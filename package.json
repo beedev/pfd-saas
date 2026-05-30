@@ -1,5 +1,5 @@
 {
-  "name": "personal-finance-dashboard",
+  "name": "pfd-saas",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,14 +7,11 @@
     "dev:9999": "next dev --turbopack -p 9999",
     "build": "next build",
     "start": "next start",
-    "start:prod": "next start -p 9999",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "db:seed": "npx tsx src/db/seed.ts",
-    "db:seed-finance": "npx tsx src/db/seed-finance.ts"
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@dxp/ui": "file:../dxp/packages/ui",
@@ -62,5 +59,6 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5"
-  }
+  },
+  "description": "A generic personal finance planner for India. SaaS edition."
 }

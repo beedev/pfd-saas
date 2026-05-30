@@ -68,3 +68,10 @@ finance-bundle-*.tar.gz
 # Ad-hoc DB snapshots created during fixes/restores
 personal-finance.db.bak-*
 personal-finance.db.pre-restore-*
+
+# SaaS-specific
+.claude/
+.DS_Store
+.env
+.env.local
+uploads/
