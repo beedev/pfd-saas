@@ -78,6 +78,13 @@
       "when": 1780233829143,
       "tag": "0010_fast_power_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780235029452,
+      "tag": "0011_organic_black_bolt",
+      "breakpoints": true
     }
   ]
 }

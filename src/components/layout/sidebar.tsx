@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   HeartPulse,
   Car,
+  Tag,
   Banknote,
   Home,
   Umbrella,
@@ -75,6 +76,7 @@ const navigation: NavSection[] = [
     section: 'Planning & Budget',
     items: [
       { name: 'Income', href: '/income', icon: Banknote },
+      { name: 'Subscriptions', href: '/subscriptions', icon: Tag },
       { name: 'Budget', href: '/budget', icon: Wallet },
       { name: 'Monthly Expenses', href: '/budget/monthly', icon: Wallet },
       { name: 'Goals', href: '/goals', icon: Target },

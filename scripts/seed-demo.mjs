@@ -411,6 +411,63 @@ await guardSection('budget', 'budget_categories', userId, async () => {
   }
 });
 
+// ─── subscriptions ─────────────────────────────────────────────────
+await guardSection('subscriptions', 'subscriptions', userId, async () => {
+  // 5 active + 1 cancelled-this-FY (drives the "savings" tile)
+  await sql`INSERT INTO subscriptions
+    (user_id, name, provider, category, plan_name, amount_paisa,
+     billing_frequency, start_date, next_renewal_date, payment_method,
+     auto_renew, url, status)
+    VALUES (${userId}, 'Netflix Premium', 'Netflix', 'STREAMING',
+            '4K UHD, 4 screens', ${649_00}::bigint, 'MONTHLY',
+            ${monthsAgoIso(18)}, ${monthsAheadIso(0)},
+            'ICICI credit card', true, 'https://netflix.com/account',
+            'ACTIVE')`;
+  await sql`INSERT INTO subscriptions
+    (user_id, name, provider, category, plan_name, amount_paisa,
+     billing_frequency, start_date, next_renewal_date, payment_method,
+     auto_renew, status)
+    VALUES (${userId}, 'Amazon Prime', 'Amazon', 'STREAMING',
+            'Annual', ${1499_00}::bigint, 'ANNUAL',
+            ${monthsAgoIso(8)}, ${monthsAheadIso(4)},
+            'UPI', true, 'ACTIVE')`;
+  await sql`INSERT INTO subscriptions
+    (user_id, name, provider, category, plan_name, amount_paisa,
+     billing_frequency, start_date, next_renewal_date, payment_method,
+     auto_renew, status)
+    VALUES (${userId}, 'iCloud+ 200GB', 'Apple', 'CLOUD',
+            '200 GB tier', ${75_00}::bigint, 'MONTHLY',
+            ${monthsAgoIso(24)}, ${monthsAheadIso(0)},
+            'Apple ID payment', true, 'ACTIVE')`;
+  await sql`INSERT INTO subscriptions
+    (user_id, name, provider, category, plan_name, amount_paisa,
+     billing_frequency, start_date, next_renewal_date, payment_method,
+     auto_renew, url, status)
+    VALUES (${userId}, 'ChatGPT Plus', 'OpenAI', 'AI', 'Plus',
+            ${1750_00}::bigint, 'MONTHLY',
+            ${monthsAgoIso(5)}, ${monthsAheadIso(0)},
+            'ICICI credit card', true, 'https://chatgpt.com',
+            'ACTIVE')`;
+  await sql`INSERT INTO subscriptions
+    (user_id, name, provider, category, plan_name, amount_paisa,
+     billing_frequency, start_date, next_renewal_date, payment_method,
+     auto_renew, status)
+    VALUES (${userId}, 'Cult.fit Live', 'Cult.fit', 'FITNESS',
+            'All Live Classes', ${4999_00}::bigint, 'QUARTERLY',
+            ${monthsAgoIso(2)}, ${monthsAheadIso(1)},
+            'UPI', true, 'ACTIVE')`;
+  // One cancelled this FY — surfaces in the savings tile
+  await sql`INSERT INTO subscriptions
+    (user_id, name, provider, category, plan_name, amount_paisa,
+     billing_frequency, start_date, next_renewal_date, payment_method,
+     auto_renew, status, cancellation_date)
+    VALUES (${userId}, 'Adobe Creative Cloud', 'Adobe', 'SOFTWARE',
+            'Photography Plan', ${799_00}::bigint, 'MONTHLY',
+            ${monthsAgoIso(14)}, NULL,
+            'ICICI credit card', false, 'CANCELLED',
+            ${monthsAgoIso(1)})`;
+});
+
 // ─── financial_goals ───────────────────────────────────────────────
 await guardSection('financial_goals', 'financial_goals', userId, async () => {
   await sql`

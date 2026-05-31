@@ -470,6 +470,66 @@ export const vehicleServiceLog = pgTable('vehicle_service_log', {
 export type VehicleServiceLog = typeof vehicleServiceLog.$inferSelect;
 export type NewVehicleServiceLog = typeof vehicleServiceLog.$inferInsert;
 
+/* ─── Subscriptions (Sprint 3 Phase 4) ───────────────────────────────
+ *
+ * Recurring digital/service subscriptions — Netflix, Adobe, iCloud,
+ * gym, ChatGPT Plus, etc. Distinct from recurring_expenses (rent /
+ * utilities / bills) because these are discretionary and easy to forget
+ * about. The /subscriptions page makes monthly drag visible.
+ * ───────────────────────────────────────────────────────────────────── */
+
+export type SubscriptionCategory =
+  | 'STREAMING'      // Netflix, Prime Video, Hotstar, YouTube Premium
+  | 'SOFTWARE'       // Adobe CC, Microsoft 365, JetBrains
+  | 'CLOUD'          // iCloud, Google One, Dropbox
+  | 'FITNESS'        // Cult.fit, gym, Peloton
+  | 'NEWS'           // newspapers, magazines, NYT, Bloomberg
+  | 'GAMING'         // Xbox Game Pass, PSN+, Steam
+  | 'AI'             // ChatGPT Plus, Claude Pro, GitHub Copilot
+  | 'EDUCATION'      // Coursera, Udemy, Khan Academy
+  | 'PRODUCTIVITY'   // Notion, Linear, Figma, 1Password
+  | 'OTHER';
+
+export type SubscriptionStatus = 'ACTIVE' | 'PAUSED' | 'CANCELLED';
+
+export type SubscriptionBillingFrequency =
+  | 'MONTHLY'
+  | 'QUARTERLY'
+  | 'SEMI_ANNUAL'
+  | 'ANNUAL'
+  | 'LIFETIME'; // one-time payment, no renewal
+
+export const subscriptions = pgTable('subscriptions', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(),
+  category: text('category').$type<SubscriptionCategory>().notNull(),
+  planName: text('plan_name'),
+  amountPaisa: bigint('amount_paisa', { mode: 'number' }).notNull(),
+  billingFrequency: text('billing_frequency').$type<SubscriptionBillingFrequency>().notNull(),
+  startDate: text('start_date').notNull(),
+  // Nullable for LIFETIME plans (no renewal).
+  nextRenewalDate: text('next_renewal_date'),
+  paymentMethod: text('payment_method'),
+  autoRenew: boolean('auto_renew').notNull().default(true),
+  url: text('url'), // provider dashboard / portal
+  status: text('status').$type<SubscriptionStatus>().notNull().default('ACTIVE'),
+  // Captured when status transitions to CANCELLED. Drives the
+  // "savings since cancelling" tally on the /subscriptions page.
+  cancellationDate: text('cancellation_date'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('subscriptions_user_id_idx').on(table.userId),
+  index('subscriptions_next_renewal_idx').on(table.nextRenewalDate),
+  index('subscriptions_status_idx').on(table.status),
+]);
+
+export type Subscription = typeof subscriptions.$inferSelect;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+
 /* ─── Domain tables ─────────────────────────────────────────────────── */
 
 // Business Profile (single row for self)
