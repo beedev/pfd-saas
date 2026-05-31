@@ -49,6 +49,8 @@ import {
   Legend,
 } from 'recharts';
 
+import { CashflowTimeline } from '@/components/cashflow-timeline';
+
 /* ─── types mirrored from /api/finance/retirement-assets ──────────────── */
 
 type Mode = 'SELL' | 'RENTAL';
@@ -808,30 +810,89 @@ export default function RetirementPage() {
   ]);
 
   /* ─── retirement-window cashflow events ───────────────────────────── */
-  // Filter all events to those active during the user's retirement years.
-  // The retirement window is [retirementStartYear, lifeExpectancyYear]
-  // where retirementStartYear = currentCalendarYear + (targetAge - currentAge)
-  // and lifeExpectancyYear = retirementStartYear + retirementDuration.
+  // Two passes:
+  //   1. Window filter — keep only events that fire / are active during
+  //      the retirement years [retirementStartYear, lifeExpectancyYear].
+  //   2. Selection filter — respect the user's asset-selection toggles
+  //      at the top of the page. If the user unticked a specific LIC
+  //      policy or NPS account from retirement, its derived events
+  //      should NOT appear in the income timeline either. Salary is
+  //      always excluded (it ends at retirement). Manual events (no
+  //      source_id) always show — the user added them deliberately.
+  const isEventSelectedForRetirement = useCallback(
+    (e: CashflowEvent): boolean => {
+      // Salary stops at retirement by definition — not "income during
+      // retirement". Always exclude.
+      if (e.sourceKind === 'SALARY') return false;
+      // Manual events have no source asset to consult; the user added
+      // them deliberately, so always include.
+      if (e.sourceId == null) return true;
+
+      // Map event kind → retirement asset class. If we can't map it
+      // (PENSION/BUSINESS/INHERITANCE/OTHER with a source_id are
+      // unusual), default to included.
+      const cls = (() => {
+        switch (e.sourceKind) {
+          case 'INSURANCE_MATURITY': return 'INSURANCE_POLICIES';
+          case 'ANNUITY':            return 'ANNUITY_POLICIES';
+          case 'NPS_LUMPSUM':
+          case 'NPS_ANNUITY':        return 'NPS';
+          case 'PPF_MATURITY':
+          case 'SSY_MATURITY':
+          case 'NSC_MATURITY':
+          case 'KVP_MATURITY':       return 'SMALL_SAVINGS';
+          case 'RENTAL':             return 'REAL_ESTATE';
+          default:                   return null;
+        }
+      })();
+      if (!cls) return true;
+
+      const classRow = classes.find((c) => c.assetClass === cls);
+      if (!classRow) return true; // class not loaded yet — be permissive
+      const item = classRow.items.find((i) => i.id === e.sourceId);
+      if (!item) return true;     // no matching item — be permissive
+      if (!item.included) return false;
+
+      // Real estate edge case: a property's rental events should only
+      // surface if the user has it in RENTAL mode (not SELL). Selling
+      // means the income stream is being liquidated, not received.
+      if (e.sourceKind === 'RENTAL' && item.mode && item.mode !== 'RENTAL') {
+        return false;
+      }
+      return true;
+    },
+    [classes],
+  );
+
   const retirementEvents = useMemo(() => {
     const yearsToRetire = Math.max(0, targetAge - currentAge);
     const retirementStartYear = new Date().getFullYear() + yearsToRetire;
     const lifeExpectancyYear = retirementStartYear + retirementDuration;
-    return cashflowEvents.filter((e) => {
-      const startYear = new Date(e.startDate).getFullYear();
-      if (e.frequency === 'ONE_TIME') {
-        // TODO: revisit once cashflow-event validation enforces start_date
-        // is in the future. For now we include backfilled historical
-        // maturities so long as they sit within the retirement window —
-        // the user may be modelling something they expect to draw down on.
-        return startYear >= retirementStartYear && startYear <= lifeExpectancyYear;
-      }
-      // MONTHLY / YEARLY — active in retirement if either it has no end
-      // date (lifelong) or it ends after retirement starts.
-      if (!e.endDate) return true;
-      const endYear = new Date(e.endDate).getFullYear();
-      return endYear >= retirementStartYear;
-    });
-  }, [cashflowEvents, currentAge, targetAge, retirementDuration]);
+    return cashflowEvents
+      .filter((e) => {
+        const startYear = new Date(e.startDate).getFullYear();
+        if (e.frequency === 'ONE_TIME') {
+          // TODO: revisit once cashflow-event validation enforces
+          // start_date is in the future. For now we include backfilled
+          // historical maturities so long as they sit within the
+          // retirement window.
+          return startYear >= retirementStartYear && startYear <= lifeExpectancyYear;
+        }
+        // MONTHLY / YEARLY — active in retirement if either it has no
+        // end date (lifelong) or it ends after retirement starts.
+        if (!e.endDate) return true;
+        const endYear = new Date(e.endDate).getFullYear();
+        return endYear >= retirementStartYear;
+      })
+      .filter(isEventSelectedForRetirement);
+  }, [cashflowEvents, currentAge, targetAge, retirementDuration, isEventSelectedForRetirement]);
+
+  // Retirement window bounds for the timeline component.
+  const retirementWindow = useMemo(() => {
+    const yearsToRetire = Math.max(0, targetAge - currentAge);
+    const start = new Date().getFullYear() + yearsToRetire;
+    return { start, end: start + retirementDuration };
+  }, [currentAge, targetAge, retirementDuration]);
 
   /** Yearly equivalent of a recurring event for the "annual income" tile. */
   const annualEquivalent = (e: CashflowEvent): number => {
@@ -1447,90 +1508,18 @@ export default function RetirementPage() {
             ]}
           />
           <div className="mt-4">
-            <DataTable<CashflowEvent>
-              data={retirementEvents}
-              emptyMessage="No cashflow events scheduled for your retirement window."
-              columns={[
-                {
-                  key: 'sourceKind',
-                  header: 'Source',
-                  render: (_v, e) => (
-                    <Badge variant={taxBadgeVariant(e.taxTreatment)}>
-                      {KIND_LABELS[e.sourceKind]}
-                    </Badge>
-                  ),
-                },
-                {
-                  key: 'name',
-                  header: 'Event',
-                  render: (_v, e) => (
-                    <span className="font-semibold text-[var(--dxp-text)]">{e.name}</span>
-                  ),
-                },
-                {
-                  key: 'startDate',
-                  header: 'Start',
-                  render: (_v, e) => (
-                    <span className="text-xs text-[var(--dxp-text-secondary)]">
-                      {fmtMonthYear(e.startDate)}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'endDate',
-                  header: 'End',
-                  render: (_v, e) => (
-                    <span className="text-xs text-[var(--dxp-text-muted)]">
-                      {e.endDate
-                        ? fmtMonthYear(e.endDate)
-                        : e.frequency === 'ONE_TIME'
-                        ? '—'
-                        : 'lifelong'}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'amountPaisa',
-                  header: 'Amount',
-                  render: (_v, e) => (
-                    <span className="font-mono font-semibold text-[var(--dxp-text)]">
-                      {formatINR(e.amountPaisa)}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'frequency',
-                  header: 'Frequency',
-                  render: (_v, e) => (
-                    <Badge variant={e.frequency === 'ONE_TIME' ? 'warning' : 'info'}>
-                      {e.frequency}
-                    </Badge>
-                  ),
-                },
-                {
-                  key: 'taxTreatment',
-                  header: 'Tax',
-                  render: (_v, e) => (
-                    <Badge variant={taxBadgeVariant(e.taxTreatment)}>
-                      {e.taxTreatment}
-                    </Badge>
-                  ),
-                },
-                {
-                  key: 'growthPctPerYear',
-                  header: 'Growth',
-                  render: (_v, e) => (
-                    <span className="font-mono text-xs text-[var(--dxp-text-secondary)]">
-                      {e.growthPctPerYear ? `${e.growthPctPerYear.toFixed(1)}%` : '—'}
-                    </span>
-                  ),
-                },
-              ]}
+            <CashflowTimeline
+              events={retirementEvents}
+              minYear={retirementWindow.start}
+              maxYear={retirementWindow.end}
+              showAlreadyActive
+              emptyMessage="No cashflow events scheduled for your retirement window. Check that the relevant assets are ticked in the selection table above, and that maturity dates are filled in for your endowment policies."
             />
           </div>
           <p className="mt-3 text-[11px] text-[var(--dxp-text-muted)]">
-            These events feed the corpus depletion chart above as inflows in
-            the years they fire. To change one, edit it in{' '}
+            Only events from assets you&apos;ve ticked in the selection table
+            above are shown here. These feed the corpus depletion chart as
+            inflows in the years they fire. To change one, edit it in{' '}
             <Link
               href="/planning/cashflows"
               className="text-[var(--dxp-brand)] underline hover:no-underline"

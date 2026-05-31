@@ -34,7 +34,7 @@ import {
   type Column,
 } from '@dxp/ui';
 import {
-  Activity,
+  AlertTriangle,
   Loader2,
   Pencil,
   Plus,
@@ -42,6 +42,8 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+
+import { CashflowTimeline } from '@/components/cashflow-timeline';
 
 type CashflowSourceKind =
   | 'INSURANCE_MATURITY' | 'ANNUITY' | 'PENSION' | 'NPS_LUMPSUM' | 'NPS_ANNUITY'
@@ -150,6 +152,14 @@ export default function CashflowEventsPage() {
   const [editTarget, setEditTarget] = useState<CashflowEvent | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CashflowEvent | null>(null);
   const [hasAutoDerived, setHasAutoDerived] = useState(false);
+  // Data-quality signal — count of insurance policies that would
+  // derive an INSURANCE_MATURITY or ANNUITY event if their
+  // maturity_date (or annuity_start_date) were filled in. Surfaces as
+  // a banner so the user knows why their event list looks sparse.
+  const [policyGap, setPolicyGap] = useState<{
+    missingMaturity: number;
+    totalEndowmentLike: number;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -195,6 +205,31 @@ export default function CashflowEventsPage() {
       if (initial.length === 0 && !hasAutoDerived) {
         setHasAutoDerived(true);
         await derive(true);
+      }
+
+      // Independently fetch insurance policies to surface the
+      // "missing maturity_date" data-quality gap. Endowment-style
+      // policies need maturity_date to derive an event; we count
+      // how many active rows are missing it.
+      try {
+        const r = await fetch('/api/investments/insurance').then((res) => res.json());
+        const policies: Array<{
+          status: string;
+          policyType: string;
+          maturityDate: string | null;
+        }> = r.policies || [];
+        const endowmentLike = policies.filter(
+          (p) =>
+            p.status === 'ACTIVE' &&
+            ['ENDOWMENT', 'MONEY_BACK', 'ULIP', 'WHOLE_LIFE'].includes(p.policyType),
+        );
+        const missing = endowmentLike.filter((p) => !p.maturityDate).length;
+        setPolicyGap({
+          missingMaturity: missing,
+          totalEndowmentLike: endowmentLike.length,
+        });
+      } catch {
+        /* non-fatal — banner just doesn't show */
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,30 +282,6 @@ export default function CashflowEventsPage() {
     ).length;
   }, [events]);
 
-  /* ─── timeline computation ─────────────────────────────────────── */
-  const HORIZON_YEARS = 40;
-  const timelineData = useMemo(() => {
-    if (!events.length) return [];
-    const todayMs = Date.now();
-    const horizonMs = todayMs + HORIZON_YEARS * 365.25 * 86400 * 1000;
-    const range = horizonMs - todayMs;
-
-    return events
-      .slice()
-      .sort((a, b) => a.sourceKind.localeCompare(b.sourceKind) || a.startDate.localeCompare(b.startDate))
-      .map((e) => {
-        const startMs = new Date(e.startDate).getTime();
-        const endMs = e.endDate
-          ? new Date(e.endDate).getTime()
-          : e.frequency === 'ONE_TIME'
-          ? startMs + 86400 * 1000 * 60 // a "blip" — show 60 days of width so it's visible
-          : horizonMs;
-
-        const leftPct = Math.max(0, ((startMs - todayMs) / range) * 100);
-        const widthPct = Math.max(0.6, Math.min(100 - leftPct, ((endMs - startMs) / range) * 100));
-        return { event: e, leftPct, widthPct };
-      });
-  }, [events]);
 
   /* ─── delete ───────────────────────────────────────────────────── */
   const confirmDelete = async () => {
@@ -484,73 +495,58 @@ export default function CashflowEventsPage() {
         ]}
       />
 
-      {/* Timeline. Horizontal axis is today → today+40y. Each row is one
-          event. Bars are pure CSS — we compute leftPct / widthPct in
-          memo. Recharts would be overkill for this small dataset. */}
+      {/* Data-quality banner — flag insurance policies missing
+          maturity_date. The user often sees fewer events than they
+          expected because we can't derive a maturity event without
+          the date. Surfacing this lets them fix the data once and
+          have everything light up. */}
+      {policyGap && policyGap.missingMaturity > 0 && (
+        <Card className="border-amber-400 bg-amber-50/40">
+          <CardContent className="py-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-amber-900">
+                  {policyGap.missingMaturity} of your {policyGap.totalEndowmentLike}{' '}
+                  endowment-style policies are missing a maturity date
+                </p>
+                <p className="mt-0.5 text-xs text-amber-800">
+                  Their payouts can&apos;t be derived as cashflow events until
+                  the date is filled in. Open each policy and set its
+                  maturity date (or policy start date + term).
+                </p>
+                <Link
+                  href="/investments/insurance"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-900"
+                >
+                  Fix in Life Insurance →
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Vertical year-grouped timeline. Events appear in the year
+          they start, sorted by month. Recurring events appear once
+          with their lifelong / end-year context — they don't repeat
+          across every year of their lifetime. */}
       <Card>
         <CardHeader>
-          <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
-            <Activity className="h-5 w-5 text-[var(--dxp-brand)]" />
-            Forward timeline · 40 year horizon
+          <h3 className="text-base font-bold text-[var(--dxp-text)]">
+            Timeline · when each event fires
           </h3>
           <p className="text-xs text-[var(--dxp-text-secondary)]">
-            Each bar shows when an event starts and how long it pays. Hover for details.
+            Moments money lands, grouped by year. Recurring streams appear
+            once in the year they begin; one-time events show their
+            calendar month.
           </p>
         </CardHeader>
         <CardContent>
-          {timelineData.length === 0 ? (
-            <p className="py-8 text-center text-[var(--dxp-text-muted)]">
-              No events yet. Click <strong>Re-derive from assets</strong> to populate from your portfolio.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {/* Decade gridlines */}
-              <div className="relative h-5 w-full">
-                {[0, 10, 20, 30, 40].map((y) => (
-                  <span
-                    key={y}
-                    className="absolute text-xs text-[var(--dxp-text-muted)]"
-                    style={{ left: `${(y / HORIZON_YEARS) * 100}%`, transform: 'translateX(-50%)' }}
-                  >
-                    +{y}y
-                  </span>
-                ))}
-              </div>
-              <div className="space-y-1">
-                {timelineData.map(({ event: e, leftPct, widthPct }) => (
-                  <div
-                    key={e.id}
-                    className="group relative grid grid-cols-[200px_1fr] items-center gap-3"
-                  >
-                    <div className="flex flex-col overflow-hidden">
-                      <span className="truncate text-xs font-semibold text-[var(--dxp-text)]">
-                        {e.name}
-                      </span>
-                      <span className="truncate text-[10px] text-[var(--dxp-text-muted)]">
-                        {KIND_LABELS[e.sourceKind]}
-                      </span>
-                    </div>
-                    <div className="relative h-6 w-full rounded bg-[var(--dxp-surface-alt)]">
-                      <div
-                        className={`absolute top-0 h-full rounded transition-all ${
-                          e.frequency === 'ONE_TIME'
-                            ? 'bg-amber-400 hover:bg-amber-500'
-                            : 'bg-[var(--dxp-brand)] hover:opacity-80'
-                        }`}
-                        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                        title={`${e.name} · ${formatINR(e.amountPaisa)} ${e.frequency} · ${e.startDate}${
-                          e.endDate ? ` → ${e.endDate}` : ''
-                        }`}
-                      />
-                      <span className="absolute right-2 top-0 text-[10px] text-[var(--dxp-text-secondary)] opacity-0 transition-opacity group-hover:opacity-100">
-                        {formatINR(e.amountPaisa)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <CashflowTimeline
+            events={events}
+            emptyMessage="No events yet. Click Re-derive from assets to populate from your portfolio."
+          />
         </CardContent>
       </Card>
 
