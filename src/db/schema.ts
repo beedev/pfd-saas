@@ -166,7 +166,7 @@ export const vendors = pgTable('vendors', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('vendors_gstin_idx').on(table.gstin),
+  uniqueIndex('vendors_gstin_idx').on(table.userId, table.gstin),
   index('vendors_user_id_idx').on(table.userId),
 ]);
 
@@ -221,7 +221,7 @@ export const invoices = pgTable('invoices', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('invoice_number_idx').on(table.invoiceNumber),
+  uniqueIndex('invoice_number_idx').on(table.userId, table.invoiceNumber),
   index('invoice_period_idx').on(table.returnPeriod),
   index('invoice_customer_idx').on(table.customerId),
   index('invoice_type_idx').on(table.invoiceType),
@@ -321,7 +321,7 @@ export const taxPayments = pgTable('tax_payments', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('payment_period_idx').on(table.returnPeriod),
+  uniqueIndex('payment_period_idx').on(table.userId, table.returnPeriod),
   index('tax_payments_user_id_idx').on(table.userId),
 ]);
 
@@ -357,7 +357,7 @@ export const budgetEntries = pgTable('budget_entries', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('budget_period_idx').on(table.period),
-  uniqueIndex('budget_category_period_idx').on(table.categoryId, table.period),
+  uniqueIndex('budget_category_period_idx').on(table.userId, table.categoryId, table.period),
   index('budget_entries_user_id_idx').on(table.userId),
 ]);
 
@@ -388,12 +388,13 @@ export type NewRecurringExpense = typeof recurringExpenses.$inferInsert;
 // Budget Carry Forward (savings carried to next month)
 export const budgetCarryForward = pgTable('budget_carry_forward', {
   id: serial('id').primaryKey(),
-  period: text('period').notNull().unique(),   // MMYYYY — the month this carry-forward GOES INTO
+  period: text('period').notNull(),   // MMYYYY — the month this carry-forward GOES INTO
   amount: bigint('amount', { mode: 'number' }).notNull().default(0), // paisa
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('budget_carry_forward_user_id_idx').on(table.userId),
+  uniqueIndex('budget_carry_forward_period_unique').on(table.userId, table.period),
 ]);
 
 // Financial Goals (for 3-year projections tracking)
@@ -438,7 +439,7 @@ export const projectionEntries = pgTable('projection_entries', {
 }, (table) => [
   index('projection_period_idx').on(table.period),
   index('projection_category_idx').on(table.categoryId),
-  uniqueIndex('projection_category_period_idx').on(table.categoryId, table.period),
+  uniqueIndex('projection_category_period_idx').on(table.userId, table.categoryId, table.period),
   index('projection_entries_user_id_idx').on(table.userId),
 ]);
 
@@ -451,7 +452,7 @@ export const carryforwardBalances = pgTable('carryforward_balances', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('carryforward_category_idx').on(table.categoryId),
+  uniqueIndex('carryforward_category_idx').on(table.userId, table.categoryId),
   index('carryforward_balances_user_id_idx').on(table.userId),
 ]);
 
@@ -538,7 +539,7 @@ export const retirementAssetSelection = pgTable('retirement_asset_selection', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('retirement_asset_class_idx').on(table.assetClass),
-  uniqueIndex('retirement_asset_unique_idx').on(table.assetClass, table.sourceId),
+  uniqueIndex('retirement_asset_unique_idx').on(table.userId, table.assetClass, table.sourceId),
   index('retirement_asset_selection_user_id_idx').on(table.userId),
 ]);
 
@@ -620,7 +621,7 @@ export const holdings = pgTable('holdings', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('holdings_symbol_idx').on(table.symbol),
-  uniqueIndex('holdings_symbol_unique').on(table.symbol),
+  uniqueIndex('holdings_symbol_unique').on(table.userId, table.symbol),
   index('holdings_user_id_idx').on(table.userId),
 ]);
 
@@ -818,7 +819,7 @@ export type NPSAccountStatus = 'ACTIVE' | 'INACTIVE' | 'MATURED';
 
 export const npsAccounts = pgTable('nps_accounts', {
   id: serial('id').primaryKey(),
-  accountNumber: text('account_number').notNull().unique(),
+  accountNumber: text('account_number').notNull(),
   accountHolder: text('account_holder').notNull(),
   pan: text('pan').notNull(),
   tier: text('tier').$type<NPSAccountType>().notNull(),
@@ -839,7 +840,7 @@ export const npsAccounts = pgTable('nps_accounts', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('nps_account_number_idx').on(table.accountNumber),
+  uniqueIndex('nps_account_number_idx').on(table.userId, table.accountNumber),
   index('nps_pan_idx').on(table.pan),
   index('nps_accounts_user_id_idx').on(table.userId),
 ]);
@@ -894,7 +895,7 @@ export type PFAccountType = 'EPF' | 'PPF' | 'VPF';
 export const providentFund = pgTable('provident_fund', {
   id: serial('id').primaryKey(),
   accountType: text('account_type').$type<PFAccountType>().notNull(),
-  accountNumber: text('account_number').unique(),
+  accountNumber: text('account_number'),
   accountHolder: text('account_holder').notNull(),
   pan: text('pan'),
   universalAccountNumber: text('uan'),
@@ -917,6 +918,7 @@ export const providentFund = pgTable('provident_fund', {
   index('pf_account_type_idx').on(table.accountType),
   index('pf_uan_idx').on(table.universalAccountNumber),
   index('provident_fund_user_id_idx').on(table.userId),
+  uniqueIndex('provident_fund_account_number_unique').on(table.userId, table.accountNumber),
 ]);
 
 export type ProvidentFund = typeof providentFund.$inferSelect;
@@ -977,7 +979,7 @@ export type PolicyStatus = 'ACTIVE' | 'LAPSED' | 'SURRENDERED' | 'MATURED' | 'CL
 
 export const insurancePolicies = pgTable('insurance_policies', {
   id: serial('id').primaryKey(),
-  policyNumber: text('policy_number').notNull().unique(),
+  policyNumber: text('policy_number').notNull(),
   policyType: text('policy_type').$type<PolicyType>().notNull(),
   status: text('status').$type<PolicyStatus>().default('ACTIVE'),
   policyHolder: text('policy_holder').notNull(),
@@ -1008,7 +1010,7 @@ export const insurancePolicies = pgTable('insurance_policies', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('policy_number_idx').on(table.policyNumber),
+  uniqueIndex('policy_number_idx').on(table.userId, table.policyNumber),
   index('policy_type_idx').on(table.policyType),
   index('policy_status_idx').on(table.status),
   index('insurance_policies_user_id_idx').on(table.userId),
@@ -1076,7 +1078,7 @@ export const creditCardExpenses = pgTable('credit_card_expenses', {
 }, (table) => [
   index('cc_expense_liability_idx').on(table.liabilityId),
   index('cc_expense_period_idx').on(table.period),
-  uniqueIndex('cc_expense_liability_period_idx').on(table.liabilityId, table.period),
+  uniqueIndex('cc_expense_liability_period_idx').on(table.userId, table.liabilityId, table.period),
   index('credit_card_expenses_user_id_idx').on(table.userId),
 ]);
 
@@ -1261,7 +1263,7 @@ export const yearlyInvestmentPlan = pgTable('yearly_investment_plan', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('plan_fy_idx').on(table.financialYear),
+  uniqueIndex('plan_fy_idx').on(table.userId, table.financialYear),
   index('yearly_investment_plan_user_id_idx').on(table.userId),
 ]);
 
@@ -1290,7 +1292,7 @@ export const priceSnapshots = pgTable('price_snapshots', {
   index('snapshot_asset_idx').on(table.assetSymbol),
   index('snapshot_date_idx').on(table.priceDate),
   index('snapshot_source_idx').on(table.source),
-  uniqueIndex('snapshot_unique_idx').on(table.assetSymbol, table.priceDate),
+  uniqueIndex('snapshot_unique_idx').on(table.userId, table.assetSymbol, table.priceDate),
   index('price_snapshots_user_id_idx').on(table.userId),
 ]);
 
@@ -1335,7 +1337,7 @@ export const alertHistory = pgTable('alert_history', {
 }, (table) => [
   index('alert_history_rule_idx').on(table.ruleId),
   index('alert_history_sent_idx').on(table.sentAt),
-  uniqueIndex('alert_history_dedup_idx').on(table.dedupKey),
+  uniqueIndex('alert_history_dedup_idx').on(table.userId, table.dedupKey),
   index('alert_history_user_id_idx').on(table.userId),
 ]);
 
@@ -1486,7 +1488,7 @@ export const taxSectionPreferences = pgTable('tax_section_preferences', {
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('tax_pref_fy_section_idx').on(table.financialYear, table.section),
+  uniqueIndex('tax_pref_fy_section_idx').on(table.userId, table.financialYear, table.section),
   index('tax_section_preferences_user_id_idx').on(table.userId),
 ]);
 
@@ -1509,7 +1511,7 @@ export const fyCloseStatus = pgTable('fy_close_status', {
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
-  uniqueIndex('fy_close_fy_cat_idx').on(table.financialYear, table.category),
+  uniqueIndex('fy_close_fy_cat_idx').on(table.userId, table.financialYear, table.category),
   index('fy_close_status_user_id_idx').on(table.userId),
 ]);
 
