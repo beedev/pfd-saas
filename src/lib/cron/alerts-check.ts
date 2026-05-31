@@ -30,6 +30,9 @@ import {
   liabilities,
   mutualFunds,
   priceSnapshots,
+  vehicleInsurancePolicies,
+  vehiclePuc,
+  vehicles,
 } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
 import { sendTelegramMessage } from '@/lib/services/telegram';
@@ -391,6 +394,85 @@ async function evaluateRule(
             dedupKey: `BUDGET:${e.categoryName}:${period}`,
             message: `💸 *Budget overspend: ${e.categoryName}*\nPlanned: ₹${(planned / 100).toLocaleString('en-IN')}\nActual: ₹${(actual / 100).toLocaleString('en-IN')}\nOver by ${overspendPct.toFixed(0)}%`,
             triggeredValue: overspendPct,
+          };
+        }
+      }
+      return null;
+    }
+
+    case 'VEHICLE_INSURANCE_DUE': {
+      // Join vehicle_insurance_policies with vehicles to get the
+      // registration number in the message. Only active policies on
+      // active vehicles count.
+      const rows = await db
+        .select({
+          insurer: vehicleInsurancePolicies.insurer,
+          policyNumber: vehicleInsurancePolicies.policyNumber,
+          premium: vehicleInsurancePolicies.premiumPaisa,
+          renewalDate: vehicleInsurancePolicies.renewalDate,
+          regNumber: vehicles.registrationNumber,
+          make: vehicles.make,
+          model: vehicles.model,
+        })
+        .from(vehicleInsurancePolicies)
+        .innerJoin(vehicles, eq(vehicles.id, vehicleInsurancePolicies.vehicleId))
+        .where(
+          and(
+            eq(vehicleInsurancePolicies.userId, userId),
+            eq(vehicleInsurancePolicies.status, 'ACTIVE'),
+            eq(vehicles.status, 'ACTIVE'),
+          ),
+        );
+      for (const r of rows) {
+        const days = daysUntil(r.renewalDate);
+        if (days >= 0 && days <= rule.threshold) {
+          return {
+            dedupKey: `VEH_INS:${r.policyNumber}:${r.renewalDate}`,
+            message: `🚗 *Vehicle insurance renewal due${days === 0 ? ' TODAY' : ` in ${days} day${days > 1 ? 's' : ''}`}*\n${r.make} ${r.model} (${r.regNumber})\n${r.insurer} — #${r.policyNumber}\nPremium: ₹${((r.premium ?? 0) / 100).toLocaleString('en-IN')}\nDue: ${r.renewalDate}`,
+            triggeredValue: days,
+          };
+        }
+      }
+      return null;
+    }
+
+    case 'PUC_EXPIRY_DUE': {
+      // For each vehicle's LATEST PUC (one per vehicle), check expiry.
+      // We don't have a single "active PUC" flag, so query then group
+      // in JS — finite vehicle count per user, no perf concern.
+      const rows = await db
+        .select({
+          regNumber: vehicles.registrationNumber,
+          make: vehicles.make,
+          model: vehicles.model,
+          vehicleId: vehicles.id,
+          certificateNumber: vehiclePuc.certificateNumber,
+          validUntil: vehiclePuc.validUntil,
+          pucId: vehiclePuc.id,
+        })
+        .from(vehiclePuc)
+        .innerJoin(vehicles, eq(vehicles.id, vehiclePuc.vehicleId))
+        .where(
+          and(
+            eq(vehiclePuc.userId, userId),
+            eq(vehicles.status, 'ACTIVE'),
+          ),
+        );
+      // Keep only the latest PUC per vehicle (highest validUntil).
+      const latest = new Map<number, typeof rows[number]>();
+      for (const r of rows) {
+        const prev = latest.get(r.vehicleId);
+        if (!prev || (r.validUntil ?? '') > (prev.validUntil ?? '')) {
+          latest.set(r.vehicleId, r);
+        }
+      }
+      for (const r of latest.values()) {
+        const days = daysUntil(r.validUntil);
+        if (days >= 0 && days <= rule.threshold) {
+          return {
+            dedupKey: `PUC_EXP:${r.regNumber}:${r.validUntil}`,
+            message: `🚦 *PUC expires${days === 0 ? ' TODAY' : ` in ${days} day${days > 1 ? 's' : ''}`}*\n${r.make} ${r.model} (${r.regNumber})\nCertificate #${r.certificateNumber}\nValid until: ${r.validUntil}`,
+            triggeredValue: days,
           };
         }
       }

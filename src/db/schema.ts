@@ -333,6 +333,143 @@ export const healthInsurancePortability = pgTable('health_insurance_portability'
 export type HealthInsurancePortability = typeof healthInsurancePortability.$inferSelect;
 export type NewHealthInsurancePortability = typeof healthInsurancePortability.$inferInsert;
 
+/* ─── Vehicles (Sprint 3 Phase 3) ────────────────────────────────────
+ *
+ * Vehicles are both an asset (depreciating IDV, occasional resale) and
+ * a recurring expense (insurance premium, PUC fee, fuel, maintenance).
+ * Four tables track the full lifecycle:
+ *
+ *   vehicles                      the registered vehicle
+ *   vehicle_insurance_policies    one row per insurance term per vehicle
+ *   vehicle_puc                   PUC certificates (Indian law mandates)
+ *   vehicle_service_log           service history
+ *
+ * Insurance renewal + PUC expiry hook into the existing alerts cron via
+ * two new alert rule types (VEHICLE_INSURANCE_DUE, PUC_EXPIRY_DUE).
+ * ───────────────────────────────────────────────────────────────────── */
+
+export type VehicleFuelType = 'PETROL' | 'DIESEL' | 'CNG' | 'LPG' | 'ELECTRIC' | 'HYBRID';
+export type VehicleStatus = 'ACTIVE' | 'SOLD' | 'SCRAPPED' | 'TRANSFERRED';
+
+export const vehicles = pgTable('vehicles', {
+  id: serial('id').primaryKey(),
+  registrationNumber: text('registration_number').notNull(),
+  make: text('make').notNull(),
+  model: text('model').notNull(),
+  variant: text('variant'),
+  year: integer('year').notNull(),
+  fuelType: text('fuel_type').$type<VehicleFuelType>().notNull(),
+  transmission: text('transmission'), // 'MANUAL' | 'AUTOMATIC' | 'AMT' | 'CVT'
+  color: text('color'),
+  bodyType: text('body_type'), // 'HATCHBACK' | 'SEDAN' | 'SUV' | 'BIKE' | 'SCOOTER' | etc.
+  purchaseDate: text('purchase_date').notNull(),
+  purchasePricePaisa: bigint('purchase_price_paisa', { mode: 'number' }).notNull(),
+  currentIdvPaisa: bigint('current_idv_paisa', { mode: 'number' }), // latest known IDV from active policy
+  odometerKm: integer('odometer_km').default(0),
+  status: text('status').$type<VehicleStatus>().notNull().default('ACTIVE'),
+  // When sold/transferred:
+  soldDate: text('sold_date'),
+  salePricePaisa: bigint('sale_price_paisa', { mode: 'number' }),
+  rcDocumentPath: text('rc_document_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('vehicles_user_id_idx').on(table.userId),
+  uniqueIndex('vehicles_registration_unique').on(table.userId, table.registrationNumber),
+]);
+
+export type Vehicle = typeof vehicles.$inferSelect;
+export type NewVehicle = typeof vehicles.$inferInsert;
+
+export type VehicleInsuranceType = 'COMPREHENSIVE' | 'THIRD_PARTY_ONLY' | 'OWN_DAMAGE_ONLY';
+export type VehicleInsuranceStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'CLAIMED';
+
+export const vehicleInsurancePolicies = pgTable('vehicle_insurance_policies', {
+  id: serial('id').primaryKey(),
+  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
+  insurer: text('insurer').notNull(),
+  policyNumber: text('policy_number').notNull(),
+  insuranceType: text('insurance_type').$type<VehicleInsuranceType>().notNull(),
+  idvPaisa: bigint('idv_paisa', { mode: 'number' }).notNull(),
+  premiumPaisa: bigint('premium_paisa', { mode: 'number' }).notNull(),
+  // Optional split — many policies report own-damage and third-party separately.
+  ownDamagePremiumPaisa: bigint('own_damage_premium_paisa', { mode: 'number' }),
+  thirdPartyPremiumPaisa: bigint('third_party_premium_paisa', { mode: 'number' }),
+  ncbPercent: real('ncb_percent').default(0),
+  // Add-ons as a JSON string array: ["ZERO_DEP", "ENGINE_PROTECT", "RSA",
+  // "RTI", "CONSUMABLES", "TYRE_PROTECT", "KEY_REPLACEMENT", "NCB_PROTECT"].
+  addons: text('addons'),
+  premiumFrequency: text('premium_frequency').$type<PremiumFrequency>().notNull().default('ANNUAL'),
+  startDate: text('start_date').notNull(),
+  renewalDate: text('renewal_date').notNull(),
+  claimsMadeCount: integer('claims_made_count').notNull().default(0),
+  status: text('status').$type<VehicleInsuranceStatus>().notNull().default('ACTIVE'),
+  policyDocumentPath: text('policy_document_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('vehicle_insurance_user_id_idx').on(table.userId),
+  index('vehicle_insurance_vehicle_idx').on(table.vehicleId),
+  index('vehicle_insurance_renewal_idx').on(table.renewalDate),
+]);
+
+export type VehicleInsurancePolicy = typeof vehicleInsurancePolicies.$inferSelect;
+export type NewVehicleInsurancePolicy = typeof vehicleInsurancePolicies.$inferInsert;
+
+export const vehiclePuc = pgTable('vehicle_puc', {
+  id: serial('id').primaryKey(),
+  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
+  certificateNumber: text('certificate_number').notNull(),
+  issuedDate: text('issued_date').notNull(),
+  validUntil: text('valid_until').notNull(),
+  issuingAuthority: text('issuing_authority'),
+  costPaisa: bigint('cost_paisa', { mode: 'number' }).default(0),
+  certificatePath: text('certificate_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('vehicle_puc_user_id_idx').on(table.userId),
+  index('vehicle_puc_vehicle_idx').on(table.vehicleId),
+  index('vehicle_puc_valid_until_idx').on(table.validUntil),
+]);
+
+export type VehiclePuc = typeof vehiclePuc.$inferSelect;
+export type NewVehiclePuc = typeof vehiclePuc.$inferInsert;
+
+export type ServiceType = 'REGULAR' | 'REPAIR' | 'ACCIDENT' | 'BREAKDOWN' | 'TYRE_CHANGE' | 'BATTERY' | 'OTHER';
+
+export const vehicleServiceLog = pgTable('vehicle_service_log', {
+  id: serial('id').primaryKey(),
+  vehicleId: integer('vehicle_id').notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
+  serviceDate: text('service_date').notNull(),
+  odometerKm: integer('odometer_km'),
+  serviceType: text('service_type').$type<ServiceType>().notNull(),
+  garageName: text('garage_name'),
+  costPaisa: bigint('cost_paisa', { mode: 'number' }).notNull().default(0),
+  description: text('description'),
+  // Optional projection of next service.
+  nextServiceDueDate: text('next_service_due_date'),
+  nextServiceDueKm: integer('next_service_due_km'),
+  invoicePath: text('invoice_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('vehicle_service_user_id_idx').on(table.userId),
+  index('vehicle_service_vehicle_idx').on(table.vehicleId),
+  index('vehicle_service_date_idx').on(table.serviceDate),
+]);
+
+export type VehicleServiceLog = typeof vehicleServiceLog.$inferSelect;
+export type NewVehicleServiceLog = typeof vehicleServiceLog.$inferInsert;
+
 /* ─── Domain tables ─────────────────────────────────────────────────── */
 
 // Business Profile (single row for self)

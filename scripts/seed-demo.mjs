@@ -256,6 +256,78 @@ await guardSection('health_insurance_policies', 'health_insurance_policies', use
   await sql`INSERT INTO health_insurance_cards (user_id, policy_id, member_name, member_id, relationship, date_of_birth, gender) VALUES (${userId}, ${policyId}, 'Demo User Daughter', ${`MEM-${policyId}-003`}, 'DAUGHTER', '2018-03-05', 'F')`;
 });
 
+// ─── vehicles + insurance + PUC + service ──────────────────────────
+await guardSection('vehicles', 'vehicles', userId, async () => {
+  const ins = await sql`
+    INSERT INTO vehicles
+      (user_id, registration_number, make, model, variant, year,
+       fuel_type, transmission, color, body_type,
+       purchase_date, purchase_price_paisa, current_idv_paisa,
+       odometer_km, status)
+    VALUES (${userId}, 'KA01DM2024', 'Maruti Suzuki', 'Swift', 'VXi',
+            2022, 'PETROL', 'MANUAL', 'Silver', 'HATCHBACK',
+            ${monthsAgoIso(36)}, ${lakh(7.5)}, ${lakh(5.5)},
+            42000, 'ACTIVE')
+    RETURNING id
+  `;
+  const vehicleId = ins[0].id;
+
+  // Insurance — renewal in 60 days to trigger demo alerts later.
+  // Explicit ::bigint casts because postgres-js's single-shot query mode
+  // doesn't always let Postgres infer the param type from the target
+  // column (especially with many bigint params in one VALUES list).
+  const policyNumber = `DEMO-VEH-${vehicleId}`;
+  await sql`
+    INSERT INTO vehicle_insurance_policies
+      (user_id, vehicle_id, insurer, policy_number, insurance_type,
+       idv_paisa, premium_paisa, own_damage_premium_paisa,
+       third_party_premium_paisa, ncb_percent, addons,
+       premium_frequency, start_date, renewal_date,
+       claims_made_count, status)
+    VALUES (${userId}, ${vehicleId}, 'Demo General Insurance Co',
+            ${policyNumber}, 'COMPREHENSIVE',
+            ${lakh(5.5)}::bigint, ${14500_00}::bigint, ${9200_00}::bigint,
+            ${3100_00}::bigint, 25, ${'["ZERO_DEP","ENGINE_PROTECT","RSA"]'},
+            'ANNUAL', ${monthsAgoIso(10)}, ${monthsAheadIso(2)},
+            0, 'ACTIVE')
+  `;
+
+  // PUC — valid for ~45 days from today
+  const pucNumber = `PUC-${vehicleId}-${monthsAgoIso(2).replace(/-/g, '')}`;
+  await sql`
+    INSERT INTO vehicle_puc
+      (user_id, vehicle_id, certificate_number, issued_date,
+       valid_until, issuing_authority, cost_paisa)
+    VALUES (${userId}, ${vehicleId},
+            ${pucNumber},
+            ${monthsAgoIso(2)}, ${daysAgoIso(-45)},
+            'Demo Petrol Pump Authorised PUC Center', ${100_00}::bigint)
+  `;
+
+  // Service log — two entries
+  await sql`
+    INSERT INTO vehicle_service_log
+      (user_id, vehicle_id, service_date, odometer_km, service_type,
+       garage_name, cost_paisa, description, next_service_due_date,
+       next_service_due_km)
+    VALUES
+      (${userId}, ${vehicleId}, ${monthsAgoIso(12)}, 30000, 'REGULAR',
+       'Demo Maruti Authorised Service', ${5500_00}::bigint,
+       '20,000 km service — oil, filter, brake check',
+       ${monthsAgoIso(0)}, 40000)
+  `;
+  await sql`
+    INSERT INTO vehicle_service_log
+      (user_id, vehicle_id, service_date, odometer_km, service_type,
+       garage_name, cost_paisa, description, next_service_due_date,
+       next_service_due_km)
+    VALUES (${userId}, ${vehicleId}, ${monthsAgoIso(3)}, 38500, 'REGULAR',
+       'Demo Maruti Authorised Service', ${4800_00}::bigint,
+       '40,000 km service — oil, filter, tyre rotation',
+       ${monthsAheadIso(9)}, 50000)
+  `;
+});
+
 // ─── liabilities ───────────────────────────────────────────────────
 await guardSection('liabilities', 'liabilities', userId, async () => {
   // Home loan
