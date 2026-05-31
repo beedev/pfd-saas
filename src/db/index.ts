@@ -1,19 +1,35 @@
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+/**
+ * Postgres connection for pfd-saas.
+ *
+ * Reads DATABASE_URL from env (must be a postgresql:// URL). Uses the
+ * postgres-js client which works well with Vercel/Neon serverless, but
+ * runs equally well against a local Postgres 17 for development.
+ *
+ * Schema is defined in ./schema.ts and shared by the Drizzle migrator
+ * (drizzle.config.ts) and runtime queries here.
+ */
+
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
 import * as schema from './schema';
-import path from 'path';
 
-// Database file path - stored in project root
-const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), 'personal-finance.db');
+const url = process.env.DATABASE_URL;
+if (!url) {
+  throw new Error(
+    'DATABASE_URL is not set. Expected a postgresql:// URL — see .env.local.',
+  );
+}
 
-// Create database connection
-const sqlite = new Database(dbPath);
+// Single shared connection pool for the Next.js server process. Across edge
+// runtimes (Vercel functions) each invocation gets its own connection; the
+// pool size of 1 is the right default for postgres-js in those cases.
+const client = postgres(url, {
+  max: process.env.NODE_ENV === 'production' ? 10 : 5,
+  idle_timeout: 20,
+  connect_timeout: 10,
+  prepare: false, // pgbouncer-friendly; safe to drop later if not behind one
+});
 
-// Enable WAL mode for better performance
-sqlite.pragma('journal_mode = WAL');
+export const db = drizzle(client, { schema });
 
-// Create drizzle instance with schema
-export const db = drizzle(sqlite, { schema });
-
-// Export schema for convenience
 export * from './schema';

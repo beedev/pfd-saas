@@ -33,8 +33,6 @@ import {
   Newspaper,
   Bell,
   CalendarCheck,
-  Sparkles,
-  History,
 } from 'lucide-react';
 
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
@@ -103,13 +101,6 @@ const navigation: NavSection[] = [
     items: [
       { name: 'Net Worth History', href: '/networth', icon: TrendingUp },
       { name: 'Retirement', href: '/retirement', icon: Sunset },
-    ],
-  },
-  {
-    section: 'Personal',
-    items: [
-      { name: 'Transformation', href: '/health/transformation', icon: Sparkles },
-      { name: 'History', href: '/health/transformation/history', icon: History },
     ],
   },
   {

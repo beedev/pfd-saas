@@ -1,9 +1,76 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { pgTable, text, integer, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { AdapterAccountType } from 'next-auth/adapters';
+
+/* ─── Auth.js tables ─────────────────────────────────────────────────────
+ * Standard Drizzle adapter schema for next-auth v5. Tables intentionally
+ * use singular lowercase names (`user`, `account`, etc.) to match the
+ * adapter's expectations exactly — don't rename them.
+ *
+ * `user.id` is a text UUID generated client-side. Every domain table in
+ * this schema carries `userId: text('user_id').references(() => users.id)`
+ * so all queries can be scoped to a single tenant.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+export const users = pgTable('user', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text('name'),
+  email: text('email').unique(),
+  emailVerified: timestamp('email_verified', { mode: 'date' }),
+  image: text('image'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+});
+
+export const accounts = pgTable(
+  'account',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type').$type<AdapterAccountType>().notNull(),
+    provider: text('provider').notNull(),
+    providerAccountId: text('provider_account_id').notNull(),
+    refresh_token: text('refresh_token'),
+    access_token: text('access_token'),
+    expires_at: integer('expires_at'),
+    token_type: text('token_type'),
+    scope: text('scope'),
+    id_token: text('id_token'),
+    session_state: text('session_state'),
+  },
+  (account) => [
+    primaryKey({ columns: [account.provider, account.providerAccountId] }),
+  ],
+);
+
+export const sessions = pgTable('session', {
+  sessionToken: text('session_token').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  expires: timestamp('expires', { mode: 'date' }).notNull(),
+});
+
+export const verificationTokens = pgTable(
+  'verification_token',
+  {
+    identifier: text('identifier').notNull(),
+    token: text('token').notNull(),
+    expires: timestamp('expires', { mode: 'date' }).notNull(),
+  },
+  (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
+);
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+/* ─── Domain tables ─────────────────────────────────────────────────── */
 
 // Business Profile (single row for self)
-export const businessProfile = sqliteTable('business_profile', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const businessProfile = pgTable('business_profile', {
+  id: serial('id').primaryKey(),
   businessName: text('business_name').notNull(),
   tradeName: text('trade_name'),
   gstin: text('gstin').notNull().unique(),
@@ -17,16 +84,16 @@ export const businessProfile = sqliteTable('business_profile', {
   financialYear: text('financial_year').notNull(),
   invoicePrefix: text('invoice_prefix'),
   invoiceStartNumber: integer('invoice_start_number').default(1),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
 
 // Supply types for customers (determines GST treatment)
 export type SupplyType = 'REGULAR' | 'EXPORT_WITH_IGST' | 'EXPORT_LUT' | 'SEZ';
 
 // Customers (B2B with GSTIN, B2C without)
-export const customers = sqliteTable('customers', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const customers = pgTable('customers', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),
   gstin: text('gstin'),
   pan: text('pan'),
@@ -36,18 +103,18 @@ export const customers = sqliteTable('customers', {
   pincode: text('pincode'),
   email: text('email'),
   phone: text('phone'),
-  isB2B: integer('is_b2b', { mode: 'boolean' }).notNull().default(false),
+  isB2B: boolean('is_b2b').notNull().default(false),
   supplyType: text('supply_type').$type<SupplyType>().default('REGULAR'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('customers_gstin_idx').on(table.gstin),
   index('customers_state_idx').on(table.stateCode),
 ]);
 
 // Vendors (for ITC tracking)
-export const vendors = sqliteTable('vendors', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const vendors = pgTable('vendors', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),
   gstin: text('gstin').notNull(),
   pan: text('pan'),
@@ -57,20 +124,20 @@ export const vendors = sqliteTable('vendors', {
   pincode: text('pincode'),
   email: text('email'),
   phone: text('phone'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('vendors_gstin_idx').on(table.gstin),
 ]);
 
 // SAC Codes Master
-export const sacCodes = sqliteTable('sac_codes', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const sacCodes = pgTable('sac_codes', {
+  id: serial('id').primaryKey(),
   code: text('code').notNull().unique(),
   description: text('description').notNull(),
   defaultTaxRate: real('default_tax_rate').default(18),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('sac_code_idx').on(table.code),
 ]);
@@ -80,8 +147,8 @@ export type InvoiceType = 'B2B' | 'B2C' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
 export type InvoiceStatus = 'DRAFT' | 'FINAL' | 'FILED';
 
 // Sales Invoices (Outward Supplies)
-export const invoices = sqliteTable('invoices', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const invoices = pgTable('invoices', {
+  id: serial('id').primaryKey(),
   invoiceNumber: text('invoice_number').notNull(),
   invoiceDate: text('invoice_date').notNull(),
   customerId: integer('customer_id').references(() => customers.id),
@@ -94,8 +161,8 @@ export const invoices = sqliteTable('invoices', {
   originalInvoiceDate: text('original_invoice_date'),
 
   placeOfSupplyCode: text('place_of_supply_code').notNull(),
-  isInterState: integer('is_inter_state', { mode: 'boolean' }).notNull(),
-  isReverseCharge: integer('is_reverse_charge', { mode: 'boolean' }).default(false),
+  isInterState: boolean('is_inter_state').notNull(),
+  isReverseCharge: boolean('is_reverse_charge').default(false),
   supplyType: text('supply_type').$type<SupplyType>().default('REGULAR'),
 
   // Amounts stored in paisa for precision
@@ -110,8 +177,8 @@ export const invoices = sqliteTable('invoices', {
   status: text('status').$type<InvoiceStatus>().default('DRAFT'),
   notes: text('notes'),
 
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('invoice_number_idx').on(table.invoiceNumber),
   index('invoice_period_idx').on(table.returnPeriod),
@@ -120,8 +187,8 @@ export const invoices = sqliteTable('invoices', {
 ]);
 
 // Invoice Line Items
-export const invoiceItems = sqliteTable('invoice_items', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const invoiceItems = pgTable('invoice_items', {
+  id: serial('id').primaryKey(),
   invoiceId: integer('invoice_id').notNull().references(() => invoices.id, { onDelete: 'cascade' }),
 
   description: text('description').notNull(),
@@ -147,8 +214,8 @@ export const invoiceItems = sqliteTable('invoice_items', {
 ]);
 
 // Purchase Invoices (for ITC)
-export const purchaseInvoices = sqliteTable('purchase_invoices', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const purchaseInvoices = pgTable('purchase_invoices', {
+  id: serial('id').primaryKey(),
   vendorId: integer('vendor_id').notNull().references(() => vendors.id),
   vendorName: text('vendor_name').notNull(),
   vendorGstin: text('vendor_gstin').notNull(),
@@ -156,8 +223,8 @@ export const purchaseInvoices = sqliteTable('purchase_invoices', {
   invoiceDate: text('invoice_date').notNull(),
 
   placeOfSupplyCode: text('place_of_supply_code').notNull(),
-  isInterState: integer('is_inter_state', { mode: 'boolean' }).notNull(),
-  isReverseCharge: integer('is_reverse_charge', { mode: 'boolean' }).default(false),
+  isInterState: boolean('is_inter_state').notNull(),
+  isReverseCharge: boolean('is_reverse_charge').default(false),
 
   taxableAmount: integer('taxable_amount').notNull(),
   cgstAmount: integer('cgst_amount').default(0),
@@ -166,14 +233,14 @@ export const purchaseInvoices = sqliteTable('purchase_invoices', {
   cessAmount: integer('cess_amount').default(0),
   totalAmount: integer('total_amount').notNull(),
 
-  itcEligible: integer('itc_eligible', { mode: 'boolean' }).default(true),
-  itcClaimed: integer('itc_claimed', { mode: 'boolean' }).default(false),
+  itcEligible: boolean('itc_eligible').default(true),
+  itcClaimed: boolean('itc_claimed').default(false),
 
   returnPeriod: text('return_period').notNull(),
   notes: text('notes'),
 
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('purchase_vendor_idx').on(table.vendorId),
   index('purchase_period_idx').on(table.returnPeriod),
@@ -182,8 +249,8 @@ export const purchaseInvoices = sqliteTable('purchase_invoices', {
 // Tax Payment Records
 export type PaymentStatus = 'PENDING' | 'PAID' | 'FILED';
 
-export const taxPayments = sqliteTable('tax_payments', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const taxPayments = pgTable('tax_payments', {
+  id: serial('id').primaryKey(),
   returnPeriod: text('return_period').notNull(),
 
   cgstLiability: integer('cgst_liability').default(0),
@@ -204,8 +271,8 @@ export const taxPayments = sqliteTable('tax_payments', {
   paymentDate: text('payment_date'),
   paymentReference: text('payment_reference'),
 
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('payment_period_idx').on(table.returnPeriod),
 ]);
@@ -217,25 +284,25 @@ export const taxPayments = sqliteTable('tax_payments', {
 // Budget Categories (user-defined, extensible)
 export type CategoryType = 'INCOME' | 'EXPENSE';
 
-export const budgetCategories = sqliteTable('budget_categories', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const budgetCategories = pgTable('budget_categories', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),
   type: text('type').$type<CategoryType>().notNull(),
   sortOrder: integer('sort_order').default(0),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 });
 
 // Monthly Budget Entries (planned vs actual per category per month)
-export const budgetEntries = sqliteTable('budget_entries', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const budgetEntries = pgTable('budget_entries', {
+  id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => budgetCategories.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),           // MMYYYY format
   plannedAmount: integer('planned_amount').default(0),  // in paisa
   actualAmount: integer('actual_amount').default(0),    // in paisa
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('budget_period_idx').on(table.period),
   uniqueIndex('budget_category_period_idx').on(table.categoryId, table.period),
@@ -244,17 +311,17 @@ export const budgetEntries = sqliteTable('budget_entries', {
 // Recurring Expense Templates — auto-populates budget_entries for future periods
 export type RecurrenceType = 'ONE_TIME' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY';
 
-export const recurringExpenses = sqliteTable('recurring_expenses', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const recurringExpenses = pgTable('recurring_expenses', {
+  id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => budgetCategories.id, { onDelete: 'cascade' }),
   amount: integer('amount').notNull(),                    // paisa
   recurrence: text('recurrence').$type<RecurrenceType>().notNull(),
   startPeriod: text('start_period').notNull(),            // MMYYYY
   endPeriod: text('end_period'),                          // MMYYYY, NULL = forever
   notes: text('notes'),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('recurring_expenses_category_idx').on(table.categoryId),
   index('recurring_expenses_active_idx').on(table.isActive),
@@ -264,45 +331,45 @@ export type RecurringExpense = typeof recurringExpenses.$inferSelect;
 export type NewRecurringExpense = typeof recurringExpenses.$inferInsert;
 
 // Budget Carry Forward (savings carried to next month)
-export const budgetCarryForward = sqliteTable('budget_carry_forward', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const budgetCarryForward = pgTable('budget_carry_forward', {
+  id: serial('id').primaryKey(),
   period: text('period').notNull().unique(),   // MMYYYY — the month this carry-forward GOES INTO
   amount: integer('amount').notNull().default(0), // paisa
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
 
 // Financial Goals (for 3-year projections tracking)
-export const financialGoals = sqliteTable('financial_goals', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const financialGoals = pgTable('financial_goals', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),               // e.g., "Marriage", "Pilot Training"
   targetAmount: integer('target_amount').notNull(),  // in paisa
   targetDate: text('target_date'),            // ISO date string
   currentAmount: integer('current_amount').default(0),  // in paisa
   color: text('color'),                       // for charts (e.g., "#4CAF50")
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 });
 
 // Projection Categories (columns in the projection grid)
-export const projectionCategories = sqliteTable('projection_categories', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const projectionCategories = pgTable('projection_categories', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),               // SIP, RD, Car Loan, Chit, etc.
-  isInflow: integer('is_inflow', { mode: 'boolean' }).notNull().default(true),
+  isInflow: boolean('is_inflow').notNull().default(true),
   goalId: integer('goal_id').references(() => financialGoals.id),  // optional link to goal
   sortOrder: integer('sort_order').default(0),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 });
 
 // Projection Entries (monthly cashflow projections - cells in the grid)
-export const projectionEntries = sqliteTable('projection_entries', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const projectionEntries = pgTable('projection_entries', {
+  id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => projectionCategories.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),           // MMYYYY
   amount: integer('amount').notNull(),        // in paisa (always positive, direction from category)
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('projection_period_idx').on(table.period),
   index('projection_category_idx').on(table.categoryId),
@@ -310,12 +377,12 @@ export const projectionEntries = sqliteTable('projection_entries', {
 ]);
 
 // Carryforward Balances (opening balances for projections)
-export const carryforwardBalances = sqliteTable('carryforward_balances', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const carryforwardBalances = pgTable('carryforward_balances', {
+  id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => projectionCategories.id, { onDelete: 'cascade' }),
   amount: integer('amount').notNull(),            // in paisa
   asOfDate: text('as_of_date').notNull(),         // ISO date
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('carryforward_category_idx').on(table.categoryId),
 ]);
@@ -331,17 +398,17 @@ export const carryforwardBalances = sqliteTable('carryforward_balances', {
  * assetClass values: STOCKS, MUTUAL_FUNDS, CHIT_FUNDS, GOLD, NPS, PF,
  *                    INSURANCE_CASH (extend as new classes appear in the app).
  */
-export const savingsAssetInclusion = sqliteTable('savings_asset_inclusion', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const savingsAssetInclusion = pgTable('savings_asset_inclusion', {
+  id: serial('id').primaryKey(),
   assetClass: text('asset_class').notNull(),
   // Optional sub-identifier within an asset class. NULL = the whole class
   // (used by aggregate classes like STOCKS, MUTUAL_FUNDS). Populated for
   // itemized classes — e.g. one row per insurance policy (sourceId =
   // insurance_policies.id) or one row per chit fund (sourceId = chit_funds.id).
   sourceId: integer('source_id'),
-  included: integer('included', { mode: 'boolean' }).notNull().default(false),
+  included: boolean('included').notNull().default(false),
   goalId: integer('goal_id').references(() => financialGoals.id, { onDelete: 'cascade' }),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('savings_asset_class_idx').on(table.assetClass),
   index('savings_asset_source_idx').on(table.assetClass, table.sourceId),
@@ -361,11 +428,11 @@ export type SavingsAssetInclusion = typeof savingsAssetInclusion.$inferSelect;
  * Projected balance at any future date T:
  *   assetBacked + lumpSumPaisa + monthlyPaisa × monthsUntil(T)
  */
-export const futureSavingsPlan = sqliteTable('future_savings_plan', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const futureSavingsPlan = pgTable('future_savings_plan', {
+  id: serial('id').primaryKey(),
   lumpSumPaisa: integer('lump_sum_paisa').notNull().default(0),
   monthlyPaisa: integer('monthly_paisa').notNull().default(0),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
 
 export type FutureSavingsPlan = typeof futureSavingsPlan.$inferSelect;
@@ -380,11 +447,11 @@ export type FutureSavingsPlan = typeof futureSavingsPlan.$inferSelect;
  * compounded current_valuation projection. NPS-only fields control the
  * 60/40 split and the assumed annuity-yield.
  */
-export const retirementAssetSelection = sqliteTable('retirement_asset_selection', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const retirementAssetSelection = pgTable('retirement_asset_selection', {
+  id: serial('id').primaryKey(),
   assetClass: text('asset_class').notNull(),
   sourceId: integer('source_id').notNull(),
-  included: integer('included', { mode: 'boolean' }).notNull().default(true),
+  included: boolean('included').notNull().default(true),
   mode: text('mode'),                              // 'SELL' | 'RENTAL' for REAL_ESTATE
   salePriceOverridePaisa: integer('sale_price_override_paisa'),
   // For REAL_ESTATE in RENTAL mode: expected monthly rent at retirement
@@ -394,7 +461,7 @@ export const retirementAssetSelection = sqliteTable('retirement_asset_selection'
   expectedFutureRentPaisa: integer('expected_future_rent_paisa'),
   npsLumpsumPct: real('nps_lumpsum_pct'),          // default 60
   npsAnnuityRatePct: real('nps_annuity_rate_pct'), // default 6
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('retirement_asset_class_idx').on(table.assetClass),
   uniqueIndex('retirement_asset_unique_idx').on(table.assetClass, table.sourceId),
@@ -409,8 +476,8 @@ export type RetirementAssetSelection = typeof retirementAssetSelection.$inferSel
  * (e.g. NPS appeared as ₹93L because the 30→60 default horizon compounded
  * the corpus for 30 years instead of the user's real 7).
  */
-export const retirementAssumptions = sqliteTable('retirement_assumptions', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const retirementAssumptions = pgTable('retirement_assumptions', {
+  id: serial('id').primaryKey(),
   currentAge: integer('current_age').notNull().default(30),
   targetAge: integer('target_age').notNull().default(60),
   monthlyExpenseRupees: integer('monthly_expense_rupees').notNull().default(50000),
@@ -424,10 +491,10 @@ export const retirementAssumptions = sqliteTable('retirement_assumptions', {
   // based on these. Defaults match the typical real-world behaviour:
   //   rental + LIC annuity → grow (rentals track inflation; LIC bonus +5%/y)
   //   NPS annuity + LIC ladder smoothed → flat
-  npsIncomeGrows: integer('nps_income_grows', { mode: 'boolean' }).notNull().default(false),
-  annuityIncomeGrows: integer('annuity_income_grows', { mode: 'boolean' }).notNull().default(true),
-  insuranceLadderIncomeGrows: integer('insurance_ladder_income_grows', { mode: 'boolean' }).notNull().default(false),
-  rentalIncomeGrows: integer('rental_income_grows', { mode: 'boolean' }).notNull().default(true),
+  npsIncomeGrows: boolean('nps_income_grows').notNull().default(false),
+  annuityIncomeGrows: boolean('annuity_income_grows').notNull().default(true),
+  insuranceLadderIncomeGrows: boolean('insurance_ladder_income_grows').notNull().default(false),
+  rentalIncomeGrows: boolean('rental_income_grows').notNull().default(true),
   // Age at which the LIC ladder starts paying out. Most LIC endowments
   // mature at a fixed age (commonly 60+) regardless of when the user retires;
   // override per user. If <= targetAge, ladder begins immediately at
@@ -438,7 +505,7 @@ export const retirementAssumptions = sqliteTable('retirement_assumptions', {
   // event-driven cascade: when Liquid falls below liquidYrsHeld years of
   // current expense, refill from Stable; when Stable falls below stableYrsHeld,
   // refill from Growth.
-  bucketEnabled: integer('bucket_enabled', { mode: 'boolean' }).notNull().default(false),
+  bucketEnabled: boolean('bucket_enabled').notNull().default(false),
   liquidPct: real('liquid_pct').notNull().default(10),
   stablePct: real('stable_pct').notNull().default(30),
   growthPct: real('growth_pct').notNull().default(60),
@@ -448,7 +515,7 @@ export const retirementAssumptions = sqliteTable('retirement_assumptions', {
   liquidYrsHeld: real('liquid_yrs_held').notNull().default(1),
   stableYrsHeld: real('stable_yrs_held').notNull().default(3),
   retirementDurationYears: integer('retirement_duration_years').notNull().default(25),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
 
 export type RetirementAssumptions = typeof retirementAssumptions.$inferSelect;
@@ -458,8 +525,8 @@ export type RetirementAssumptions = typeof retirementAssumptions.$inferSelect;
 // ============================================================================
 
 // 1. Holdings (Stocks / ETFs)
-export const holdings = sqliteTable('holdings', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const holdings = pgTable('holdings', {
+  id: serial('id').primaryKey(),
   symbol: text('symbol').notNull(),
   quantity: real('quantity').notNull(),
   averagePrice: integer('average_price').notNull(),
@@ -470,8 +537,8 @@ export const holdings = sqliteTable('holdings', {
   gainLoss: integer('gain_loss').notNull(),
   gainLossPercent: real('gain_loss_percent').notNull(),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('holdings_symbol_idx').on(table.symbol),
   uniqueIndex('holdings_symbol_unique').on(table.symbol),
@@ -483,8 +550,8 @@ export type NewHolding = typeof holdings.$inferInsert;
 // 2. Mutual Funds
 export type MutualFundType = 'EQUITY' | 'DEBT' | 'HYBRID' | 'LIQUID' | 'GOLD';
 
-export const mutualFunds = sqliteTable('mutual_funds', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const mutualFunds = pgTable('mutual_funds', {
+  id: serial('id').primaryKey(),
   isin: text('isin').notNull(),
   schemeName: text('scheme_name').notNull(),
   fundType: text('fund_type').$type<MutualFundType>().notNull(),
@@ -498,8 +565,8 @@ export const mutualFunds = sqliteTable('mutual_funds', {
   lastNavDate: text('last_nav_date'),
   investmentStartDate: text('investment_start_date'), // ISO date — for CAGR computation
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('mf_isin_idx').on(table.isin),
   index('mf_folio_idx').on(table.folioNumber),
@@ -512,8 +579,8 @@ export type NewMutualFund = typeof mutualFunds.$inferInsert;
 export type SIPFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'ANNUAL';
 export type SIPStatus = 'ACTIVE' | 'PAUSED' | 'COMPLETED';
 
-export const sips = sqliteTable('sips', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const sips = pgTable('sips', {
+  id: serial('id').primaryKey(),
   mutualFundId: integer('mutual_fund_id').notNull().references(() => mutualFunds.id, { onDelete: 'cascade' }),
   startingUnits: real('starting_units').notNull(),
   startingNav: integer('starting_nav').notNull(),
@@ -527,8 +594,8 @@ export const sips = sqliteTable('sips', {
   nextExecutionDate: text('next_execution_date'),
   expectedXirr: real('expected_xirr'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('sip_mf_idx').on(table.mutualFundId),
   index('sip_status_idx').on(table.status),
@@ -541,12 +608,12 @@ export type NewSIP = typeof sips.$inferInsert;
 export type ChitFundStatus = 'ACTIVE' | 'WON' | 'COMPLETED' | 'WITHDRAWN';
 export type ChitPaymentMethod = 'CASH' | 'CHEQUE' | 'NEFT' | 'UPI' | 'CARD';
 
-export const chitFunds = sqliteTable('chit_funds', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const chitFunds = pgTable('chit_funds', {
+  id: serial('id').primaryKey(),
   foremanName: text('foreman_name').notNull(),
   schemeName: text('scheme_name').notNull(),
   registrationNumber: text('registration_number'),
-  isRegistered: integer('is_registered', { mode: 'boolean' }).default(true),
+  isRegistered: boolean('is_registered').default(true),
 
   chitValue: integer('chit_value').notNull(),
   monthlyInstallment: integer('monthly_installment').notNull(),
@@ -576,15 +643,15 @@ export const chitFunds = sqliteTable('chit_funds', {
   nextDueDate: text('next_due_date'),
 
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('chit_status_idx').on(table.status),
   index('chit_foreman_idx').on(table.foremanName),
 ]);
 
-export const chitFundInstallments = sqliteTable('chit_fund_installments', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const chitFundInstallments = pgTable('chit_fund_installments', {
+  id: serial('id').primaryKey(),
   chitFundId: integer('chit_fund_id').notNull().references(() => chitFunds.id, { onDelete: 'cascade' }),
   monthNumber: integer('month_number').notNull(),
   dueDate: text('due_date').notNull(),
@@ -596,7 +663,7 @@ export const chitFundInstallments = sqliteTable('chit_fund_installments', {
   winnerName: text('winner_name'),
   winnerBidDiscountPct: real('winner_bid_discount_pct'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('chit_install_fund_idx').on(table.chitFundId),
   index('chit_install_month_idx').on(table.monthNumber),
@@ -611,8 +678,8 @@ export type NewChitFundInstallment = typeof chitFundInstallments.$inferInsert;
 export type GoldType = 'PHYSICAL' | 'ETF' | 'GOLD_BOND' | 'DIGITAL';
 export type GoldPurity = '999' | '995' | '916';
 
-export const goldHoldings = sqliteTable('gold_holdings', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const goldHoldings = pgTable('gold_holdings', {
+  id: serial('id').primaryKey(),
   type: text('type').$type<GoldType>().notNull(),
   // Legacy columns (kept to avoid breaking existing rows)
   quantity: real('quantity').notNull(),
@@ -646,8 +713,8 @@ export const goldHoldings = sqliteTable('gold_holdings', {
   etfSymbol: text('etf_symbol'),
   etfUnits: real('etf_units'),
 
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('gold_type_idx').on(table.type),
 ]);
@@ -659,8 +726,8 @@ export type NewGoldHolding = typeof goldHoldings.$inferInsert;
 export type NPSAccountType = 'TIER1' | 'TIER2';
 export type NPSAccountStatus = 'ACTIVE' | 'INACTIVE' | 'MATURED';
 
-export const npsAccounts = sqliteTable('nps_accounts', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const npsAccounts = pgTable('nps_accounts', {
+  id: serial('id').primaryKey(),
   accountNumber: text('account_number').notNull().unique(),
   accountHolder: text('account_holder').notNull(),
   pan: text('pan').notNull(),
@@ -678,8 +745,8 @@ export const npsAccounts = sqliteTable('nps_accounts', {
   expectedMaturityDate: text('expected_maturity_date'),
   lastStatementDate: text('last_statement_date'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('nps_account_number_idx').on(table.accountNumber),
   index('nps_pan_idx').on(table.pan),
@@ -693,8 +760,8 @@ export type FDStatus = 'ACTIVE' | 'MATURED' | 'BROKEN';
 export type FDCompoundingFreq = 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY' | 'YEARLY';
 export type FDInterestType = 'CUMULATIVE' | 'NON_CUMULATIVE';
 
-export const fixedDeposits = sqliteTable('fixed_deposits', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const fixedDeposits = pgTable('fixed_deposits', {
+  id: serial('id').primaryKey(),
   bankName: text('bank_name').notNull(),
   accountNumber: text('account_number'),                      // FD receipt / account no
   principalPaisa: integer('principal_paisa').notNull(),
@@ -710,14 +777,14 @@ export const fixedDeposits = sqliteTable('fixed_deposits', {
   tenureMonths: integer('tenure_months'),                      // derived
   maturityAmountPaisa: integer('maturity_amount_paisa'),       // auto-computed
   status: text('status').$type<FDStatus>().default('ACTIVE'),
-  isTaxSaver: integer('is_tax_saver', { mode: 'boolean' }).default(false),
-  autoRenew: integer('auto_renew', { mode: 'boolean' }).default(false),
+  isTaxSaver: boolean('is_tax_saver').default(false),
+  autoRenew: boolean('auto_renew').default(false),
   prematureWithdrawalPenaltyPct: real('premature_withdrawal_penalty_pct').default(1.0),
   jointHolderName: text('joint_holder_name'),
   documentPath: text('document_path'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('fd_bank_idx').on(table.bankName),
   index('fd_status_idx').on(table.status),
@@ -730,8 +797,8 @@ export type NewFixedDeposit = typeof fixedDeposits.$inferInsert;
 // 6. Provident Fund (EPF/PPF/VPF)
 export type PFAccountType = 'EPF' | 'PPF' | 'VPF';
 
-export const providentFund = sqliteTable('provident_fund', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const providentFund = pgTable('provident_fund', {
+  id: serial('id').primaryKey(),
   accountType: text('account_type').$type<PFAccountType>().notNull(),
   accountNumber: text('account_number').unique(),
   accountHolder: text('account_holder').notNull(),
@@ -745,12 +812,12 @@ export const providentFund = sqliteTable('provident_fund', {
   interestEarned: integer('interest_earned').default(0),
   ppfMaturityDate: text('ppf_maturity_date'),
   ppfExtensionDate: text('ppf_extension_date'),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  isActive: boolean('is_active').default(true),
   openingDate: text('opening_date').notNull(),
   lastContributionDate: text('last_contribution_date'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('pf_account_type_idx').on(table.accountType),
   index('pf_uan_idx').on(table.universalAccountNumber),
@@ -763,8 +830,8 @@ export type NewProvidentFund = typeof providentFund.$inferInsert;
 export type PropertyType = 'RESIDENTIAL' | 'COMMERCIAL' | 'LAND' | 'PLOT';
 export type PropertyStatus = 'OWNED' | 'MORTGAGED' | 'UNDER_CONSTRUCTION' | 'RENTED';
 
-export const realEstate = sqliteTable('real_estate', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const realEstate = pgTable('real_estate', {
+  id: serial('id').primaryKey(),
   propertyName: text('property_name').notNull(),
   type: text('type').$type<PropertyType>().notNull(),
   status: text('status').$type<PropertyStatus>().notNull(),
@@ -795,8 +862,8 @@ export const realEstate = sqliteTable('real_estate', {
   lastPropertyTaxPaid: text('last_property_tax_paid'),
   documentPath: text('document_path'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('re_type_idx').on(table.type),
   index('re_city_idx').on(table.city),
@@ -810,8 +877,8 @@ export type NewRealEstate = typeof realEstate.$inferInsert;
 export type PolicyType = 'TERM_LIFE' | 'WHOLE_LIFE' | 'ENDOWMENT' | 'ULIP' | 'HEALTH' | 'CRITICAL_ILLNESS' | 'DISABILITY' | 'ACCIDENT';
 export type PolicyStatus = 'ACTIVE' | 'LAPSED' | 'SURRENDERED' | 'MATURED' | 'CLAIMED';
 
-export const insurancePolicies = sqliteTable('insurance_policies', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const insurancePolicies = pgTable('insurance_policies', {
+  id: serial('id').primaryKey(),
   policyNumber: text('policy_number').notNull().unique(),
   policyType: text('policy_type').$type<PolicyType>().notNull(),
   status: text('status').$type<PolicyStatus>().default('ACTIVE'),
@@ -839,8 +906,8 @@ export const insurancePolicies = sqliteTable('insurance_policies', {
   nomineeName: text('nominee_name'),
   nomineeRelation: text('nominee_relation'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('policy_number_idx').on(table.policyNumber),
   index('policy_type_idx').on(table.policyType),
@@ -854,8 +921,8 @@ export type NewInsurancePolicy = typeof insurancePolicies.$inferInsert;
 export type LiabilityType = 'HOME_LOAN' | 'AUTO_LOAN' | 'PERSONAL_LOAN' | 'CREDIT_CARD' | 'EDUCATION_LOAN' | 'OTHER';
 export type LiabilityStatus = 'ACTIVE' | 'CLOSED' | 'DEFAULTED';
 
-export const liabilities = sqliteTable('liabilities', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const liabilities = pgTable('liabilities', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),
   type: text('type').$type<LiabilityType>().notNull(),
   status: text('status').$type<LiabilityStatus>().default('ACTIVE'),
@@ -878,8 +945,8 @@ export const liabilities = sqliteTable('liabilities', {
   purposeOfLoan: text('purpose_of_loan'),
   documentPath: text('document_path'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('liability_type_idx').on(table.type),
   index('liability_status_idx').on(table.status),
@@ -891,8 +958,8 @@ export type NewLiability = typeof liabilities.$inferInsert;
 
 // 9b. Credit Card Monthly Expenses
 // One row per card per payment month. Period derived from dueDate (payment month).
-export const creditCardExpenses = sqliteTable('credit_card_expenses', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const creditCardExpenses = pgTable('credit_card_expenses', {
+  id: serial('id').primaryKey(),
   liabilityId: integer('liability_id').notNull().references(() => liabilities.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),           // MMYYYY — derived from dueDate (payment month)
   amount: integer('amount').notNull(),         // in paisa (statement total)
@@ -902,7 +969,7 @@ export const creditCardExpenses = sqliteTable('credit_card_expenses', {
   paidAmount: integer('paid_amount'),          // paisa — NULL means statement still outstanding
   settledOn: text('settled_on'),               // ISO date — when statement was actually paid
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('cc_expense_liability_idx').on(table.liabilityId),
   index('cc_expense_period_idx').on(table.period),
@@ -915,8 +982,8 @@ export type NewCreditCardExpense = typeof creditCardExpenses.$inferInsert;
 // 9c. Loan Amortization Schedule (uploaded from bank PDF/CSV)
 export type AmortizationStatus = 'UPCOMING' | 'PAID' | 'OVERDUE';
 
-export const loanAmortization = sqliteTable('loan_amortization', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const loanAmortization = pgTable('loan_amortization', {
+  id: serial('id').primaryKey(),
   liabilityId: integer('liability_id').notNull().references(() => liabilities.id, { onDelete: 'cascade' }),
   monthNumber: integer('month_number').notNull(),
   dueDate: text('due_date'),                         // ISO date
@@ -928,7 +995,7 @@ export const loanAmortization = sqliteTable('loan_amortization', {
   status: text('status').$type<AmortizationStatus>().default('UPCOMING'),
   paidOn: text('paid_on'),                             // ISO date
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('amort_liability_idx').on(table.liabilityId),
   index('amort_month_idx').on(table.monthNumber),
@@ -940,8 +1007,8 @@ export type NewLoanAmortizationRow = typeof loanAmortization.$inferInsert;
 // 10. Investment Transactions
 export type TransactionType = 'BUY' | 'SELL' | 'DIVIDEND' | 'SIP_EXECUTION' | 'INTEREST' | 'BONUS' | 'STOCK_SPLIT';
 
-export const investmentTransactions = sqliteTable('investment_transactions', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const investmentTransactions = pgTable('investment_transactions', {
+  id: serial('id').primaryKey(),
   type: text('type').$type<TransactionType>().notNull(),
   assetType: text('asset_type').notNull(),
   assetId: integer('asset_id'),
@@ -956,7 +1023,7 @@ export const investmentTransactions = sqliteTable('investment_transactions', {
   settlementDate: text('settlement_date'),
   referenceNumber: text('reference_number'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('tx_asset_type_idx').on(table.assetType),
   index('tx_date_idx').on(table.transactionDate),
@@ -969,8 +1036,8 @@ export type NewInvestmentTransaction = typeof investmentTransactions.$inferInser
 // 11. Tax Deductions (Section 80)
 export type DeductionSection = 'SECTION_80C' | 'SECTION_80CCC' | 'SECTION_80CCD' | 'SECTION_80D' | 'SECTION_80E' | 'SECTION_80EE' | 'SECTION_80TTA' | 'OTHER';
 
-export const taxDeductions = sqliteTable('tax_deductions', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const taxDeductions = pgTable('tax_deductions', {
+  id: serial('id').primaryKey(),
   section: text('section').notNull(), // '80C'|'80CCD_1B'|'80D'|'80G'|'24B'|...
   description: text('description').notNull(),
   // Legacy columns (Phase <6)
@@ -982,7 +1049,7 @@ export const taxDeductions = sqliteTable('tax_deductions', {
   category: text('category'),
   incurredDate: text('incurred_date').notNull().default(''),
   financialYear: text('financial_year').notNull(),
-  claimed: integer('claimed', { mode: 'boolean' }).default(false),
+  claimed: boolean('claimed').default(false),
   claimedAmount: integer('claimed_amount'),
   claimedInYear: text('claimed_in_year'),
   notes: text('notes'),
@@ -995,11 +1062,11 @@ export const taxDeductions = sqliteTable('tax_deductions', {
   recipientPan: text('recipient_pan'),
   recipient80gNumber: text('recipient_80g_number'),
   qualifyingPercent: real('qualifying_percent'),
-  hasUpperLimit: integer('has_upper_limit', { mode: 'boolean' }).default(false),
+  hasUpperLimit: boolean('has_upper_limit').default(false),
   linkedAssetType: text('linked_asset_type'),
   linkedAssetId: integer('linked_asset_id'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('deduction_section_idx').on(table.section),
   index('deduction_fy_idx').on(table.financialYear),
@@ -1011,8 +1078,8 @@ export type NewTaxDeduction = typeof taxDeductions.$inferInsert;
 // 12. Tax Documents
 export type DocumentType = 'AADHAR' | 'PAN' | 'GST_CERT' | 'INVESTMENT_CERT' | 'TAX_RETURN' | 'INSURANCE_POLICY' | 'PROPERTY_DEED' | 'LOAN_AGREEMENT' | 'OTHER';
 
-export const taxDocuments = sqliteTable('tax_documents', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const taxDocuments = pgTable('tax_documents', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull().default(''),
   type: text('type').notNull().default('OTHER'),
   fileSize: integer('file_size'),
@@ -1025,16 +1092,16 @@ export const taxDocuments = sqliteTable('tax_documents', {
   expiryDate: text('expiry_date'),
   financialYear: text('financial_year'),
   tags: text('tags'),
-  isEncrypted: integer('is_encrypted', { mode: 'boolean' }).default(false),
+  isEncrypted: boolean('is_encrypted').default(false),
   notes: text('notes'),
   // Phase 6 columns
   deductionId: integer('deduction_id'),
   category: text('category'), // DONATION_RECEIPT|80G_CERTIFICATE|...
   title: text('title'),
   hashSha256: text('hash_sha256'),
-  uploadedAt: integer('uploaded_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  uploadedAt: timestamp('uploaded_at', { mode: 'date' }).defaultNow(),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('doc_type_idx').on(table.type),
   index('doc_fy_idx').on(table.financialYear),
@@ -1048,8 +1115,8 @@ export type NewTaxDocument = typeof taxDocuments.$inferInsert;
 // 13. Yearly Investment Plan
 export type PlanStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED';
 
-export const yearlyInvestmentPlan = sqliteTable('yearly_investment_plan', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const yearlyInvestmentPlan = pgTable('yearly_investment_plan', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   equityTarget: integer('equity_target').notNull(),
   equityAllocation: integer('equity_allocation').default(0),
@@ -1078,8 +1145,8 @@ export const yearlyInvestmentPlan = sqliteTable('yearly_investment_plan', {
   status: text('status').$type<PlanStatus>().default('PLANNED'),
   progressPercent: real('progress_percent').default(0),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('plan_fy_idx').on(table.financialYear),
 ]);
@@ -1088,8 +1155,8 @@ export type YearlyInvestmentPlan = typeof yearlyInvestmentPlan.$inferSelect;
 export type NewYearlyInvestmentPlan = typeof yearlyInvestmentPlan.$inferInsert;
 
 // 14. Price Snapshots
-export const priceSnapshots = sqliteTable('price_snapshots', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const priceSnapshots = pgTable('price_snapshots', {
+  id: serial('id').primaryKey(),
   assetType: text('asset_type').notNull(),
   assetSymbol: text('asset_symbol').notNull(),
   assetName: text('asset_name'),
@@ -1103,7 +1170,7 @@ export const priceSnapshots = sqliteTable('price_snapshots', {
   change: integer('change'),
   changePercent: real('change_percent'),
   source: text('source').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('snapshot_asset_idx').on(table.assetSymbol),
   index('snapshot_date_idx').on(table.priceDate),
@@ -1121,8 +1188,8 @@ export type NewPriceSnapshot = typeof priceSnapshots.$inferInsert;
 export type AlertCategory = 'MARKET' | 'PAYMENT' | 'PORTFOLIO';
 export type AlertOperator = 'GT' | 'LT' | 'GTE' | 'LTE' | 'CROSSES_ABOVE' | 'CROSSES_BELOW' | 'CHANGE_PCT_GT' | 'CHANGE_PCT_LT';
 
-export const alertRules = sqliteTable('alert_rules', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const alertRules = pgTable('alert_rules', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),
   category: text('category').$type<AlertCategory>().notNull(),
   ruleType: text('rule_type').notNull(),
@@ -1130,22 +1197,22 @@ export const alertRules = sqliteTable('alert_rules', {
   assetId: integer('asset_id'),
   operator: text('operator').$type<AlertOperator>(),
   threshold: real('threshold').notNull(),
-  isEnabled: integer('is_enabled', { mode: 'boolean' }).default(true),
+  isEnabled: boolean('is_enabled').default(true),
   cooldownHours: integer('cooldown_hours').default(24),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('alert_rule_category_idx').on(table.category),
   index('alert_rule_enabled_idx').on(table.isEnabled),
 ]);
 
-export const alertHistory = sqliteTable('alert_history', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const alertHistory = pgTable('alert_history', {
+  id: serial('id').primaryKey(),
   ruleId: integer('rule_id').notNull().references(() => alertRules.id, { onDelete: 'cascade' }),
   dedupKey: text('dedup_key').notNull(),
   message: text('message').notNull(),
   triggeredValue: real('triggered_value'),
-  sentAt: integer('sent_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  sentAt: timestamp('sent_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('alert_history_rule_idx').on(table.ruleId),
   index('alert_history_sent_idx').on(table.sentAt),
@@ -1163,8 +1230,8 @@ export type AlertHistoryRow = typeof alertHistory.$inferSelect;
 export type HoldingPeriod = 'LTCG' | 'STCG';
 export type CapGainAssetType = 'STOCKS' | 'EQUITY_MF' | 'DEBT_MF' | 'GOLD' | 'REAL_ESTATE' | 'OTHER';
 
-export const capitalGains = sqliteTable('capital_gains', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const capitalGains = pgTable('capital_gains', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   assetType: text('asset_type').$type<CapGainAssetType>().notNull(),
   assetName: text('asset_name').notNull(),
@@ -1179,7 +1246,7 @@ export const capitalGains = sqliteTable('capital_gains', {
   taxRate: real('tax_rate').notNull(),                     // percentage
   taxAmount: integer('tax_amount').notNull(),             // paisa
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('cg_fy_idx').on(table.financialYear),
 ]);
@@ -1192,15 +1259,15 @@ export type CapitalGainRow = typeof capitalGains.$inferSelect;
 
 export type TaxPaymentType = 'ADVANCE_TAX' | 'TDS' | 'SELF_ASSESSMENT' | 'OTHER';
 
-export const incomeTaxPaid = sqliteTable('income_tax_paid', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const incomeTaxPaid = pgTable('income_tax_paid', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   paymentType: text('payment_type').$type<TaxPaymentType>().notNull(),
   amount: integer('amount').notNull(),   // paisa
   paymentDate: text('payment_date').notNull(),
   referenceNumber: text('reference_number'),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('itp_fy_idx').on(table.financialYear),
 ]);
@@ -1212,8 +1279,8 @@ export type IncomeTaxPaidRow = typeof incomeTaxPaid.$inferSelect;
 // ============================================================================
 
 // Salary income per Form 16 (Schedule S + CSV_TDS1 export)
-export const salaryIncome = sqliteTable('salary_income', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const salaryIncome = pgTable('salary_income', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   employerName: text('employer_name').notNull(),
   employerTan: text('employer_tan').notNull(),
@@ -1223,8 +1290,8 @@ export const salaryIncome = sqliteTable('salary_income', {
   taxableSalaryPaisa: integer('taxable_salary_paisa').notNull(),
   tdsPaisa: integer('tds_paisa').default(0),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('salary_income_fy_idx').on(table.financialYear),
 ]);
@@ -1234,8 +1301,8 @@ export type SalaryIncomeRow = typeof salaryIncome.$inferSelect;
 // TDS credits — non-salary (consulting/interest/property) — feeds CSV_TDS2 / CSV_TDS3
 export type TdsCategory = 'CONSULTING' | 'INTEREST' | 'RENT' | 'PROPERTY' | 'OTHER';
 
-export const tdsCredits = sqliteTable('tds_credits', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const tdsCredits = pgTable('tds_credits', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   category: text('category').$type<TdsCategory>().notNull(),
   deductorName: text('deductor_name').notNull(),
@@ -1245,8 +1312,8 @@ export const tdsCredits = sqliteTable('tds_credits', {
   incomePaisa: integer('income_paisa').notNull(),
   tdsPaisa: integer('tds_paisa').notNull(),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('tds_credits_fy_idx').on(table.financialYear),
   index('tds_credits_category_idx').on(table.category),
@@ -1262,15 +1329,15 @@ export type OtherIncomeSource =
   | 'DIVIDEND'
   | 'OTHER';
 
-export const otherSourcesIncome = sqliteTable('other_sources_income', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const otherSourcesIncome = pgTable('other_sources_income', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   source: text('source').$type<OtherIncomeSource>().notNull(),
   description: text('description').notNull(),
   amountPaisa: integer('amount_paisa').notNull(),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   index('other_income_fy_idx').on(table.financialYear),
 ]);
@@ -1281,12 +1348,12 @@ export type OtherSourcesIncomeRow = typeof otherSourcesIncome.$inferSelect;
 // TAX SECTION PREFERENCES (include/exclude per FY)
 // ============================================================================
 
-export const taxSectionPreferences = sqliteTable('tax_section_preferences', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const taxSectionPreferences = pgTable('tax_section_preferences', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   section: text('section').notNull(),
-  isExcluded: integer('is_excluded', { mode: 'boolean' }).default(false),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  isExcluded: boolean('is_excluded').default(false),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('tax_pref_fy_section_idx').on(table.financialYear, table.section),
 ]);
@@ -1295,14 +1362,14 @@ export const taxSectionPreferences = sqliteTable('tax_section_preferences', {
 // FY CLOSE STATUS
 // ============================================================================
 
-export const fyCloseStatus = sqliteTable('fy_close_status', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const fyCloseStatus = pgTable('fy_close_status', {
+  id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   category: text('category').notNull(),
-  isLocked: integer('is_locked', { mode: 'boolean' }).default(false),
-  lockedAt: integer('locked_at', { mode: 'timestamp' }),
+  isLocked: boolean('is_locked').default(false),
+  lockedAt: timestamp('locked_at', { mode: 'date' }),
   notes: text('notes'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('fy_close_fy_cat_idx').on(table.financialYear, table.category),
 ]);
@@ -1359,8 +1426,8 @@ export type NewCarryforwardBalance = typeof carryforwardBalances.$inferInsert;
 
 // ─── Transformation Tracker ────────────────────────────────────────
 
-export const transformationPlans = sqliteTable('transformation_plans', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const transformationPlans = pgTable('transformation_plans', {
+  id: serial('id').primaryKey(),
   name: text('name').notNull(),
   startDate: text('start_date').notNull(),
   dayCount: integer('day_count').notNull().default(100),
@@ -1369,29 +1436,29 @@ export const transformationPlans = sqliteTable('transformation_plans', {
   dailyCalorieTarget: integer('daily_calorie_target'),
   dailyProteinTargetG: integer('daily_protein_target_g'),
   notes: text('notes'),
-  createdAt: integer('created_at').default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
 
-export const transformationSections = sqliteTable(
+export const transformationSections = pgTable(
   'transformation_sections',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: serial('id').primaryKey(),
     planId: integer('plan_id')
       .notNull()
       .references(() => transformationPlans.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
     deletedAt: integer('deleted_at'),
-    createdAt: integer('created_at').default(sql`(unixepoch())`),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   },
   (t) => ({ planIdx: index('trans_sec_plan_idx').on(t.planId) }),
 );
 
-export const transformationItems = sqliteTable(
+export const transformationItems = pgTable(
   'transformation_items',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: serial('id').primaryKey(),
     sectionId: integer('section_id')
       .notNull()
       .references(() => transformationSections.id, { onDelete: 'cascade' }),
@@ -1405,15 +1472,15 @@ export const transformationItems = sqliteTable(
     // ["Walking 6k steps","Stretching","Simple weights","Gym"].
     options: text('options'),
     deletedAt: integer('deleted_at'),
-    createdAt: integer('created_at').default(sql`(unixepoch())`),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   },
   (t) => ({ secIdx: index('trans_item_sec_idx').on(t.sectionId) }),
 );
 
-export const transformationDays = sqliteTable(
+export const transformationDays = pgTable(
   'transformation_days',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: serial('id').primaryKey(),
     planId: integer('plan_id')
       .notNull()
       .references(() => transformationPlans.id, { onDelete: 'cascade' }),
@@ -1421,8 +1488,8 @@ export const transformationDays = sqliteTable(
     dayNumber: integer('day_number'),
     currentWeightKg: real('current_weight_kg'),
     journal: text('journal'),
-    createdAt: integer('created_at').default(sql`(unixepoch())`),
-    updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+    createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+    updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   },
   (t) => ({
     planDateIdx: index('trans_day_plan_date_idx').on(t.planId, t.date),
@@ -1430,10 +1497,10 @@ export const transformationDays = sqliteTable(
   }),
 );
 
-export const transformationChecks = sqliteTable(
+export const transformationChecks = pgTable(
   'transformation_checks',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: serial('id').primaryKey(),
     dayId: integer('day_id')
       .notNull()
       .references(() => transformationDays.id, { onDelete: 'cascade' }),
