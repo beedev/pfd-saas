@@ -16,6 +16,41 @@ countries later.
 
 ## Status
 
+**Sprint 3.5 complete.** Goals/Retirement architecture + IA regroup.
+Four focused phases on top of Sprint 3:
+
+- **Sidebar IA regroup** (Phase 1): top-level sections match the user's
+  mental model — Investments are *what you own*, Insurance is *what
+  protects you*, Liabilities are *what you owe*. URLs stay stable at
+  `/investments/*`; only sidebar groupings change. New `/insurance`
+  overview page. Retirement moves under Planning.
+- **`cashflow_events` substrate** (Phase 2): first-class inflow
+  timeline that both retirement and per-goal funding projections
+  consume. Migration 0013. Auto-derivation from insurance maturities,
+  NPS lumpsum/annuity, PPF/VPF/NSC/KVP/SSY maturities, SCSS quarterly
+  payouts, real-estate rental, salary till retirement. `/planning/
+  cashflows` timeline UI. Idempotent re-derive preserves manual rows.
+- **Goals upgrade** (Phase 3): disbursement model on `financial_goals`
+  — LUMPSUM (one-shot), FIXED_PERIOD_SWP (flat per-year), INFLATION_SWP
+  (per-year × growth^N). Migration 0014. Year-by-year projection engine
+  (`lib/finance/goal-projection.ts`) with binary-search monthly-
+  contribution solver. Per-goal asset mapping via existing
+  `savings_asset_inclusion` keyed by `goal_id`. New `/goals/[id]` detail
+  page with 4 stacked sections including a Recharts funding chart.
+- **Retirement reads cashflow_events** (Phase 4): additive enhancement.
+  `/api/finance/retirement-assets` gains SMALL_SAVINGS as a 6th asset
+  class (closes Sprint 3 Phase 5 deferred). `/retirement` page gains
+  an "Income arrivals during retirement" section that surfaces the
+  events firing during retirement years — pre-existing three-bucket
+  SWP cascade math, corpus depletion chart, and selection table
+  untouched.
+
+Design principle that drove the sprint: **Stage ≠ Milestone**.
+Retirement is a *life phase* (singular, dedicated dashboard, never
+"closed"). Goals are *milestones* (plural, lifecycle: open → funded →
+closed). Both share the substrate (cashflow events, asset mapping)
+but stay psychologically distinct at the surface.
+
 **Sprint 3 complete.** Five India-specific modules shipped on top of
 Sprint 2's productized core:
 
@@ -67,15 +102,18 @@ Deferred from Sprint 2:
   obsoleted the Mailpit dev-SMTP need; full Docker comes in Sprint 5
   with deployment infrastructure).
 
-Deferred from Sprint 3:
-- `/api/finance/retirement-assets` wiring for small_savings. PPF and SSY
-  belong in the retirement corpus calculation but the per-asset inclusion
-  model needs scheme-aware projection math; rolled into Sprint 4 alongside
-  the broader tax/retirement integration.
+Deferred from Sprint 3 / 3.5:
 - MF CAS PDF parser. Awaiting a sample PDF.
 - Migration of `timestamp` → `timestamptz` across all 50+ tables. Known
   tech debt — flagged when the per-tenant cron timezone bug surfaced in
   Sprint 2 Phase 5.
+- Tax-aware inflow simulation. `cashflow_events.tax_treatment` is
+  captured (TAX_FREE / TAXABLE / TDS) but Sprint 4 will compute the
+  tax impact on the income side of retirement and goals.
+- Cross-asset rebalance projection. Currently each asset class grows
+  at its own assumed return; a more honest model would track the
+  three-bucket cascade (equity / debt / cash) across the whole
+  portfolio. Sprint 4 or later.
 
 ## Key invariants (don't break these)
 

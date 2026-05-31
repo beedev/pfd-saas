@@ -232,6 +232,7 @@ Sprint sequence:
 - **Sprint 1.5** ✅ Data import + smoke test (one-time, for the owner)
 - **Sprint 2** ✅ Productize — onboarding, mobile-responsive, PWA, per-tenant cron, demo data, real SMTP. Docker self-host scaffold deferred to Sprint 5.
 - **Sprint 3** ✅ India modules — Health Insurance (cards/claims/portability), Income tracker, Vehicles (insurance/PUC/service log), Subscriptions, Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS with interest projection)
+- **Sprint 3.5** ✅ Goals/Retirement architecture + IA regroup — sidebar regrouped (Investments / Insurance / Liabilities), `cashflow_events` substrate (auto-derived inflow timeline from insurance / NPS / PPF / SSY / rental / salary), goals get disbursement model + asset mapping + year-by-year projection, retirement page reads cashflow events for income arrivals
 - **Sprint 4** ⏳ Tax hardening — regime toggle, slab abstraction, Form 26AS, ITR-1/2 export
 - **Sprint 5** ⏳ SaaS infra — Razorpay billing, pricing tiers, Docker self-host, marketing + docs sites
 - **Sprint 6** ⏳ Launch — deploy, domain, legal, observability, backups, beta, public
