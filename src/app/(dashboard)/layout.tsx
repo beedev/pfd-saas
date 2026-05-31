@@ -55,8 +55,11 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
       <Sidebar hasBusinessProfile={hasBusinessProfile} />
-      <main className="flex-1 overflow-y-auto">
-        <div className="container mx-auto p-6">
+      {/* On mobile the sidebar is replaced by a fixed top bar (h-14);
+          pt-14 keeps the page content out from under it. md+ has the
+          inline sidebar so no top padding needed. */}
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        <div className="container mx-auto p-4 md:p-6">
           {children}
         </div>
       </main>

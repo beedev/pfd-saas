@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { LogOut } from 'lucide-react';
+import { LogOut, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -120,73 +121,143 @@ type SidebarProps = {
   hasBusinessProfile: boolean;
 };
 
+/**
+ * Renders BOTH the persistent desktop sidebar (≥md) and the mobile
+ * top bar + slide-in drawer (<md). Layout chooses which one to show via
+ * Tailwind responsive classes — both elements exist in the DOM but
+ * only one is visible at any width. Drawer state lives here.
+ */
 export function Sidebar({ hasBusinessProfile }: SidebarProps) {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
   const visibleNav = hasBusinessProfile
     ? navigation
     : navigation.filter((s) => s.section !== 'GST');
 
+  // Close drawer when navigating to a new page. usePathname triggers a
+  // re-render on navigation, so this side-effect runs naturally.
+  // (No useEffect needed — the close happens via onClick on each Link.)
+
+  const navBody = (
+    <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
+      {visibleNav.map((section) => (
+        <div key={section.section}>
+          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+            {section.section}
+          </p>
+          <div className="space-y-1">
+            {section.items.map((item) => {
+              const isActive =
+                pathname === item.href ||
+                (item.href !== '/' && pathname.startsWith(item.href));
+
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  onClick={() => setMobileOpen(false)}
+                  className={cn(
+                    'group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                  )}
+                >
+                  <item.icon
+                    className={cn(
+                      'mr-3 h-5 w-5 flex-shrink-0',
+                      isActive
+                        ? 'text-white'
+                        : 'text-gray-400 group-hover:text-white',
+                    )}
+                  />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+
+  const footer = (
+    <div className="border-t border-gray-800 p-4 space-y-3">
+      <button
+        type="button"
+        onClick={() => signOut({ callbackUrl: '/login' })}
+        className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+      >
+        <LogOut className="mr-3 h-5 w-5 text-gray-400" />
+        Sign out
+      </button>
+      <p className="text-xs text-gray-500">pfd-saas · v0.1</p>
+    </div>
+  );
+
   return (
-    <div className="flex h-full w-64 flex-col bg-gray-900">
-      <div className="flex h-16 items-center justify-center border-b border-gray-800 px-4">
-        <h1 className="text-lg font-bold text-white text-center leading-tight">
-          Personal Finance
-          <br />
-          Dashboard
-        </h1>
+    <>
+      {/* Desktop sidebar — hidden on mobile */}
+      <div className="hidden md:flex h-full w-64 flex-col bg-gray-900">
+        <div className="flex h-16 items-center justify-center border-b border-gray-800 px-4">
+          <h1 className="text-lg font-bold text-white text-center leading-tight">
+            Personal Finance
+            <br />
+            Dashboard
+          </h1>
+        </div>
+        {navBody}
+        {footer}
       </div>
 
-      <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
-        {visibleNav.map((section) => (
-          <div key={section.section}>
-            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-              {section.section}
-            </p>
-            <div className="space-y-1">
-              {section.items.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  (item.href !== '/' && pathname.startsWith(item.href));
-
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={cn(
-                      'group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-gray-800 text-white'
-                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                    )}
-                  >
-                    <item.icon
-                      className={cn(
-                        'mr-3 h-5 w-5 flex-shrink-0',
-                        isActive
-                          ? 'text-white'
-                          : 'text-gray-400 group-hover:text-white'
-                      )}
-                    />
-                    {item.name}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </nav>
-
-      <div className="border-t border-gray-800 p-4 space-y-3">
+      {/* Mobile top bar — hidden on desktop. Fixed position so it doesn't
+          eat the main-content height; the dashboard layout adds top
+          padding on <md to compensate. */}
+      <div className="md:hidden fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-gray-800 bg-gray-900 px-4">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open navigation"
+          className="rounded-md p-2 text-gray-300 hover:bg-gray-800 hover:text-white"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="text-sm font-bold text-white">Personal Finance</h1>
         <button
           type="button"
           onClick={() => signOut({ callbackUrl: '/login' })}
-          className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+          aria-label="Sign out"
+          className="rounded-md p-2 text-gray-400 hover:bg-gray-800 hover:text-white"
         >
-          <LogOut className="mr-3 h-5 w-5 text-gray-400" />
-          Sign out
+          <LogOut className="h-5 w-5" />
         </button>
-        <p className="text-xs text-gray-500">pfd-saas · v0.1</p>
       </div>
-    </div>
+
+      {/* Mobile drawer — animates in from the left when mobileOpen */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-40 flex">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative flex h-full w-64 flex-col bg-gray-900 shadow-xl">
+            <div className="flex h-14 items-center justify-between border-b border-gray-800 px-4">
+              <h1 className="text-sm font-bold text-white">Personal Finance</h1>
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close navigation"
+                className="rounded-md p-2 text-gray-300 hover:bg-gray-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {navBody}
+            {footer}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
