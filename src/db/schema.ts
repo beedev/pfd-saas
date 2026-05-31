@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -83,7 +83,7 @@ export const businessProfile = pgTable('business_profile', {
   phone: text('phone'),
   financialYear: text('financial_year').notNull(),
   invoicePrefix: text('invoice_prefix'),
-  invoiceStartNumber: integer('invoice_start_number').default(1),
+  invoiceStartNumber: bigint('invoice_start_number', { mode: 'number' }).default(1),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
@@ -173,12 +173,12 @@ export const invoices = pgTable('invoices', {
   supplyType: text('supply_type').$type<SupplyType>().default('REGULAR'),
 
   // Amounts stored in paisa for precision
-  taxableAmount: integer('taxable_amount').notNull(),
-  cgstAmount: integer('cgst_amount').default(0),
-  sgstAmount: integer('sgst_amount').default(0),
-  igstAmount: integer('igst_amount').default(0),
-  cessAmount: integer('cess_amount').default(0),
-  totalAmount: integer('total_amount').notNull(),
+  taxableAmount: bigint('taxable_amount', { mode: 'number' }).notNull(),
+  cgstAmount: bigint('cgst_amount', { mode: 'number' }).default(0),
+  sgstAmount: bigint('sgst_amount', { mode: 'number' }).default(0),
+  igstAmount: bigint('igst_amount', { mode: 'number' }).default(0),
+  cessAmount: bigint('cess_amount', { mode: 'number' }).default(0),
+  totalAmount: bigint('total_amount', { mode: 'number' }).notNull(),
 
   returnPeriod: text('return_period').notNull(),
   status: text('status').$type<InvoiceStatus>().default('DRAFT'),
@@ -203,20 +203,20 @@ export const invoiceItems = pgTable('invoice_items', {
   description: text('description').notNull(),
   sacCode: text('sac_code').notNull(),
   quantity: real('quantity').default(1),
-  unitPrice: integer('unit_price').notNull(),
-  discount: integer('discount').default(0),
+  unitPrice: bigint('unit_price', { mode: 'number' }).notNull(),
+  discount: bigint('discount', { mode: 'number' }).default(0),
 
-  taxableAmount: integer('taxable_amount').notNull(),
+  taxableAmount: bigint('taxable_amount', { mode: 'number' }).notNull(),
   taxRate: real('tax_rate').notNull(),
 
   cgstRate: real('cgst_rate').default(0),
-  cgstAmount: integer('cgst_amount').default(0),
+  cgstAmount: bigint('cgst_amount', { mode: 'number' }).default(0),
   sgstRate: real('sgst_rate').default(0),
-  sgstAmount: integer('sgst_amount').default(0),
+  sgstAmount: bigint('sgst_amount', { mode: 'number' }).default(0),
   igstRate: real('igst_rate').default(0),
-  igstAmount: integer('igst_amount').default(0),
+  igstAmount: bigint('igst_amount', { mode: 'number' }).default(0),
 
-  totalAmount: integer('total_amount').notNull(),
+  totalAmount: bigint('total_amount', { mode: 'number' }).notNull(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('item_invoice_idx').on(table.invoiceId),
@@ -237,12 +237,12 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
   isInterState: boolean('is_inter_state').notNull(),
   isReverseCharge: boolean('is_reverse_charge').default(false),
 
-  taxableAmount: integer('taxable_amount').notNull(),
-  cgstAmount: integer('cgst_amount').default(0),
-  sgstAmount: integer('sgst_amount').default(0),
-  igstAmount: integer('igst_amount').default(0),
-  cessAmount: integer('cess_amount').default(0),
-  totalAmount: integer('total_amount').notNull(),
+  taxableAmount: bigint('taxable_amount', { mode: 'number' }).notNull(),
+  cgstAmount: bigint('cgst_amount', { mode: 'number' }).default(0),
+  sgstAmount: bigint('sgst_amount', { mode: 'number' }).default(0),
+  igstAmount: bigint('igst_amount', { mode: 'number' }).default(0),
+  cessAmount: bigint('cess_amount', { mode: 'number' }).default(0),
+  totalAmount: bigint('total_amount', { mode: 'number' }).notNull(),
 
   itcEligible: boolean('itc_eligible').default(true),
   itcClaimed: boolean('itc_claimed').default(false),
@@ -266,19 +266,19 @@ export const taxPayments = pgTable('tax_payments', {
   id: serial('id').primaryKey(),
   returnPeriod: text('return_period').notNull(),
 
-  cgstLiability: integer('cgst_liability').default(0),
-  sgstLiability: integer('sgst_liability').default(0),
-  igstLiability: integer('igst_liability').default(0),
-  cessLiability: integer('cess_liability').default(0),
+  cgstLiability: bigint('cgst_liability', { mode: 'number' }).default(0),
+  sgstLiability: bigint('sgst_liability', { mode: 'number' }).default(0),
+  igstLiability: bigint('igst_liability', { mode: 'number' }).default(0),
+  cessLiability: bigint('cess_liability', { mode: 'number' }).default(0),
 
-  cgstItcUtilized: integer('cgst_itc_utilized').default(0),
-  sgstItcUtilized: integer('sgst_itc_utilized').default(0),
-  igstItcUtilized: integer('igst_itc_utilized').default(0),
+  cgstItcUtilized: bigint('cgst_itc_utilized', { mode: 'number' }).default(0),
+  sgstItcUtilized: bigint('sgst_itc_utilized', { mode: 'number' }).default(0),
+  igstItcUtilized: bigint('igst_itc_utilized', { mode: 'number' }).default(0),
 
-  cgstCashPaid: integer('cgst_cash_paid').default(0),
-  sgstCashPaid: integer('sgst_cash_paid').default(0),
-  igstCashPaid: integer('igst_cash_paid').default(0),
-  cessCashPaid: integer('cess_cash_paid').default(0),
+  cgstCashPaid: bigint('cgst_cash_paid', { mode: 'number' }).default(0),
+  sgstCashPaid: bigint('sgst_cash_paid', { mode: 'number' }).default(0),
+  igstCashPaid: bigint('igst_cash_paid', { mode: 'number' }).default(0),
+  cessCashPaid: bigint('cess_cash_paid', { mode: 'number' }).default(0),
 
   status: text('status').$type<PaymentStatus>().default('PENDING'),
   paymentDate: text('payment_date'),
@@ -316,8 +316,8 @@ export const budgetEntries = pgTable('budget_entries', {
   id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => budgetCategories.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),           // MMYYYY format
-  plannedAmount: integer('planned_amount').default(0),  // in paisa
-  actualAmount: integer('actual_amount').default(0),    // in paisa
+  plannedAmount: bigint('planned_amount', { mode: 'number' }).default(0),  // in paisa
+  actualAmount: bigint('actual_amount', { mode: 'number' }).default(0),    // in paisa
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -334,7 +334,7 @@ export type RecurrenceType = 'ONE_TIME' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY';
 export const recurringExpenses = pgTable('recurring_expenses', {
   id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => budgetCategories.id, { onDelete: 'cascade' }),
-  amount: integer('amount').notNull(),                    // paisa
+  amount: bigint('amount', { mode: 'number' }).notNull(),                    // paisa
   recurrence: text('recurrence').$type<RecurrenceType>().notNull(),
   startPeriod: text('start_period').notNull(),            // MMYYYY
   endPeriod: text('end_period'),                          // MMYYYY, NULL = forever
@@ -356,7 +356,7 @@ export type NewRecurringExpense = typeof recurringExpenses.$inferInsert;
 export const budgetCarryForward = pgTable('budget_carry_forward', {
   id: serial('id').primaryKey(),
   period: text('period').notNull().unique(),   // MMYYYY — the month this carry-forward GOES INTO
-  amount: integer('amount').notNull().default(0), // paisa
+  amount: bigint('amount', { mode: 'number' }).notNull().default(0), // paisa
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
@@ -367,9 +367,9 @@ export const budgetCarryForward = pgTable('budget_carry_forward', {
 export const financialGoals = pgTable('financial_goals', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),               // e.g., "Marriage", "Pilot Training"
-  targetAmount: integer('target_amount').notNull(),  // in paisa
+  targetAmount: bigint('target_amount', { mode: 'number' }).notNull(),  // in paisa
   targetDate: text('target_date'),            // ISO date string
-  currentAmount: integer('current_amount').default(0),  // in paisa
+  currentAmount: bigint('current_amount', { mode: 'number' }).default(0),  // in paisa
   color: text('color'),                       // for charts (e.g., "#4CAF50")
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
@@ -397,7 +397,7 @@ export const projectionEntries = pgTable('projection_entries', {
   id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => projectionCategories.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),           // MMYYYY
-  amount: integer('amount').notNull(),        // in paisa (always positive, direction from category)
+  amount: bigint('amount', { mode: 'number' }).notNull(),        // in paisa (always positive, direction from category)
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -413,7 +413,7 @@ export const projectionEntries = pgTable('projection_entries', {
 export const carryforwardBalances = pgTable('carryforward_balances', {
   id: serial('id').primaryKey(),
   categoryId: integer('category_id').notNull().references(() => projectionCategories.id, { onDelete: 'cascade' }),
-  amount: integer('amount').notNull(),            // in paisa
+  amount: bigint('amount', { mode: 'number' }).notNull(),            // in paisa
   asOfDate: text('as_of_date').notNull(),         // ISO date
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
@@ -467,8 +467,8 @@ export type SavingsAssetInclusion = typeof savingsAssetInclusion.$inferSelect;
  */
 export const futureSavingsPlan = pgTable('future_savings_plan', {
   id: serial('id').primaryKey(),
-  lumpSumPaisa: integer('lump_sum_paisa').notNull().default(0),
-  monthlyPaisa: integer('monthly_paisa').notNull().default(0),
+  lumpSumPaisa: bigint('lump_sum_paisa', { mode: 'number' }).notNull().default(0),
+  monthlyPaisa: bigint('monthly_paisa', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
@@ -493,12 +493,12 @@ export const retirementAssetSelection = pgTable('retirement_asset_selection', {
   sourceId: integer('source_id').notNull(),
   included: boolean('included').notNull().default(true),
   mode: text('mode'),                              // 'SELL' | 'RENTAL' for REAL_ESTATE
-  salePriceOverridePaisa: integer('sale_price_override_paisa'),
+  salePriceOverridePaisa: bigint('sale_price_override_paisa', { mode: 'number' }),
   // For REAL_ESTATE in RENTAL mode: expected monthly rent at retirement
   // (already inflation-adjusted to future value). Used directly as ×12
   // annual income — no further inflation applied — so the user can model
   // "I'll rent it out after I retire" without needing current monthly_rent.
-  expectedFutureRentPaisa: integer('expected_future_rent_paisa'),
+  expectedFutureRentPaisa: bigint('expected_future_rent_paisa', { mode: 'number' }),
   npsLumpsumPct: real('nps_lumpsum_pct'),          // default 60
   npsAnnuityRatePct: real('nps_annuity_rate_pct'), // default 6
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -574,12 +574,12 @@ export const holdings = pgTable('holdings', {
   id: serial('id').primaryKey(),
   symbol: text('symbol').notNull(),
   quantity: real('quantity').notNull(),
-  averagePrice: integer('average_price').notNull(),
-  currentPrice: integer('current_price').notNull(),
+  averagePrice: bigint('average_price', { mode: 'number' }).notNull(),
+  currentPrice: bigint('current_price', { mode: 'number' }).notNull(),
   purchaseDate: text('purchase_date').notNull(),
-  totalInvestment: integer('total_investment').notNull(),
-  currentValue: integer('current_value').notNull(),
-  gainLoss: integer('gain_loss').notNull(),
+  totalInvestment: bigint('total_investment', { mode: 'number' }).notNull(),
+  currentValue: bigint('current_value', { mode: 'number' }).notNull(),
+  gainLoss: bigint('gain_loss', { mode: 'number' }).notNull(),
   gainLossPercent: real('gain_loss_percent').notNull(),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
@@ -604,10 +604,10 @@ export const mutualFunds = pgTable('mutual_funds', {
   fundType: text('fund_type').$type<MutualFundType>().notNull(),
   folioNumber: text('folio_number'),
   units: real('units').notNull(),
-  nav: integer('nav').notNull(),
-  totalInvestment: integer('total_investment').notNull(),
-  currentValue: integer('current_value').notNull(),
-  gainLoss: integer('gain_loss').notNull(),
+  nav: bigint('nav', { mode: 'number' }).notNull(),
+  totalInvestment: bigint('total_investment', { mode: 'number' }).notNull(),
+  currentValue: bigint('current_value', { mode: 'number' }).notNull(),
+  gainLoss: bigint('gain_loss', { mode: 'number' }).notNull(),
   gainLossPercent: real('gain_loss_percent').notNull(),
   lastNavDate: text('last_nav_date'),
   investmentStartDate: text('investment_start_date'), // ISO date — for CAGR computation
@@ -632,13 +632,13 @@ export const sips = pgTable('sips', {
   id: serial('id').primaryKey(),
   mutualFundId: integer('mutual_fund_id').notNull().references(() => mutualFunds.id, { onDelete: 'cascade' }),
   startingUnits: real('starting_units').notNull(),
-  startingNav: integer('starting_nav').notNull(),
-  monthlyAmount: integer('monthly_amount').notNull(),
+  startingNav: bigint('starting_nav', { mode: 'number' }).notNull(),
+  monthlyAmount: bigint('monthly_amount', { mode: 'number' }).notNull(),
   frequency: text('frequency').$type<SIPFrequency>().notNull().default('MONTHLY'),
   startDate: text('start_date').notNull(),
   endDate: text('end_date'),
   status: text('status').$type<SIPStatus>().default('ACTIVE'),
-  totalInvestedSoFar: integer('total_invested_so_far').notNull().default(0),
+  totalInvestedSoFar: bigint('total_invested_so_far', { mode: 'number' }).notNull().default(0),
   lastExecutionDate: text('last_execution_date'),
   nextExecutionDate: text('next_execution_date'),
   expectedXirr: real('expected_xirr'),
@@ -666,29 +666,29 @@ export const chitFunds = pgTable('chit_funds', {
   registrationNumber: text('registration_number'),
   isRegistered: boolean('is_registered').default(true),
 
-  chitValue: integer('chit_value').notNull(),
-  monthlyInstallment: integer('monthly_installment').notNull(),
+  chitValue: bigint('chit_value', { mode: 'number' }).notNull(),
+  monthlyInstallment: bigint('monthly_installment', { mode: 'number' }).notNull(),
   durationMonths: integer('duration_months').notNull(),
   groupSize: integer('group_size').notNull(),
   ticketNumber: text('ticket_number'),
   startDate: text('start_date').notNull(),
   expectedEndDate: text('expected_end_date').notNull(),
   foremanCommissionPct: real('foreman_commission_pct').default(5),
-  documentChargesPaisa: integer('document_charges_paisa').default(0),
+  documentChargesPaisa: bigint('document_charges_paisa', { mode: 'number' }).default(0),
   promptPaymentDiscountPct: real('prompt_payment_discount_pct').default(0),
 
   // Running state
   installmentsPaid: integer('installments_paid').default(0),
-  totalPaid: integer('total_paid').default(0),
-  totalDividends: integer('total_dividends').default(0),
-  netContribution: integer('net_contribution').default(0),
+  totalPaid: bigint('total_paid', { mode: 'number' }).default(0),
+  totalDividends: bigint('total_dividends', { mode: 'number' }).default(0),
+  netContribution: bigint('net_contribution', { mode: 'number' }).default(0),
 
   // Winning state
   status: text('status').$type<ChitFundStatus>().default('ACTIVE'),
   winMonth: integer('win_month'),
   winDate: text('win_date'),
   winBidDiscountPct: real('win_bid_discount_pct'),
-  winAmountReceived: integer('win_amount_received'),
+  winAmountReceived: bigint('win_amount_received', { mode: 'number' }),
 
   xirr: real('xirr'),
   nextDueDate: text('next_due_date'),
@@ -708,9 +708,9 @@ export const chitFundInstallments = pgTable('chit_fund_installments', {
   chitFundId: integer('chit_fund_id').notNull().references(() => chitFunds.id, { onDelete: 'cascade' }),
   monthNumber: integer('month_number').notNull(),
   dueDate: text('due_date').notNull(),
-  installmentPaid: integer('installment_paid').notNull(),
-  dividendReceived: integer('dividend_received').default(0),
-  netOutgo: integer('net_outgo').notNull(),
+  installmentPaid: bigint('installment_paid', { mode: 'number' }).notNull(),
+  dividendReceived: bigint('dividend_received', { mode: 'number' }).default(0),
+  netOutgo: bigint('net_outgo', { mode: 'number' }).notNull(),
   paidOn: text('paid_on').notNull(),
   paymentMethod: text('payment_method').$type<ChitPaymentMethod>().default('NEFT'),
   winnerName: text('winner_name'),
@@ -738,9 +738,9 @@ export const goldHoldings = pgTable('gold_holdings', {
   type: text('type').$type<GoldType>().notNull(),
   // Legacy columns (kept to avoid breaking existing rows)
   quantity: real('quantity').notNull(),
-  currentPrice: integer('current_price').notNull(),
-  totalValue: integer('total_value').notNull(),
-  purchasePrice: integer('purchase_price'),
+  currentPrice: bigint('current_price', { mode: 'number' }).notNull(),
+  totalValue: bigint('total_value', { mode: 'number' }).notNull(),
+  purchasePrice: bigint('purchase_price', { mode: 'number' }),
   certificateNumber: text('certificate_number'),
   lastPriceUpdate: text('last_price_update'),
 
@@ -749,12 +749,12 @@ export const goldHoldings = pgTable('gold_holdings', {
   grams: real('grams'),
   purity: text('purity').$type<GoldPurity>(),
   purchaseDate: text('purchase_date'),
-  purchasePricePerGram: integer('purchase_price_per_gram'),
-  currentRatePerGram: integer('current_rate_per_gram'),
+  purchasePricePerGram: bigint('purchase_price_per_gram', { mode: 'number' }),
+  currentRatePerGram: bigint('current_rate_per_gram', { mode: 'number' }),
   lastRateUpdate: text('last_rate_update'),
-  totalInvestment: integer('total_investment'),
-  currentValue: integer('current_value'),
-  gainLoss: integer('gain_loss'),
+  totalInvestment: bigint('total_investment', { mode: 'number' }),
+  currentValue: bigint('current_value', { mode: 'number' }),
+  gainLoss: bigint('gain_loss', { mode: 'number' }),
   gainLossPercent: real('gain_loss_percent'),
   notes: text('notes'),
 
@@ -791,13 +791,13 @@ export const npsAccounts = pgTable('nps_accounts', {
   tier: text('tier').$type<NPSAccountType>().notNull(),
   status: text('status').$type<NPSAccountStatus>().default('ACTIVE'),
   subscriberId: text('subscriber_id'),
-  equityFundValue: integer('equity_fund_value').default(0),
-  debtFundValue: integer('debt_fund_value').default(0),
-  alternativeFundValue: integer('alternative_fund_value').default(0),
-  totalValue: integer('total_value').notNull().default(0),
-  totalContributed: integer('total_contributed').notNull().default(0),
-  employerContribution: integer('employer_contribution').default(0),
-  gainLoss: integer('gain_loss').default(0),
+  equityFundValue: bigint('equity_fund_value', { mode: 'number' }).default(0),
+  debtFundValue: bigint('debt_fund_value', { mode: 'number' }).default(0),
+  alternativeFundValue: bigint('alternative_fund_value', { mode: 'number' }).default(0),
+  totalValue: bigint('total_value', { mode: 'number' }).notNull().default(0),
+  totalContributed: bigint('total_contributed', { mode: 'number' }).notNull().default(0),
+  employerContribution: bigint('employer_contribution', { mode: 'number' }).default(0),
+  gainLoss: bigint('gain_loss', { mode: 'number' }).default(0),
   openingDate: text('opening_date').notNull(),
   expectedMaturityDate: text('expected_maturity_date'),
   lastStatementDate: text('last_statement_date'),
@@ -823,7 +823,7 @@ export const fixedDeposits = pgTable('fixed_deposits', {
   id: serial('id').primaryKey(),
   bankName: text('bank_name').notNull(),
   accountNumber: text('account_number'),                      // FD receipt / account no
-  principalPaisa: integer('principal_paisa').notNull(),
+  principalPaisa: bigint('principal_paisa', { mode: 'number' }).notNull(),
   interestRate: real('interest_rate').notNull(),               // annual %
   compoundingFreq: text('compounding_freq')
     .$type<FDCompoundingFreq>()
@@ -834,7 +834,7 @@ export const fixedDeposits = pgTable('fixed_deposits', {
   startDate: text('start_date').notNull(),                     // ISO date
   maturityDate: text('maturity_date').notNull(),               // ISO date
   tenureMonths: integer('tenure_months'),                      // derived
-  maturityAmountPaisa: integer('maturity_amount_paisa'),       // auto-computed
+  maturityAmountPaisa: bigint('maturity_amount_paisa', { mode: 'number' }),       // auto-computed
   status: text('status').$type<FDStatus>().default('ACTIVE'),
   isTaxSaver: boolean('is_tax_saver').default(false),
   autoRenew: boolean('auto_renew').default(false),
@@ -865,12 +865,12 @@ export const providentFund = pgTable('provident_fund', {
   accountHolder: text('account_holder').notNull(),
   pan: text('pan'),
   universalAccountNumber: text('uan'),
-  employeeBalance: integer('employee_balance').default(0),
-  employerBalance: integer('employer_balance').default(0),
-  interestBalance: integer('interest_balance').default(0),
-  totalBalance: integer('total_balance').notNull().default(0),
-  totalContributed: integer('total_contributed').notNull().default(0),
-  interestEarned: integer('interest_earned').default(0),
+  employeeBalance: bigint('employee_balance', { mode: 'number' }).default(0),
+  employerBalance: bigint('employer_balance', { mode: 'number' }).default(0),
+  interestBalance: bigint('interest_balance', { mode: 'number' }).default(0),
+  totalBalance: bigint('total_balance', { mode: 'number' }).notNull().default(0),
+  totalContributed: bigint('total_contributed', { mode: 'number' }).notNull().default(0),
+  interestEarned: bigint('interest_earned', { mode: 'number' }).default(0),
   ppfMaturityDate: text('ppf_maturity_date'),
   ppfExtensionDate: text('ppf_extension_date'),
   isActive: boolean('is_active').default(true),
@@ -907,21 +907,21 @@ export const realEstate = pgTable('real_estate', {
   area: real('area').notNull(),
   areaUnit: text('area_unit').default('sqft'),
   builtUpArea: real('built_up_area'),
-  purchasePrice: integer('purchase_price').notNull(),
+  purchasePrice: bigint('purchase_price', { mode: 'number' }).notNull(),
   purchaseDate: text('purchase_date').notNull(),
-  currentValuation: integer('current_valuation').notNull(),
+  currentValuation: bigint('current_valuation', { mode: 'number' }).notNull(),
   valuationDate: text('valuation_date'),
-  gainLoss: integer('gain_loss').notNull(),
+  gainLoss: bigint('gain_loss', { mode: 'number' }).notNull(),
   gainLossPercent: real('gain_loss_percent').notNull(),
-  mortgageAmount: integer('mortgage_amount'),
+  mortgageAmount: bigint('mortgage_amount', { mode: 'number' }),
   mortgageLender: text('mortgage_lender'),
   mortgageRate: real('mortgage_rate'),
   mortgageStartDate: text('mortgage_start_date'),
   mortgageEndDate: text('mortgage_end_date'),
-  monthlyRent: integer('monthly_rent'),
+  monthlyRent: bigint('monthly_rent', { mode: 'number' }),
   rentStartDate: text('rent_start_date'),
   rentTenantName: text('rent_tenant_name'),
-  propertyTaxAnnual: integer('property_tax_annual'),
+  propertyTaxAnnual: bigint('property_tax_annual', { mode: 'number' }),
   lastPropertyTaxPaid: text('last_property_tax_paid'),
   documentPath: text('document_path'),
   notes: text('notes'),
@@ -950,9 +950,9 @@ export const insurancePolicies = pgTable('insurance_policies', {
   policyHolder: text('policy_holder').notNull(),
   insurer: text('insurer').notNull(),
   insurerCode: text('insurer_code'),
-  sumAssured: integer('sum_assured').notNull(),
-  maturityBenefit: integer('maturity_benefit'),
-  premiumAmount: integer('premium_amount').notNull(),
+  sumAssured: bigint('sum_assured', { mode: 'number' }).notNull(),
+  maturityBenefit: bigint('maturity_benefit', { mode: 'number' }),
+  premiumAmount: bigint('premium_amount', { mode: 'number' }).notNull(),
   premiumFrequency: text('premium_frequency'),
   policyTerm: integer('policy_term'),
   premiumPaymentTerm: integer('premium_payment_term'),
@@ -960,10 +960,10 @@ export const insurancePolicies = pgTable('insurance_policies', {
   maturityDate: text('maturity_date'),
   lastPremiumPaidDate: text('last_premium_paid_date'),
   nextPremiumDueDate: text('next_premium_due_date'),
-  investmentValue: integer('investment_value'),
-  investmentGainLoss: integer('investment_gain_loss'),
+  investmentValue: bigint('investment_value', { mode: 'number' }),
+  investmentGainLoss: bigint('investment_gain_loss', { mode: 'number' }),
   // Whole life / pension policies — annuity payout per period (paisa)
-  annuityAmount: integer('annuity_amount'),
+  annuityAmount: bigint('annuity_amount', { mode: 'number' }),
   annuityFrequency: text('annuity_frequency'), // MONTHLY | QUARTERLY | HALF_YEARLY | YEARLY
   annuityStartDate: text('annuity_start_date'),
   riders: text('riders'),
@@ -995,20 +995,20 @@ export const liabilities = pgTable('liabilities', {
   status: text('status').$type<LiabilityStatus>().default('ACTIVE'),
   creditorName: text('creditor_name').notNull(),
   creditorType: text('creditor_type'),
-  originalAmount: integer('original_amount').notNull(),
-  currentBalance: integer('current_balance').notNull(),
+  originalAmount: bigint('original_amount', { mode: 'number' }).notNull(),
+  currentBalance: bigint('current_balance', { mode: 'number' }).notNull(),
   interestRate: real('interest_rate').notNull(),
-  monthlyEmi: integer('monthly_emi').notNull(),
+  monthlyEmi: bigint('monthly_emi', { mode: 'number' }).notNull(),
   startDate: text('start_date').notNull(),
   maturityDate: text('maturity_date'),
   remainingTenor: integer('remaining_tenor'),
   accountNumber: text('account_number'),
   loanNumber: text('loan_number'),
-  totalPaidSoFar: integer('total_paid_so_far').default(0),
+  totalPaidSoFar: bigint('total_paid_so_far', { mode: 'number' }).default(0),
   lastPaymentDate: text('last_payment_date'),
   nextPaymentDate: text('next_payment_date'),
   collateralType: text('collateral_type'),
-  collateralValue: integer('collateral_value'),
+  collateralValue: bigint('collateral_value', { mode: 'number' }),
   purposeOfLoan: text('purpose_of_loan'),
   documentPath: text('document_path'),
   notes: text('notes'),
@@ -1031,11 +1031,11 @@ export const creditCardExpenses = pgTable('credit_card_expenses', {
   id: serial('id').primaryKey(),
   liabilityId: integer('liability_id').notNull().references(() => liabilities.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),           // MMYYYY — derived from dueDate (payment month)
-  amount: integer('amount').notNull(),         // in paisa (statement total)
+  amount: bigint('amount', { mode: 'number' }).notNull(),         // in paisa (statement total)
   paidOn: text('paid_on').notNull(),           // ISO date — kept for backward compat
   statementDate: text('statement_date'),       // ISO date — when bill was generated
   dueDate: text('due_date'),                   // ISO date — when payment is due
-  paidAmount: integer('paid_amount'),          // paisa — NULL means statement still outstanding
+  paidAmount: bigint('paid_amount', { mode: 'number' }),          // paisa — NULL means statement still outstanding
   settledOn: text('settled_on'),               // ISO date — when statement was actually paid
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
@@ -1058,11 +1058,11 @@ export const loanAmortization = pgTable('loan_amortization', {
   liabilityId: integer('liability_id').notNull().references(() => liabilities.id, { onDelete: 'cascade' }),
   monthNumber: integer('month_number').notNull(),
   dueDate: text('due_date'),                         // ISO date
-  openingBalance: integer('opening_balance').notNull(), // paisa
-  emi: integer('emi').notNull(),                       // paisa
-  principal: integer('principal').notNull(),            // paisa
-  interest: integer('interest').notNull(),              // paisa
-  closingBalance: integer('closing_balance').notNull(), // paisa
+  openingBalance: bigint('opening_balance', { mode: 'number' }).notNull(), // paisa
+  emi: bigint('emi', { mode: 'number' }).notNull(),                       // paisa
+  principal: bigint('principal', { mode: 'number' }).notNull(),            // paisa
+  interest: bigint('interest', { mode: 'number' }).notNull(),              // paisa
+  closingBalance: bigint('closing_balance', { mode: 'number' }).notNull(), // paisa
   status: text('status').$type<AmortizationStatus>().default('UPCOMING'),
   paidOn: text('paid_on'),                             // ISO date
   notes: text('notes'),
@@ -1087,11 +1087,11 @@ export const investmentTransactions = pgTable('investment_transactions', {
   assetId: integer('asset_id'),
   assetName: text('asset_name').notNull(),
   quantity: real('quantity').notNull(),
-  pricePerUnit: integer('price_per_unit').notNull(),
-  amount: integer('amount').notNull(),
-  brokerageCharges: integer('brokerage_charges').default(0),
-  taxesAndCharges: integer('taxes_and_charges').default(0),
-  totalCost: integer('total_cost').notNull(),
+  pricePerUnit: bigint('price_per_unit', { mode: 'number' }).notNull(),
+  amount: bigint('amount', { mode: 'number' }).notNull(),
+  brokerageCharges: bigint('brokerage_charges', { mode: 'number' }).default(0),
+  taxesAndCharges: bigint('taxes_and_charges', { mode: 'number' }).default(0),
+  totalCost: bigint('total_cost', { mode: 'number' }).notNull(),
   transactionDate: text('transaction_date').notNull(),
   settlementDate: text('settlement_date'),
   referenceNumber: text('reference_number'),
@@ -1116,21 +1116,21 @@ export const taxDeductions = pgTable('tax_deductions', {
   section: text('section').notNull(), // '80C'|'80CCD_1B'|'80D'|'80G'|'24B'|...
   description: text('description').notNull(),
   // Legacy columns (Phase <6)
-  deductibleAmount: integer('deductible_amount').notNull().default(0),
-  availableLimit: integer('available_limit').notNull().default(0),
-  utilizableAmount: integer('utilizable_amount').notNull().default(0),
+  deductibleAmount: bigint('deductible_amount', { mode: 'number' }).notNull().default(0),
+  availableLimit: bigint('available_limit', { mode: 'number' }).notNull().default(0),
+  utilizableAmount: bigint('utilizable_amount', { mode: 'number' }).notNull().default(0),
   documentType: text('document_type'),
   documentPath: text('document_path'),
   category: text('category'),
   incurredDate: text('incurred_date').notNull().default(''),
   financialYear: text('financial_year').notNull(),
   claimed: boolean('claimed').default(false),
-  claimedAmount: integer('claimed_amount'),
+  claimedAmount: bigint('claimed_amount', { mode: 'number' }),
   claimedInYear: text('claimed_in_year'),
   notes: text('notes'),
   // Phase 6 columns
   subType: text('sub_type'),
-  amountPaisa: integer('amount_paisa').default(0),
+  amountPaisa: bigint('amount_paisa', { mode: 'number' }).default(0),
   paymentDate: text('payment_date'),
   paymentMethod: text('payment_method'), // CASH|CHEQUE|NEFT|UPI|CARD
   recipientName: text('recipient_name'),
@@ -1197,30 +1197,30 @@ export type PlanStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED';
 export const yearlyInvestmentPlan = pgTable('yearly_investment_plan', {
   id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
-  equityTarget: integer('equity_target').notNull(),
-  equityAllocation: integer('equity_allocation').default(0),
-  equityActual: integer('equity_actual').default(0),
-  mfTarget: integer('mf_target').notNull(),
-  mfAllocation: integer('mf_allocation').default(0),
-  mfActual: integer('mf_actual').default(0),
-  goldTarget: integer('gold_target').default(0),
-  goldAllocation: integer('gold_allocation').default(0),
-  goldActual: integer('gold_actual').default(0),
-  npsTarget: integer('nps_target').default(0),
-  npsAllocation: integer('nps_allocation').default(0),
-  npsActual: integer('nps_actual').default(0),
-  pfTarget: integer('pf_target').default(0),
-  pfAllocation: integer('pf_allocation').default(0),
-  pfActual: integer('pf_actual').default(0),
-  reTarget: integer('re_target').default(0),
-  reAllocation: integer('re_allocation').default(0),
-  reActual: integer('re_actual').default(0),
-  emergencyTarget: integer('emergency_target').notNull(),
-  emergencyActual: integer('emergency_actual').default(0),
-  deductionTarget: integer('deduction_target').notNull(),
-  deductionActual: integer('deduction_actual').default(0),
-  totalPlannedInvestment: integer('total_planned_investment').notNull(),
-  totalActualInvestment: integer('total_actual_investment').default(0),
+  equityTarget: bigint('equity_target', { mode: 'number' }).notNull(),
+  equityAllocation: bigint('equity_allocation', { mode: 'number' }).default(0),
+  equityActual: bigint('equity_actual', { mode: 'number' }).default(0),
+  mfTarget: bigint('mf_target', { mode: 'number' }).notNull(),
+  mfAllocation: bigint('mf_allocation', { mode: 'number' }).default(0),
+  mfActual: bigint('mf_actual', { mode: 'number' }).default(0),
+  goldTarget: bigint('gold_target', { mode: 'number' }).default(0),
+  goldAllocation: bigint('gold_allocation', { mode: 'number' }).default(0),
+  goldActual: bigint('gold_actual', { mode: 'number' }).default(0),
+  npsTarget: bigint('nps_target', { mode: 'number' }).default(0),
+  npsAllocation: bigint('nps_allocation', { mode: 'number' }).default(0),
+  npsActual: bigint('nps_actual', { mode: 'number' }).default(0),
+  pfTarget: bigint('pf_target', { mode: 'number' }).default(0),
+  pfAllocation: bigint('pf_allocation', { mode: 'number' }).default(0),
+  pfActual: bigint('pf_actual', { mode: 'number' }).default(0),
+  reTarget: bigint('re_target', { mode: 'number' }).default(0),
+  reAllocation: bigint('re_allocation', { mode: 'number' }).default(0),
+  reActual: bigint('re_actual', { mode: 'number' }).default(0),
+  emergencyTarget: bigint('emergency_target', { mode: 'number' }).notNull(),
+  emergencyActual: bigint('emergency_actual', { mode: 'number' }).default(0),
+  deductionTarget: bigint('deduction_target', { mode: 'number' }).notNull(),
+  deductionActual: bigint('deduction_actual', { mode: 'number' }).default(0),
+  totalPlannedInvestment: bigint('total_planned_investment', { mode: 'number' }).notNull(),
+  totalActualInvestment: bigint('total_actual_investment', { mode: 'number' }).default(0),
   status: text('status').$type<PlanStatus>().default('PLANNED'),
   progressPercent: real('progress_percent').default(0),
   notes: text('notes'),
@@ -1241,14 +1241,14 @@ export const priceSnapshots = pgTable('price_snapshots', {
   assetType: text('asset_type').notNull(),
   assetSymbol: text('asset_symbol').notNull(),
   assetName: text('asset_name'),
-  price: integer('price').notNull(),
+  price: bigint('price', { mode: 'number' }).notNull(),
   priceDate: text('price_date').notNull(),
   priceTime: text('price_time'),
-  dayHigh: integer('day_high'),
-  dayLow: integer('day_low'),
+  dayHigh: bigint('day_high', { mode: 'number' }),
+  dayLow: bigint('day_low', { mode: 'number' }),
   volume: integer('volume'),
-  previousClose: integer('previous_close'),
-  change: integer('change'),
+  previousClose: bigint('previous_close', { mode: 'number' }),
+  change: bigint('change', { mode: 'number' }),
   changePercent: real('change_percent'),
   source: text('source').notNull(),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
@@ -1324,14 +1324,14 @@ export const capitalGains = pgTable('capital_gains', {
   assetName: text('asset_name').notNull(),
   purchaseDate: text('purchase_date'),
   saleDate: text('sale_date').notNull(),
-  purchasePrice: integer('purchase_price').notNull(),   // paisa
-  salePrice: integer('sale_price').notNull(),             // paisa
-  capitalGain: integer('capital_gain').notNull(),         // paisa (can be negative)
+  purchasePrice: bigint('purchase_price', { mode: 'number' }).notNull(),   // paisa
+  salePrice: bigint('sale_price', { mode: 'number' }).notNull(),             // paisa
+  capitalGain: bigint('capital_gain', { mode: 'number' }).notNull(),         // paisa (can be negative)
   holdingPeriod: text('holding_period').$type<HoldingPeriod>().notNull(),
-  exemptionApplied: integer('exemption_applied').default(0), // paisa
-  taxableGain: integer('taxable_gain').notNull(),         // paisa
+  exemptionApplied: bigint('exemption_applied', { mode: 'number' }).default(0), // paisa
+  taxableGain: bigint('taxable_gain', { mode: 'number' }).notNull(),         // paisa
   taxRate: real('tax_rate').notNull(),                     // percentage
-  taxAmount: integer('tax_amount').notNull(),             // paisa
+  taxAmount: bigint('tax_amount', { mode: 'number' }).notNull(),             // paisa
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
@@ -1352,7 +1352,7 @@ export const incomeTaxPaid = pgTable('income_tax_paid', {
   id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
   paymentType: text('payment_type').$type<TaxPaymentType>().notNull(),
-  amount: integer('amount').notNull(),   // paisa
+  amount: bigint('amount', { mode: 'number' }).notNull(),   // paisa
   paymentDate: text('payment_date').notNull(),
   referenceNumber: text('reference_number'),
   notes: text('notes'),
@@ -1375,11 +1375,11 @@ export const salaryIncome = pgTable('salary_income', {
   financialYear: text('financial_year').notNull(),
   employerName: text('employer_name').notNull(),
   employerTan: text('employer_tan').notNull(),
-  grossSalaryPaisa: integer('gross_salary_paisa').notNull(),
-  exemptionsPaisa: integer('exemptions_paisa').default(0),
-  section16Paisa: integer('section16_paisa').default(0),
-  taxableSalaryPaisa: integer('taxable_salary_paisa').notNull(),
-  tdsPaisa: integer('tds_paisa').default(0),
+  grossSalaryPaisa: bigint('gross_salary_paisa', { mode: 'number' }).notNull(),
+  exemptionsPaisa: bigint('exemptions_paisa', { mode: 'number' }).default(0),
+  section16Paisa: bigint('section16_paisa', { mode: 'number' }).default(0),
+  taxableSalaryPaisa: bigint('taxable_salary_paisa', { mode: 'number' }).notNull(),
+  tdsPaisa: bigint('tds_paisa', { mode: 'number' }).default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -1402,8 +1402,8 @@ export const tdsCredits = pgTable('tds_credits', {
   deductorTan: text('deductor_tan'),     // present → TDS2 export
   deductorPan: text('deductor_pan'),     // present → TDS3 export
   section: text('section').notNull(),     // e.g. 194J, 194A, 194-IA
-  incomePaisa: integer('income_paisa').notNull(),
-  tdsPaisa: integer('tds_paisa').notNull(),
+  incomePaisa: bigint('income_paisa', { mode: 'number' }).notNull(),
+  tdsPaisa: bigint('tds_paisa', { mode: 'number' }).notNull(),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -1429,7 +1429,7 @@ export const otherSourcesIncome = pgTable('other_sources_income', {
   financialYear: text('financial_year').notNull(),
   source: text('source').$type<OtherIncomeSource>().notNull(),
   description: text('description').notNull(),
-  amountPaisa: integer('amount_paisa').notNull(),
+  amountPaisa: bigint('amount_paisa', { mode: 'number' }).notNull(),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -1467,6 +1467,11 @@ export const fyCloseStatus = pgTable('fy_close_status', {
   category: text('category').notNull(),
   isLocked: boolean('is_locked').default(false),
   lockedAt: timestamp('locked_at', { mode: 'date' }),
+  // Free-form attribution for who locked the FY — added later via manual
+  // ALTER TABLE in personal v1's SQLite (see v1 CLAUDE.md note about
+  // npm run db:push failing on existing indexes). Carried into pfd-saas
+  // schema during Sprint 1.5 Phase 2 so the v1 import round-trips.
+  lockedBy: text('locked_by'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
