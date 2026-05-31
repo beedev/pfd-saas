@@ -114,8 +114,17 @@ const navigation: NavSection[] = [
   },
 ];
 
-export function Sidebar() {
+type SidebarProps = {
+  /** Whether the current user filed GST during onboarding. When false,
+   *  the GST section is hidden — the rest of the app still loads. */
+  hasBusinessProfile: boolean;
+};
+
+export function Sidebar({ hasBusinessProfile }: SidebarProps) {
   const pathname = usePathname();
+  const visibleNav = hasBusinessProfile
+    ? navigation
+    : navigation.filter((s) => s.section !== 'GST');
 
   return (
     <div className="flex h-full w-64 flex-col bg-gray-900">
@@ -128,7 +137,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
-        {navigation.map((section) => (
+        {visibleNav.map((section) => (
           <div key={section.section}>
             <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               {section.section}
