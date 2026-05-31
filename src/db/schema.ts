@@ -140,6 +140,199 @@ export const scheduledJobs = pgTable('scheduled_jobs', {
 export type ScheduledJob = typeof scheduledJobs.$inferSelect;
 export type NewScheduledJob = typeof scheduledJobs.$inferInsert;
 
+/* ─── Health insurance (Sprint 3 Phase 1) ────────────────────────────
+ *
+ * Split from `insurance_policies` (which carries life / term / ULIP /
+ * endowment). Health-specific concerns — sum insured ceiling, NCB
+ * carry, family floater membership, cashless network, waiting periods,
+ * portability — get their own first-class shape.
+ *
+ * Four tables:
+ *   health_insurance_policies      one row per policy contract
+ *   health_insurance_cards         one row per insured member (family
+ *                                  floater = multiple cards per policy)
+ *   health_insurance_claims        per-claim history
+ *   health_insurance_portability   port-in / port-out audit
+ * ───────────────────────────────────────────────────────────────────── */
+
+export type HealthPolicyType =
+  | 'INDIVIDUAL'
+  | 'FAMILY_FLOATER'
+  | 'TOPUP'
+  | 'SUPER_TOPUP'
+  | 'CRITICAL_ILLNESS'
+  | 'OPD_RIDER';
+
+export type HealthPolicyStatus =
+  | 'ACTIVE'
+  | 'LAPSED'
+  | 'PORTED_OUT'
+  | 'CANCELLED'
+  | 'CLAIM_SETTLED';
+
+export type PremiumFrequency =
+  | 'ANNUAL'
+  | 'SEMI_ANNUAL'
+  | 'QUARTERLY'
+  | 'MONTHLY';
+
+export const healthInsurancePolicies = pgTable('health_insurance_policies', {
+  id: serial('id').primaryKey(),
+  insurer: text('insurer').notNull(),
+  policyNumber: text('policy_number').notNull(),
+  policyType: text('policy_type').$type<HealthPolicyType>().notNull(),
+  status: text('status').$type<HealthPolicyStatus>().notNull().default('ACTIVE'),
+  policyHolder: text('policy_holder').notNull(),
+  // Total sum insured for the policy (family floater shares this across members).
+  sumInsuredPaisa: bigint('sum_insured_paisa', { mode: 'number' }).notNull(),
+  // Cumulative bonus already earned (paisa). NCB percent + sum gives the
+  // effective coverage; we store both for display flexibility.
+  cumulativeBonusPaisa: bigint('cumulative_bonus_paisa', { mode: 'number' }).default(0),
+  ncbPercent: real('ncb_percent').default(0),
+  premiumPaisa: bigint('premium_paisa', { mode: 'number' }).notNull(),
+  premiumFrequency: text('premium_frequency').$type<PremiumFrequency>().notNull().default('ANNUAL'),
+  startDate: text('start_date').notNull(),
+  renewalDate: text('renewal_date'),
+  lastRenewedDate: text('last_renewed_date'),
+  // Waiting period for pre-existing diseases. Most retail health policies
+  // have 2-4 years; reduced if ported with served period.
+  waitingPeriodMonths: integer('waiting_period_months').default(48),
+  servedWaitingMonths: integer('served_waiting_months').default(0),
+  // JSON list of declared PEDs (pre-existing diseases) — string array.
+  preExistingDiseases: text('pre_existing_diseases'),
+  cashlessAvailable: boolean('cashless_available').notNull().default(true),
+  networkHospitalCount: integer('network_hospital_count'),
+  // Path to the master policy PDF (uploaded by the user). Cards have
+  // their own image uploads in health_insurance_cards.
+  policyDocumentPath: text('policy_document_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('health_insurance_policies_user_id_idx').on(table.userId),
+  uniqueIndex('health_policy_number_unique').on(table.userId, table.policyNumber),
+]);
+
+export type HealthInsurancePolicy = typeof healthInsurancePolicies.$inferSelect;
+export type NewHealthInsurancePolicy = typeof healthInsurancePolicies.$inferInsert;
+
+export type FamilyRelationship =
+  | 'SELF'
+  | 'SPOUSE'
+  | 'SON'
+  | 'DAUGHTER'
+  | 'FATHER'
+  | 'MOTHER'
+  | 'FATHER_IN_LAW'
+  | 'MOTHER_IN_LAW'
+  | 'OTHER';
+
+/**
+ * Per-member cards. Indian health insurers issue one e-card / physical
+ * card per insured member, each with a unique member ID. A family
+ * floater policy can have 5+ cards.
+ */
+export const healthInsuranceCards = pgTable('health_insurance_cards', {
+  id: serial('id').primaryKey(),
+  policyId: integer('policy_id').notNull().references(() => healthInsurancePolicies.id, { onDelete: 'cascade' }),
+  memberName: text('member_name').notNull(),
+  // The unique member identifier printed on the card. Often what the
+  // hospital types into the cashless portal.
+  memberId: text('member_id'),
+  relationship: text('relationship').$type<FamilyRelationship>().notNull(),
+  dateOfBirth: text('date_of_birth'),
+  gender: text('gender'),
+  // Path to the uploaded card image / PDF, relative to the uploads/ root.
+  // Served via /api/investments/health-insurance/cards/[id]/download.
+  cardImagePath: text('card_image_path'),
+  // Optional direct link to the insurer's portal where this member's
+  // e-card lives (some insurers gate downloads behind login).
+  eCardUrl: text('e_card_url'),
+  validUntil: text('valid_until'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('health_insurance_cards_user_id_idx').on(table.userId),
+  index('health_insurance_cards_policy_idx').on(table.policyId),
+]);
+
+export type HealthInsuranceCard = typeof healthInsuranceCards.$inferSelect;
+export type NewHealthInsuranceCard = typeof healthInsuranceCards.$inferInsert;
+
+export type ClaimStatus =
+  | 'INTIMATED'
+  | 'DOCUMENTS_PENDING'
+  | 'UNDER_REVIEW'
+  | 'APPROVED'
+  | 'PARTIAL'
+  | 'REJECTED'
+  | 'SETTLED';
+
+export const healthInsuranceClaims = pgTable('health_insurance_claims', {
+  id: serial('id').primaryKey(),
+  policyId: integer('policy_id').notNull().references(() => healthInsurancePolicies.id, { onDelete: 'cascade' }),
+  // Which member's claim — optional FK to a card row for traceability,
+  // but stored as plain text so the claim survives a card delete.
+  memberName: text('member_name').notNull(),
+  cardId: integer('card_id').references(() => healthInsuranceCards.id, { onDelete: 'set null' }),
+  claimDate: text('claim_date').notNull(),
+  hospital: text('hospital'),
+  diagnosis: text('diagnosis'),
+  // What the user / hospital asked for.
+  claimAmountPaisa: bigint('claim_amount_paisa', { mode: 'number' }).notNull(),
+  // What the insurer approved (may be 0 if rejected, partial if
+  // sub-limits applied).
+  approvedAmountPaisa: bigint('approved_amount_paisa', { mode: 'number' }),
+  // Cashless vs reimbursement.
+  cashless: boolean('cashless').default(true),
+  status: text('status').$type<ClaimStatus>().notNull().default('INTIMATED'),
+  settlementDate: text('settlement_date'),
+  // Reason for rejection / partial approval, if any.
+  rejectionReason: text('rejection_reason'),
+  documentPath: text('document_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('health_insurance_claims_user_id_idx').on(table.userId),
+  index('health_insurance_claims_policy_idx').on(table.policyId),
+  index('health_insurance_claims_status_idx').on(table.status),
+]);
+
+export type HealthInsuranceClaim = typeof healthInsuranceClaims.$inferSelect;
+export type NewHealthInsuranceClaim = typeof healthInsuranceClaims.$inferInsert;
+
+/**
+ * Portability — when the user ports a health policy from one insurer
+ * to another, the waiting period served at the previous insurer
+ * carries over. We track this so the UI can display the effective
+ * remaining waiting period.
+ */
+export const healthInsurancePortability = pgTable('health_insurance_portability', {
+  id: serial('id').primaryKey(),
+  policyId: integer('policy_id').notNull().references(() => healthInsurancePolicies.id, { onDelete: 'cascade' }),
+  previousInsurer: text('previous_insurer').notNull(),
+  previousPolicyNumber: text('previous_policy_number'),
+  portedDate: text('ported_date').notNull(),
+  portedSumInsuredPaisa: bigint('ported_sum_insured_paisa', { mode: 'number' }),
+  waitingPeriodUsedMonths: integer('waiting_period_used_months').notNull().default(0),
+  ncbCarriedPercent: real('ncb_carried_percent').default(0),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('health_insurance_portability_user_id_idx').on(table.userId),
+  index('health_insurance_portability_policy_idx').on(table.policyId),
+]);
+
+export type HealthInsurancePortability = typeof healthInsurancePortability.$inferSelect;
+export type NewHealthInsurancePortability = typeof healthInsurancePortability.$inferInsert;
+
 /* ─── Domain tables ─────────────────────────────────────────────────── */
 
 // Business Profile (single row for self)

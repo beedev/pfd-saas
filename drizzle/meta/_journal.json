@@ -57,6 +57,13 @@
       "when": 1780225067064,
       "tag": "0007_petite_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780229735441,
+      "tag": "0008_chemical_songbird",
+      "breakpoints": true
     }
   ]
 }
