@@ -6,6 +6,7 @@ import {
   taxDocuments,
   mutualFunds,
   providentFund,
+  smallSavingsAccounts,
   insurancePolicies,
   liabilities,
   npsAccounts,
@@ -78,11 +79,12 @@ export async function GET(request: NextRequest) {
   const fy = searchParams.get('fy') || getCurrentFinancialYear();
 
   try {
-    const [deductions, docs, mfs, pfRows, policies, debts, nps, gold] = await Promise.all([
+    const [deductions, docs, mfs, pfRows, ssRows, policies, debts, nps, gold] = await Promise.all([
       db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id))),
       db.select().from(taxDocuments).where(and(eq(taxDocuments.financialYear, fy), eq(taxDocuments.userId, session.user.id))),
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
       db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
+      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
       db.select().from(liabilities).where(eq(liabilities.userId, session.user.id)),
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
@@ -132,15 +134,30 @@ export async function GET(request: NextRequest) {
       buckets['80C'].sources.push({ source: 'ELSS mutual funds (invested)', amountPaisa: elssTotal });
     }
 
-    // 80C: PPF + EPF employee balance (as indicator — not precise YTD)
+    // 80C: EPF employee balance (indicator — not precise YTD).
+    // Sprint 3 Phase 5 split the table: epf_accounts now holds EPF only;
+    // PPF/VPF moved to small_savings_accounts and are pulled separately.
     const pfContribution = pfRows.reduce((sum, p) => {
-      if (p.accountType === 'PPF' || p.accountType === 'EPF' || p.accountType === 'VPF') {
-        return sum + (p.employeeBalance || 0);
-      }
+      if (p.accountType === 'EPF') return sum + (p.employeeBalance || 0);
       return sum;
     }, 0);
     if (pfContribution > 0) {
-      buckets['80C'].sources.push({ source: 'EPF/PPF/VPF employee balance', amountPaisa: pfContribution });
+      buckets['80C'].sources.push({ source: 'EPF employee balance', amountPaisa: pfContribution });
+    }
+
+    // 80C: Small savings — PPF, VPF, NSC, SSY, SCSS deposits all qualify.
+    // KVP does NOT qualify and is excluded. Same lifetime-balance caveat
+    // applies as EPF above: we surface total_deposited_paisa as an
+    // indicator, not FY-precise contribution.
+    const SS_80C_SCHEMES = ['PPF', 'VPF', 'NSC', 'SSY', 'SCSS'];
+    const ssContribution = ssRows
+      .filter((a) => SS_80C_SCHEMES.includes(a.schemeType))
+      .reduce((s, a) => s + (a.totalDepositedPaisa || 0), 0);
+    if (ssContribution > 0) {
+      buckets['80C'].sources.push({
+        source: 'PPF/VPF/NSC/SSY/SCSS deposits',
+        amountPaisa: ssContribution,
+      });
     }
 
     // 80C: Life insurance premiums (TERM_LIFE, WHOLE_LIFE, ENDOWMENT, ULIP)

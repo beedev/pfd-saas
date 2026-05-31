@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
         goldPaisa: g.GOLD_TOTAL || 0,
         npsPaisa: g.NPS_TOTAL || 0,
         pfPaisa: g.PF_TOTAL || 0,
+        smallSavingsPaisa: g.SS_TOTAL || 0,
         realEstatePaisa: g.RE_TOTAL || 0,
         insurancePaisa: g.INS_TOTAL || 0,
         liabilitiesPaisa: g.LIA_TOTAL || 0,

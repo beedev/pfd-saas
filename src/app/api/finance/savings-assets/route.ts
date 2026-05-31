@@ -28,6 +28,7 @@ import {
   goldHoldings,
   npsAccounts,
   providentFund,
+  smallSavingsAccounts,
   chitFunds,
   insurancePolicies,
   fixedDeposits,
@@ -86,13 +87,14 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const [stocks, mfs, gold, nps, pf, chits, ins, fds, inclusions] =
+    const [stocks, mfs, gold, nps, pf, ss, chits, ins, fds, inclusions] =
       await Promise.all([
         db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
         db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
         db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
         db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
         db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
+        db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
         db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
         db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
         db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
@@ -281,6 +283,37 @@ export async function GET() {
       defaultIncludedAll: true,
     };
 
+    // ─── itemized: small savings (PPF/VPF/NSC/KVP/SSY/SCSS) ────────────
+    // Each ACTIVE/EXTENDED account becomes one item. Projected value uses
+    // current_balance_paisa (conservative — excludes future interest
+    // growth, which the /projection endpoint surfaces separately).
+    const ssItems = ss
+      .filter((a) => a.status === 'ACTIVE' || a.status === 'EXTENDED')
+      .sort((a, b) => a.maturityDate.localeCompare(b.maturityDate))
+      .map((a) => ({
+        id: a.id,
+        label: `${a.schemeType} · ${a.holderName}`,
+        sublabel: [a.accountNumber, `${a.interestRatePercent.toFixed(2)}%`]
+          .filter(Boolean)
+          .join(' · '),
+        maturityDate: a.maturityDate,
+        valuePaisa: a.currentBalancePaisa || 0,
+        included: lookupIncluded(inclusionRows, 'SMALL_SAVINGS', a.id, true),
+      }));
+
+    const ssRow: ItemizedAsset = {
+      kind: 'itemized',
+      assetClass: 'SMALL_SAVINGS',
+      label: 'Small Savings',
+      liquidity: 'locked',
+      basis: 'Current balance (PPF/VPF/NSC/KVP/SSY/SCSS — interest projection in detail page)',
+      items: ssItems,
+      includedSumPaisa: ssItems
+        .filter((i) => i.included)
+        .reduce((s, i) => s + i.valuePaisa, 0),
+      defaultIncludedAll: true,
+    };
+
     const policyRow: ItemizedAsset = {
       kind: 'itemized',
       assetClass: 'INSURANCE_POLICIES',
@@ -301,7 +334,8 @@ export async function GET() {
       chitRow,
       goldRow,
       aggregateRows[2], // NPS
-      aggregateRows[3], // PF
+      aggregateRows[3], // PF (EPF only)
+      ssRow,            // Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS)
       policyRow,
     ];
 
@@ -312,6 +346,7 @@ export async function GET() {
       fdRow.includedSumPaisa +
       chitRow.includedSumPaisa +
       goldRow.includedSumPaisa +
+      ssRow.includedSumPaisa +
       policyRow.includedSumPaisa;
 
     return NextResponse.json({ classes: rows, includedTotalPaisa });

@@ -8,6 +8,7 @@ import {
   goldHoldings,
   npsAccounts,
   providentFund,
+  smallSavingsAccounts,
   realEstate,
   insurancePolicies,
   liabilities,
@@ -41,12 +42,13 @@ export async function POST(_request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const [stocks, mfs, gold, nps, pf, re, ins, debts, chits, fds] = await Promise.all([
+    const [stocks, mfs, gold, nps, pf, ss, re, ins, debts, chits, fds] = await Promise.all([
       db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
       db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
       db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
+      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
       db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
       db.select().from(liabilities).where(eq(liabilities.userId, session.user.id)),
@@ -59,6 +61,10 @@ export async function POST(_request: NextRequest) {
     const goldPaisa = gold.reduce((s, g) => s + (g.currentValue || 0), 0);
     const npsPaisa = nps.reduce((s, n) => s + (n.totalValue || 0), 0);
     const pfPaisa = pf.reduce((s, p) => s + (p.totalBalance || 0), 0);
+    // Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS) — current_balance is the
+    // post-interest book value; trusted because users mark interest
+    // credits as transactions or refresh from projection math.
+    const ssPaisa = ss.reduce((s, a) => s + (a.currentBalancePaisa || 0), 0);
     const rePaisa = re.reduce((s, r) => s + (r.currentValuation || 0), 0);
     const insPaisa = ins
       .filter((p) => CASH_VALUE_POLICIES.includes(p.policyType))
@@ -75,7 +81,7 @@ export async function POST(_request: NextRequest) {
       .reduce((s, f) => s + (f.principalPaisa || 0), 0);
 
     const totalAssets =
-      stocksPaisa + mfPaisa + goldPaisa + npsPaisa + pfPaisa + rePaisa + insPaisa + chitPaisa + fdPaisa;
+      stocksPaisa + mfPaisa + goldPaisa + npsPaisa + pfPaisa + ssPaisa + rePaisa + insPaisa + chitPaisa + fdPaisa;
     const netWorth = totalAssets - liaPaisa;
 
     const today = new Date().toISOString().slice(0, 10);
@@ -84,7 +90,8 @@ export async function POST(_request: NextRequest) {
       { symbol: 'MF_TOTAL', name: 'Mutual Funds', price: mfPaisa },
       { symbol: 'GOLD_TOTAL', name: 'Gold', price: goldPaisa },
       { symbol: 'NPS_TOTAL', name: 'NPS', price: npsPaisa },
-      { symbol: 'PF_TOTAL', name: 'Provident Fund', price: pfPaisa },
+      { symbol: 'PF_TOTAL', name: 'Provident Fund (EPF)', price: pfPaisa },
+      { symbol: 'SS_TOTAL', name: 'Small Savings', price: ssPaisa },
       { symbol: 'RE_TOTAL', name: 'Real Estate', price: rePaisa },
       { symbol: 'INS_TOTAL', name: 'Insurance (cash)', price: insPaisa },
       { symbol: 'CHIT_TOTAL', name: 'Chit Funds', price: chitPaisa },

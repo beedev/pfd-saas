@@ -44,6 +44,14 @@ interface GoldHolding {
 }
 interface NPSAccount { id: number; totalValue: number; totalContributed: number }
 interface PFAccount { id: number; totalBalance: number }
+interface SmallSavingsAccount {
+  id: number;
+  schemeType: 'PPF' | 'VPF' | 'NSC' | 'KVP' | 'SSY' | 'SCSS';
+  currentBalancePaisa: number;
+  totalDepositedPaisa: number;
+  totalInterestPaisa: number;
+  status: 'ACTIVE' | 'MATURED' | 'CLOSED' | 'EXTENDED';
+}
 interface RealEstateProperty { id: number; currentValuation: number; purchasePrice: number; mortgageAmount: number | null; monthlyRent: number | null }
 interface InsurancePolicy { id: number; policyType: string; sumAssured: number; investmentValue: number | null }
 interface LiabilityRow { id: number; type: string; currentBalance: number; monthlyEmi: number }
@@ -62,7 +70,8 @@ const assetClasses = [
   { key: 'mf', title: 'Mutual Funds', description: 'SIPs and lump-sum investments', icon: PiggyBank, href: '/investments/mutual-funds', live: true },
   { key: 'gold', title: 'Gold', description: 'Physical, ETFs, sovereign bonds', icon: Coins, href: '/investments/gold', live: true },
   { key: 'nps', title: 'NPS', description: 'National Pension System', icon: Landmark, href: '/investments/nps', live: true },
-  { key: 'pf', title: 'EPF / PPF / VPF', description: 'Provident fund balances', icon: ShieldCheck, href: '/investments/pf', live: true },
+  { key: 'pf', title: 'EPF', description: 'Employees Provident Fund', icon: ShieldCheck, href: '/investments/pf', live: true },
+  { key: 'small-savings', title: 'Small Savings', description: 'PPF, VPF, NSC, KVP, SSY, SCSS schemes', icon: PiggyBank, href: '/investments/small-savings', live: true },
   { key: 'real-estate', title: 'Real Estate', description: 'Properties and valuations', icon: Home, href: '/investments/real-estate', live: true },
   { key: 'insurance', title: 'Insurance (Life)', description: 'Life, term, ULIP, endowment policies', icon: Umbrella, href: '/investments/insurance', live: true },
   { key: 'health-insurance', title: 'Health Insurance', description: 'Health, top-up, critical illness with cards & claims', icon: HeartPulse, href: '/investments/health-insurance', live: true },
@@ -80,6 +89,7 @@ export default function InvestmentsPage() {
   const [gold, setGold] = useState<GoldHolding[]>([]);
   const [nps, setNps] = useState<NPSAccount[]>([]);
   const [pf, setPf] = useState<PFAccount[]>([]);
+  const [smallSavings, setSmallSavings] = useState<SmallSavingsAccount[]>([]);
   const [props, setProps] = useState<RealEstateProperty[]>([]);
   const [policies, setPolicies] = useState<InsurancePolicy[]>([]);
   const [debts, setDebts] = useState<LiabilityRow[]>([]);
@@ -94,18 +104,20 @@ export default function InvestmentsPage() {
       fetch('/api/investments/gold').then((r) => r.json()),
       fetch('/api/investments/nps').then((r) => r.json()),
       fetch('/api/investments/pf').then((r) => r.json()),
+      fetch('/api/investments/small-savings').then((r) => r.json()),
       fetch('/api/investments/real-estate').then((r) => r.json()),
       fetch('/api/investments/insurance').then((r) => r.json()),
       fetch('/api/investments/liabilities').then((r) => r.json()),
       fetch('/api/investments/chit-funds').then((r) => r.json()),
       fetch('/api/investments/fixed-deposits').then((r) => r.json()),
     ])
-      .then(([stocksData, mfData, goldData, npsData, pfData, reData, insData, liaData, chitData, fdData]) => {
+      .then(([stocksData, mfData, goldData, npsData, pfData, ssData, reData, insData, liaData, chitData, fdData]) => {
         setHoldings(stocksData.holdings || []);
         setFunds(mfData.mutualFunds || []);
         setGold(goldData.gold || []);
         setNps(npsData.accounts || []);
         setPf(pfData.accounts || []);
+        setSmallSavings(ssData.accounts || []);
         setProps(reData.properties || []);
         setPolicies(insData.policies || []);
         setDebts(liaData.liabilities || []);
@@ -137,6 +149,13 @@ export default function InvestmentsPage() {
   const npsContributed = nps.reduce((s, a) => s + a.totalContributed, 0) / 100;
 
   const pfValue = pf.reduce((s, a) => s + a.totalBalance, 0) / 100;
+
+  // Small Savings — show all schemes regardless of status (matured rows
+  // still hold maturity value until the user records the withdrawal).
+  const ssActive = smallSavings.filter((a) => a.status === 'ACTIVE' || a.status === 'EXTENDED');
+  const ssBalance = smallSavings.reduce((s, a) => s + a.currentBalancePaisa, 0) / 100;
+  const ssDeposited = smallSavings.reduce((s, a) => s + a.totalDepositedPaisa, 0) / 100;
+  const ssInterest = smallSavings.reduce((s, a) => s + a.totalInterestPaisa, 0) / 100;
 
   const reValue = props.reduce((s, p) => s + p.currentValuation, 0) / 100;
   const reLoan = props.reduce((s, p) => s + (p.mortgageAmount ?? 0), 0) / 100;
@@ -237,11 +256,24 @@ export default function InvestmentsPage() {
 
           {/* PF */}
           <SummaryCard
-            title="Provident Fund"
+            title="Provident Fund (EPF)"
             icon={<ShieldCheck className="h-5 w-5 text-[var(--dxp-brand)]" />}
             href="/investments/pf"
             count={`${pf.length} account${pf.length === 1 ? '' : 's'}`}
             stats={[{ label: 'Total balance', value: pfValue }]}
+          />
+
+          {/* Small Savings */}
+          <SummaryCard
+            title="Small Savings"
+            icon={<PiggyBank className="h-5 w-5 text-[var(--dxp-brand)]" />}
+            href="/investments/small-savings"
+            count={`${ssActive.length} active · ${smallSavings.length} total`}
+            stats={[
+              { label: 'Current balance', value: ssBalance },
+              { label: 'Deposited', value: ssDeposited },
+              { label: 'Interest earned', value: ssInterest },
+            ]}
           />
 
           {/* Real Estate */}

@@ -1320,10 +1320,14 @@ export const fixedDeposits = pgTable('fixed_deposits', {
 export type FixedDeposit = typeof fixedDeposits.$inferSelect;
 export type NewFixedDeposit = typeof fixedDeposits.$inferInsert;
 
-// 6. Provident Fund (EPF/PPF/VPF)
+// 6. EPF accounts (mandatory provident fund, employer-tied).
+// Sprint 3 Phase 5: renamed from `provident_fund` since PPF/VPF/NSC/
+// KVP/SSY/SCSS now live in `small_savings_accounts`. `account_type`
+// column kept for backwards compat with the migrated data but is
+// effectively always 'EPF' going forward.
 export type PFAccountType = 'EPF' | 'PPF' | 'VPF';
 
-export const providentFund = pgTable('provident_fund', {
+export const epfAccounts = pgTable('epf_accounts', {
   id: serial('id').primaryKey(),
   accountType: text('account_type').$type<PFAccountType>().notNull(),
   accountNumber: text('account_number'),
@@ -1348,12 +1352,103 @@ export const providentFund = pgTable('provident_fund', {
 }, (table) => [
   index('pf_account_type_idx').on(table.accountType),
   index('pf_uan_idx').on(table.universalAccountNumber),
-  index('provident_fund_user_id_idx').on(table.userId),
-  uniqueIndex('provident_fund_account_number_unique').on(table.userId, table.accountNumber),
+  index('epf_accounts_user_id_idx').on(table.userId),
+  uniqueIndex('epf_account_number_unique').on(table.userId, table.accountNumber),
 ]);
 
-export type ProvidentFund = typeof providentFund.$inferSelect;
-export type NewProvidentFund = typeof providentFund.$inferInsert;
+// Backwards-compat alias — older code imports `providentFund`. New
+// code should use `epfAccounts`.
+export const providentFund = epfAccounts;
+export type EpfAccount = typeof epfAccounts.$inferSelect;
+export type NewEpfAccount = typeof epfAccounts.$inferInsert;
+export type ProvidentFund = EpfAccount;
+export type NewProvidentFund = NewEpfAccount;
+
+/* ─── Small savings schemes (Sprint 3 Phase 5) ──────────────────────
+ *
+ * PPF, VPF, NSC, KVP, SSY, SCSS — Indian govt-backed small savings.
+ * Each has distinct lock-in, interest rate, compounding, and tax
+ * treatment. One row per account; transactions ledger records
+ * deposits / interest credits / withdrawals.
+ * ───────────────────────────────────────────────────────────────────── */
+
+export type SmallSavingsScheme = 'PPF' | 'VPF' | 'NSC' | 'KVP' | 'SSY' | 'SCSS';
+export type SmallSavingsStatus = 'ACTIVE' | 'MATURED' | 'CLOSED' | 'EXTENDED';
+export type InterestCompounding = 'YEARLY' | 'HALF_YEARLY' | 'QUARTERLY';
+
+export const smallSavingsAccounts = pgTable('small_savings_accounts', {
+  id: serial('id').primaryKey(),
+  schemeType: text('scheme_type').$type<SmallSavingsScheme>().notNull(),
+  accountNumber: text('account_number').notNull(),
+  // For SSY this is the child's name; for others it's the depositor.
+  holderName: text('holder_name').notNull(),
+  // For SSY: child's DOB (used to derive 21-year maturity from open-date
+  // OR child age 18 — whichever later).
+  holderDob: text('holder_dob'),
+  pan: text('pan'),
+  institution: text('institution'), // bank or post office branch
+  openingDate: text('opening_date').notNull(),
+  maturityDate: text('maturity_date').notNull(),
+  // PPF can be extended in 5-year blocks past 15 years. Tracks how many.
+  extensionBlocksUsed: integer('extension_blocks_used').default(0),
+  // Annual deposit cap as of FY 2025-26: PPF 1.5L, SSY 1.5L, NSC 1.5L
+  // for 80C; KVP/SCSS unlimited. We don't enforce — display only.
+  depositAmountPaisa: bigint('deposit_amount_paisa', { mode: 'number' }).default(0),
+  currentBalancePaisa: bigint('current_balance_paisa', { mode: 'number' }).notNull().default(0),
+  // Annual interest rate as a percentage (e.g. 7.1 for PPF, 8.2 for SSY).
+  // Govt-set and revised quarterly; user updates manually for now.
+  interestRatePercent: real('interest_rate_percent').notNull(),
+  interestCompounding: text('interest_compounding').$type<InterestCompounding>().notNull().default('YEARLY'),
+  // For PPF: 15 years from opening, even if extension blocks add more.
+  // For SCSS: 5 years from opening. NSC: 5 years. KVP: ~115 months.
+  // SSY: 21 years OR child's 21st birthday — whichever later.
+  lockInEndDate: text('lock_in_end_date'),
+  // Total deposits since opening (paisa, useful for tax 80C tracking).
+  totalDepositedPaisa: bigint('total_deposited_paisa', { mode: 'number' }).notNull().default(0),
+  totalInterestPaisa: bigint('total_interest_paisa', { mode: 'number' }).notNull().default(0),
+  status: text('status').$type<SmallSavingsStatus>().notNull().default('ACTIVE'),
+  passbookPath: text('passbook_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('small_savings_user_id_idx').on(table.userId),
+  index('small_savings_scheme_idx').on(table.schemeType),
+  uniqueIndex('small_savings_account_unique').on(table.userId, table.schemeType, table.accountNumber),
+]);
+
+export type SmallSavingsAccount = typeof smallSavingsAccounts.$inferSelect;
+export type NewSmallSavingsAccount = typeof smallSavingsAccounts.$inferInsert;
+
+export type SmallSavingsTxnType =
+  | 'DEPOSIT'
+  | 'INTEREST_CREDIT'
+  | 'WITHDRAWAL'
+  | 'PARTIAL_WITHDRAWAL'
+  | 'MATURITY';
+
+export const smallSavingsTransactions = pgTable('small_savings_transactions', {
+  id: serial('id').primaryKey(),
+  accountId: integer('account_id').notNull().references(() => smallSavingsAccounts.id, { onDelete: 'cascade' }),
+  txnDate: text('txn_date').notNull(),
+  txnType: text('txn_type').$type<SmallSavingsTxnType>().notNull(),
+  amountPaisa: bigint('amount_paisa', { mode: 'number' }).notNull(),
+  // Balance after this transaction (paisa) — denormalised so projections
+  // are cheap.
+  balanceAfterPaisa: bigint('balance_after_paisa', { mode: 'number' }),
+  referenceNumber: text('reference_number'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('small_savings_txn_user_id_idx').on(table.userId),
+  index('small_savings_txn_account_idx').on(table.accountId),
+  index('small_savings_txn_date_idx').on(table.txnDate),
+]);
+
+export type SmallSavingsTransaction = typeof smallSavingsTransactions.$inferSelect;
+export type NewSmallSavingsTransaction = typeof smallSavingsTransactions.$inferInsert;
 
 // 7. Real Estate
 export type PropertyType = 'RESIDENTIAL' | 'COMMERCIAL' | 'LAND' | 'PLOT';

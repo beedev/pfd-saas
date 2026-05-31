@@ -197,11 +197,71 @@ await guardSection('nps_accounts', 'nps_accounts', userId, async () => {
   `;
 });
 
-// ─── provident_fund ────────────────────────────────────────────────
-await guardSection('provident_fund', 'provident_fund', userId, async () => {
+// ─── epf_accounts (renamed from provident_fund — Sprint 3 Phase 5) ──
+await guardSection('epf_accounts', 'epf_accounts', userId, async () => {
   await sql`
-    INSERT INTO provident_fund (user_id, account_type, account_holder, employee_balance, employer_balance, interest_balance, total_balance, total_contributed, interest_earned, opening_date, is_active)
+    INSERT INTO epf_accounts (user_id, account_type, account_holder, employee_balance, employer_balance, interest_balance, total_balance, total_contributed, interest_earned, opening_date, is_active)
     VALUES (${userId}, 'EPF', 'Demo User', ${lakh(8.0)}, ${lakh(8.0)}, ${lakh(2.5)}, ${lakh(18.5)}, ${lakh(16.0)}, ${lakh(2.5)}, ${monthsAgoIso(72)}, true)
+  `;
+});
+
+// ─── small_savings_accounts (PPF, NSC, SSY) ────────────────────────
+// Three representative accounts so the demo lights up the new module.
+//   PPF  — 8-year-old account, regular ₹1.5L/year contribution
+//   NSC  — 2-year-old certificate, single ₹1L deposit
+//   SSY  — daughter's account opened 5 years ago when she was 3
+await guardSection('small_savings_accounts', 'small_savings_accounts', userId, async () => {
+  // PPF: ₹12L contributed over 8 years, ~₹2.8L interest earned at 7.1%
+  await sql`
+    INSERT INTO small_savings_accounts
+      (user_id, scheme_type, account_number, holder_name, pan,
+       institution, opening_date, maturity_date,
+       deposit_amount_paisa, current_balance_paisa, interest_rate_percent,
+       interest_compounding, lock_in_end_date,
+       total_deposited_paisa, total_interest_paisa, status, notes)
+    VALUES
+      (${userId}, 'PPF', ${`PPF000${userId.slice(0,6)}`}, 'Demo User',
+       'DEMOX9999X', 'SBI Velachery Branch',
+       ${monthsAgoIso(96)}, ${monthsAgoIso(96 - 180)},
+       ${15000_00}::bigint, ${lakh(14.8)}::bigint, ${7.1}::real,
+       'YEARLY', ${monthsAgoIso(96 - 180)},
+       ${lakh(12.0)}::bigint, ${lakh(2.8)}::bigint, 'ACTIVE',
+       'Annual ₹1.5L deposit — full 80C utilization')
+  `;
+  // NSC: ₹1L deposit 2 years ago, ~₹16k interest at 7.7%
+  await sql`
+    INSERT INTO small_savings_accounts
+      (user_id, scheme_type, account_number, holder_name, pan,
+       institution, opening_date, maturity_date,
+       deposit_amount_paisa, current_balance_paisa, interest_rate_percent,
+       interest_compounding, lock_in_end_date,
+       total_deposited_paisa, total_interest_paisa, status, notes)
+    VALUES
+      (${userId}, 'NSC', ${`NSC${userId.slice(0,8)}001`}, 'Demo User',
+       'DEMOX9999X', 'India Post Velachery',
+       ${monthsAgoIso(24)}, ${monthsAgoIso(24 - 60)},
+       ${0}::bigint, ${116000_00}::bigint, ${7.7}::real,
+       'YEARLY', ${monthsAgoIso(24 - 60)},
+       ${lakh(1.0)}::bigint, ${16000_00}::bigint, 'ACTIVE',
+       'NSC VIII Issue — 5-year term, interest paid at maturity')
+  `;
+  // SSY: opened 5 years ago for daughter (DOB ~8 years ago),
+  // ₹50k/year contributed, ~₹50k interest at 8.2%
+  await sql`
+    INSERT INTO small_savings_accounts
+      (user_id, scheme_type, account_number, holder_name, holder_dob,
+       institution, opening_date, maturity_date,
+       deposit_amount_paisa, current_balance_paisa, interest_rate_percent,
+       interest_compounding, lock_in_end_date,
+       total_deposited_paisa, total_interest_paisa, status, notes)
+    VALUES
+      (${userId}, 'SSY', ${`SSY${userId.slice(0,8)}D01`}, 'Demo Daughter',
+       ${monthsAgoIso(96)}, 'SBI Velachery Branch',
+       ${monthsAgoIso(60)}, ${monthsAgoIso(60 - 252)},
+       ${50000_00}::bigint, ${lakh(3.0)}::bigint, ${8.2}::real,
+       'YEARLY', ${monthsAgoIso(60 - 252)},
+       ${lakh(2.5)}::bigint, ${50000_00}::bigint, 'ACTIVE',
+       'Sukanya Samriddhi for daughter — matures at her age 21')
   `;
 });
 
