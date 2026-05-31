@@ -134,7 +134,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)));
 
     // Sync to budget — period is the due date month
-    await recomputeCreditCardBudgetForPeriod(numericId, period);
+    await recomputeCreditCardBudgetForPeriod(session.user.id, numericId, period);
 
     return NextResponse.json(
       { expense },

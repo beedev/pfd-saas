@@ -5,6 +5,11 @@
  * - SIP executions → "SIP" budget category
  * - Chit installments → "Chit" budget category
  * - Credit card expenses → card name budget category (e.g., "ICICI")
+ *
+ * Every public function in this file is scoped by `userId` (the caller's
+ * authenticated session user). Reads from multi-tenant tables filter by
+ * userId; writes stamp userId. Without this, a SIP execution from user A
+ * would update user B's budget.
  */
 
 import { db } from '@/db';
@@ -43,19 +48,22 @@ function periodToDateRange(period: string): [string, string] {
 }
 
 /**
- * Find-or-create an EXPENSE budget category, then upsert actualAmount for the period.
+ * Find-or-create the user's EXPENSE budget category, then upsert
+ * actualAmount for the period. All operations are scoped by userId.
  */
 export async function syncBudgetActual(
+  userId: string,
   categoryName: string,
   period: string,
   actualAmountPaisa: number,
 ): Promise<void> {
-  // Find category
+  // Find category (user-scoped)
   let categories = await db
     .select()
     .from(budgetCategories)
     .where(
       and(
+        eq(budgetCategories.userId, userId),
         eq(budgetCategories.name, categoryName),
         eq(budgetCategories.type, 'EXPENSE'),
       ),
@@ -66,6 +74,7 @@ export async function syncBudgetActual(
     categories = await db
       .insert(budgetCategories)
       .values({
+        userId,
         name: categoryName,
         type: 'EXPENSE',
         sortOrder: 99,
@@ -76,12 +85,13 @@ export async function syncBudgetActual(
 
   const categoryId = categories[0].id;
 
-  // Upsert budget entry
+  // Upsert budget entry (user-scoped)
   const existing = await db
     .select()
     .from(budgetEntries)
     .where(
       and(
+        eq(budgetEntries.userId, userId),
         eq(budgetEntries.categoryId, categoryId),
         eq(budgetEntries.period, period),
       ),
@@ -95,9 +105,15 @@ export async function syncBudgetActual(
         actualAmount: actualAmountPaisa,
         updatedAt: new Date(),
       })
-      .where(eq(budgetEntries.id, existing[0].id));
+      .where(
+        and(
+          eq(budgetEntries.userId, userId),
+          eq(budgetEntries.id, existing[0].id),
+        ),
+      );
   } else {
     await db.insert(budgetEntries).values({
+      userId,
       categoryId,
       period,
       plannedAmount: actualAmountPaisa,
@@ -107,9 +123,12 @@ export async function syncBudgetActual(
 }
 
 /**
- * Recompute total SIP spend for a period and sync to budget.
+ * Recompute total SIP spend for a user's period and sync to budget.
  */
-export async function recomputeSipBudgetForPeriod(period: string): Promise<void> {
+export async function recomputeSipBudgetForPeriod(
+  userId: string,
+  period: string,
+): Promise<void> {
   const [from, to] = periodToDateRange(period);
 
   const result = await db
@@ -117,20 +136,24 @@ export async function recomputeSipBudgetForPeriod(period: string): Promise<void>
     .from(investmentTransactions)
     .where(
       and(
+        eq(investmentTransactions.userId, userId),
         eq(investmentTransactions.type, 'SIP_EXECUTION'),
         gte(investmentTransactions.transactionDate, from),
         lt(investmentTransactions.transactionDate, to),
       ),
     );
 
-  await syncBudgetActual('SIP', period, result[0].total);
+  await syncBudgetActual(userId, 'SIP', period, result[0].total);
 }
 
 /**
- * Recompute total chit outflow for a period and sync to budget.
+ * Recompute total chit outflow for a user's period and sync to budget.
  * Uses installmentPaid (the net amount that left the bank).
  */
-export async function recomputeChitBudgetForPeriod(period: string): Promise<void> {
+export async function recomputeChitBudgetForPeriod(
+  userId: string,
+  period: string,
+): Promise<void> {
   const [from, to] = periodToDateRange(period);
 
   const result = await db
@@ -138,30 +161,37 @@ export async function recomputeChitBudgetForPeriod(period: string): Promise<void
     .from(chitFundInstallments)
     .where(
       and(
+        eq(chitFundInstallments.userId, userId),
         gte(chitFundInstallments.paidOn, from),
         lt(chitFundInstallments.paidOn, to),
       ),
     );
 
-  await syncBudgetActual('Chit', period, result[0].total);
+  await syncBudgetActual(userId, 'Chit', period, result[0].total);
 }
 
 /**
- * Recompute credit card spend for a liability+period and sync to budget.
+ * Recompute credit card spend for a user's liability+period and sync to budget.
  * Uses the liability's name as the budget category name.
  *
  * Spend = COALESCE(paid_amount, amount) — when statement is unpaid, the
  * statement total is forecasted; once paid, the actual paid amount replaces it.
  */
 export async function recomputeCreditCardBudgetForPeriod(
+  userId: string,
   liabilityId: number,
   period: string,
 ): Promise<void> {
-  // Look up the liability name
+  // Look up the liability name — must belong to this user
   const liability = await db
     .select({ name: liabilities.name })
     .from(liabilities)
-    .where(eq(liabilities.id, liabilityId));
+    .where(
+      and(
+        eq(liabilities.userId, userId),
+        eq(liabilities.id, liabilityId),
+      ),
+    );
 
   if (liability.length === 0) return;
 
@@ -172,10 +202,11 @@ export async function recomputeCreditCardBudgetForPeriod(
     .from(creditCardExpenses)
     .where(
       and(
+        eq(creditCardExpenses.userId, userId),
         eq(creditCardExpenses.liabilityId, liabilityId),
         eq(creditCardExpenses.period, period),
       ),
     );
 
-  await syncBudgetActual(liability[0].name, period, result[0].total);
+  await syncBudgetActual(userId, liability[0].name, period, result[0].total);
 }

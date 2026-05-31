@@ -115,7 +115,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)));
 
     // Sync budget — replaces forecasted statement total with actual paid amount.
-    await recomputeCreditCardBudgetForPeriod(numericId, target.period);
+    await recomputeCreditCardBudgetForPeriod(session.user.id, numericId, target.period);
 
     return NextResponse.json({
       expense: updated[0],

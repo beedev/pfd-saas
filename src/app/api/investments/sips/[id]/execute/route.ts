@@ -161,7 +161,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .returning();
 
     // Sync SIP spend to budget
-    await recomputeSipBudgetForPeriod(dateToPeriod(executionDate));
+    await recomputeSipBudgetForPeriod(session.user.id, dateToPeriod(executionDate));
 
     return NextResponse.json({
       sip: updatedSipRows[0],

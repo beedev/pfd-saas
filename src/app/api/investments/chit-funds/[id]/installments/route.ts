@@ -148,7 +148,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .returning();
 
     // Sync chit outflow to budget
-    await recomputeChitBudgetForPeriod(dateToPeriod(paidOn));
+    await recomputeChitBudgetForPeriod(session.user.id, dateToPeriod(paidOn));
 
     return NextResponse.json({
       chitFund: updatedChit[0],
