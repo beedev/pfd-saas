@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, alertRules } from '@/db';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -30,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(alertRules)
       .set(updates)
-      .where(eq(alertRules.id, numericId))
+      .where(and(eq(alertRules.id, numericId), eq(alertRules.userId, session.user.id)))
       .returning();
 
     if (!result.length) {
@@ -44,13 +47,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(alertRules).where(eq(alertRules.id, numericId));
+    await db
+      .delete(alertRules)
+      .where(and(eq(alertRules.id, numericId), eq(alertRules.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete alert rule:', err);

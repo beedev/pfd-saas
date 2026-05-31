@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, realEstate } from '@/db';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    const rows = await db.select().from(realEstate).where(eq(realEstate.id, numericId)).limit(1);
+    const rows = await db
+      .select()
+      .from(realEstate)
+      .where(and(eq(realEstate.id, numericId), eq(realEstate.userId, session.user.id)))
+      .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ property: rows[0] });
   } catch (err) {
@@ -23,6 +30,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -32,7 +41,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(realEstate)
-      .where(eq(realEstate.id, numericId))
+      .where(and(eq(realEstate.id, numericId), eq(realEstate.userId, session.user.id)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const current = existing[0];
@@ -79,7 +88,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
         updatedAt: new Date(),
       })
-      .where(eq(realEstate.id, numericId))
+      .where(and(eq(realEstate.id, numericId), eq(realEstate.userId, session.user.id)))
       .returning();
     return NextResponse.json({ property: result[0] });
   } catch (err) {
@@ -89,13 +98,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(realEstate).where(eq(realEstate.id, numericId));
+    await db.delete(realEstate).where(and(eq(realEstate.id, numericId), eq(realEstate.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete property:', err);

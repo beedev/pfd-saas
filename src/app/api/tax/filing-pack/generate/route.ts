@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import JSZip from 'jszip';
 import { db, taxDeductions, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { auth } from '@/auth';
 
 const INR = (paisa: number) => (paisa / 100).toFixed(2);
 
@@ -60,13 +61,15 @@ function generateSummaryCsv(deductions: DeductionRow[]): string {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || getCurrentFinancialYear();
 
   try {
     const [deductions, docs] = await Promise.all([
-      db.select().from(taxDeductions).where(eq(taxDeductions.financialYear, fy)),
-      db.select().from(taxDocuments).where(eq(taxDocuments.financialYear, fy)),
+      db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id))),
+      db.select().from(taxDocuments).where(and(eq(taxDocuments.financialYear, fy), eq(taxDocuments.userId, session.user.id))),
     ]);
 
     const zip = new JSZip();

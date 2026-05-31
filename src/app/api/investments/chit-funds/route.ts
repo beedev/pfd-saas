@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc, eq, asc } from 'drizzle-orm';
+import { and, desc, eq, asc } from 'drizzle-orm';
 import {
   db,
   chitFunds,
   chitFundInstallments,
   type ChitFundStatus,
 } from '@/db';
+import { auth } from '@/auth';
 import { calculateXirr } from '@/lib/finance/xirr';
 import { buildChitCashFlows } from '@/lib/finance/chit-xirr';
 
@@ -18,8 +19,14 @@ function addMonths(iso: string, months: number): string {
 
 // GET /api/investments/chit-funds
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const rows = await db.select().from(chitFunds).orderBy(desc(chitFunds.createdAt));
+    const rows = await db
+      .select()
+      .from(chitFunds)
+      .where(eq(chitFunds.userId, session.user.id))
+      .orderBy(desc(chitFunds.createdAt));
     return NextResponse.json({ chitFunds: rows });
   } catch (error) {
     console.error('Error fetching chit funds:', error);
@@ -46,6 +53,8 @@ export async function GET() {
 //   }
 // }
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -158,6 +167,7 @@ export async function POST(request: NextRequest) {
     const inserted = await db
       .insert(chitFunds)
       .values({
+        userId: session.user.id,
         foremanName,
         schemeName,
         registrationNumber: registrationNumber || null,
@@ -194,6 +204,7 @@ export async function POST(request: NextRequest) {
     if (seedInstallments.length) {
       await db.insert(chitFundInstallments).values(
         seedInstallments.map((s) => ({
+          userId: session.user.id,
           chitFundId: newChit.id,
           monthNumber: s.monthNumber,
           dueDate: s.dueDate,
@@ -213,7 +224,7 @@ export async function POST(request: NextRequest) {
       const insts = await db
         .select()
         .from(chitFundInstallments)
-        .where(eq(chitFundInstallments.chitFundId, newChit.id))
+        .where(and(eq(chitFundInstallments.chitFundId, newChit.id), eq(chitFundInstallments.userId, session.user.id)))
         .orderBy(asc(chitFundInstallments.monthNumber));
 
       const flows = buildChitCashFlows({
@@ -232,7 +243,7 @@ export async function POST(request: NextRequest) {
       const updated = await db
         .update(chitFunds)
         .set({ xirr: xirrPct, updatedAt: new Date() })
-        .where(eq(chitFunds.id, newChit.id))
+        .where(and(eq(chitFunds.id, newChit.id), eq(chitFunds.userId, session.user.id)))
         .returning();
       return NextResponse.json({ chitFund: updated[0] }, { status: 201 });
     }

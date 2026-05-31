@@ -2,20 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, taxDeductions } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { auth } from '@/auth';
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || searchParams.get('financialYear');
   const section = searchParams.get('section');
 
   try {
-    const conds = [] as ReturnType<typeof eq>[];
+    const conds = [eq(taxDeductions.userId, session.user.id)] as ReturnType<typeof eq>[];
     if (fy) conds.push(eq(taxDeductions.financialYear, fy));
     if (section) conds.push(eq(taxDeductions.section, section));
     const rows = await db
       .select()
       .from(taxDeductions)
-      .where(conds.length > 0 ? and(...conds) : undefined)
+      .where(and(...conds))
       .orderBy(desc(taxDeductions.createdAt));
     return NextResponse.json({ deductions: rows });
   } catch (err) {
@@ -43,6 +46,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = (await request.json()) as CreateBody;
     if (!body.section) {
@@ -57,6 +62,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(taxDeductions)
       .values({
+        userId: session.user.id,
         section: body.section,
         description: body.description || body.section,
         deductibleAmount: amountPaisa,

@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, goldHoldings, type GoldPurity } from '@/db';
+import { auth } from '@/auth';
 import { getCurrentGoldRate, calculateValue } from '@/lib/services/ibja';
 import { getQuote } from '@/lib/services/yahoo-finance';
 
 // POST /api/investments/gold/refresh-rates — refresh current rate for every holding
 export async function POST() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const all = await db.select().from(goldHoldings);
+    const all = await db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id));
     let updated = 0;
     let failed = 0;
 
@@ -64,7 +67,7 @@ export async function POST() {
             lastPriceUpdate: lastRateUpdate,
             updatedAt: new Date(),
           })
-          .where(eq(goldHoldings.id, row.id));
+          .where(and(eq(goldHoldings.id, row.id), eq(goldHoldings.userId, session.user.id)));
         updated += 1;
       } catch (err) {
         console.error(`refresh failed for gold ${row.id}:`, err);

@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
 import { db, holdings, mutualFunds } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { auth } from '@/auth';
 
 // Since Phase 6 typically has no SELL data, we compute unrealised gains
 // grouped by holding period (>12 months vs ≤12 months) for equity instruments.
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || getCurrentFinancialYear();
 
   try {
     const [stockRows, mfRows] = await Promise.all([
-      db.select().from(holdings),
-      db.select().from(mutualFunds),
+      db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
+      db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
     ]);
 
     const now = new Date();

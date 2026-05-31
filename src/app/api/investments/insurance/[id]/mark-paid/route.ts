@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, insurancePolicies } from '@/db';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -32,6 +33,8 @@ function advanceDueDate(currentDue: string, frequency: string | null): string {
 }
 
 export async function POST(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -42,7 +45,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(insurancePolicies)
-      .where(eq(insurancePolicies.id, numericId))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
       .limit(1);
 
     if (!rows.length) {
@@ -61,7 +64,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
         nextPremiumDueDate: nextDue,
         updatedAt: new Date(),
       })
-      .where(eq(insurancePolicies.id, numericId))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
       .returning();
 
     return NextResponse.json({

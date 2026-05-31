@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, desc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { db, capitalGains } from '@/db';
+import { auth } from '@/auth';
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
@@ -10,7 +13,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(capitalGains)
-      .where(eq(capitalGains.financialYear, fy))
+      .where(and(eq(capitalGains.financialYear, fy), eq(capitalGains.userId, session.user.id)))
       .orderBy(desc(capitalGains.saleDate));
 
     const ltcgTotal = rows.filter((r) => r.holdingPeriod === 'LTCG').reduce((s, r) => s + r.capitalGain, 0);
@@ -29,6 +32,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -48,6 +53,7 @@ export async function POST(request: NextRequest) {
     const taxPaisa = Math.round(taxableGainPaisa * taxRate / 100);
 
     const result = await db.insert(capitalGains).values({
+      userId: session.user.id,
       financialYear,
       assetType,
       assetName,
@@ -72,10 +78,12 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const id = Number(new URL(request.url).searchParams.get('id'));
     if (!Number.isFinite(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-    await db.delete(capitalGains).where(eq(capitalGains.id, id));
+    await db.delete(capitalGains).where(and(eq(capitalGains.id, id), eq(capitalGains.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[capital-gains DELETE]', err);

@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, vendors } from '@/db';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
+import { auth } from '@/auth';
 
 // GET - List all vendors
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const allVendors = await db
       .select()
       .from(vendors)
+      .where(eq(vendors.userId, session.user.id))
       .orderBy(desc(vendors.createdAt));
 
     return NextResponse.json({ vendors: allVendors });
@@ -24,6 +28,8 @@ export async function GET() {
 
 // POST - Create new vendor
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -74,6 +80,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await db.insert(vendors).values({
+      userId: session.user.id,
       name,
       gstin: validatedGstin,
       pan: pan?.toUpperCase().trim() || null,

@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
 import { db, recurringExpenses, budgetEntries, budgetCategories } from '@/db';
 import { expandRecurringPeriods, Recurrence } from '@/lib/finance/recurring-expand';
+import { auth } from '@/auth';
 
 const VALID_RECURRENCE: Recurrence[] = ['ONE_TIME', 'MONTHLY', 'QUARTERLY', 'ANNUALLY'];
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rows = await db
       .select({
@@ -22,7 +25,13 @@ export async function GET() {
       })
       .from(recurringExpenses)
       .innerJoin(budgetCategories, eq(budgetCategories.id, recurringExpenses.categoryId))
-      .where(eq(recurringExpenses.isActive, true));
+      .where(
+        and(
+          eq(recurringExpenses.isActive, true),
+          eq(recurringExpenses.userId, session.user.id),
+          eq(budgetCategories.userId, session.user.id),
+        ),
+      );
 
     return NextResponse.json({ recurring: rows });
   } catch (err) {
@@ -32,6 +41,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { categoryId, amountRupees, recurrence, startPeriod, endPeriod, notes } = body;
@@ -57,6 +68,7 @@ export async function POST(request: NextRequest) {
     const inserted = await db
       .insert(recurringExpenses)
       .values({
+        userId: session.user.id,
         categoryId,
         amount: amountPaisa,
         recurrence,
@@ -74,12 +86,19 @@ export async function POST(request: NextRequest) {
       const existing = await db
         .select()
         .from(budgetEntries)
-        .where(and(eq(budgetEntries.categoryId, categoryId), eq(budgetEntries.period, period)));
+        .where(
+          and(
+            eq(budgetEntries.categoryId, categoryId),
+            eq(budgetEntries.period, period),
+            eq(budgetEntries.userId, session.user.id),
+          ),
+        );
       if (existing.length > 0) {
         skipped += 1;
         continue;
       }
       await db.insert(budgetEntries).values({
+        userId: session.user.id,
         categoryId,
         period,
         plannedAmount: amountPaisa,
@@ -99,6 +118,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const id = Number(searchParams.get('id'));
@@ -110,7 +131,7 @@ export async function DELETE(request: NextRequest) {
     await db
       .update(recurringExpenses)
       .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(recurringExpenses.id, id));
+      .where(and(eq(recurringExpenses.id, id), eq(recurringExpenses.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete recurring expense:', err);

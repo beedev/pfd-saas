@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, invoices, invoiceItems, customers, businessProfile } from '@/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
+import { auth } from '@/auth';
 
 // GET - Fetch single invoice with items, customer, and business profile
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const invoiceId = parseInt(id, 10);
@@ -20,7 +23,7 @@ export async function GET(
     const invoice = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.id, invoiceId))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
       .limit(1);
 
     if (invoice.length === 0) {
@@ -30,18 +33,22 @@ export async function GET(
     const items = await db
       .select()
       .from(invoiceItems)
-      .where(eq(invoiceItems.invoiceId, invoiceId));
+      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
 
     const customer = invoice[0].customerId
       ? await db
           .select()
           .from(customers)
-          .where(eq(customers.id, invoice[0].customerId))
+          .where(and(eq(customers.id, invoice[0].customerId), eq(customers.userId, session.user.id)))
           .limit(1)
       : [];
 
     // Get business profile for PDF generation
-    const business = await db.select().from(businessProfile).limit(1);
+    const business = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
 
     return NextResponse.json({
       invoice: invoice[0],
@@ -63,6 +70,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const invoiceId = parseInt(id, 10);
@@ -75,7 +84,7 @@ export async function DELETE(
     const invoice = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.id, invoiceId))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
       .limit(1);
 
     if (invoice.length === 0) {
@@ -83,10 +92,10 @@ export async function DELETE(
     }
 
     // Delete invoice items first (foreign key constraint)
-    await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+    await db.delete(invoiceItems).where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
 
     // Delete invoice
-    await db.delete(invoices).where(eq(invoices.id, invoiceId));
+    await db.delete(invoices).where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -103,6 +112,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const invoiceId = parseInt(id, 10);
@@ -115,7 +126,7 @@ export async function PUT(
     const existingInvoice = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.id, invoiceId))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
       .limit(1);
 
     if (existingInvoice.length === 0) {
@@ -140,12 +151,12 @@ export async function PUT(
           status,
           updatedAt: new Date(),
         })
-        .where(eq(invoices.id, invoiceId));
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
 
       const updated = await db
         .select()
         .from(invoices)
-        .where(eq(invoices.id, invoiceId))
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
         .limit(1);
 
       return NextResponse.json({ invoice: updated[0] });
@@ -177,7 +188,11 @@ export async function PUT(
     }
 
     // Get business profile for supplier state
-    const profile = await db.select().from(businessProfile).limit(1);
+    const profile = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
         { error: 'Business profile not set up' },
@@ -190,7 +205,7 @@ export async function PUT(
     const customer = await db
       .select()
       .from(customers)
-      .where(eq(customers.id, customerId))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
       .limit(1);
 
     if (customer.length === 0) {
@@ -293,13 +308,14 @@ export async function PUT(
         returnPeriod,
         updatedAt: new Date(),
       })
-      .where(eq(invoices.id, invoiceId));
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
 
     // Delete existing items and insert new ones
-    await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+    await db.delete(invoiceItems).where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
 
     for (const item of processedItems) {
       await db.insert(invoiceItems).values({
+        userId: session.user.id,
         invoiceId,
         ...item,
       });
@@ -309,13 +325,13 @@ export async function PUT(
     const updated = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.id, invoiceId))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
       .limit(1);
 
     const updatedItems = await db
       .select()
       .from(invoiceItems)
-      .where(eq(invoiceItems.invoiceId, invoiceId));
+      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
 
     return NextResponse.json({
       invoice: updated[0],

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, invoices, invoiceItems, customers, businessProfile } from '@/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
 import { STATE_CODES } from '@/constants/state-codes';
+import { auth } from '@/auth';
 
 interface ImportRow {
   invoiceNumber: string;
@@ -27,6 +28,8 @@ interface ImportResult {
 
 // POST - Import invoices from CSV data
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { rows } = body;
@@ -39,7 +42,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Get business profile for supplier state
-    const profile = await db.select().from(businessProfile).limit(1);
+    const profile = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
         { error: 'Business profile not set up. Please configure your business details first.' },
@@ -109,7 +116,7 @@ export async function POST(request: NextRequest) {
           const existingCustomer = await db
             .select()
             .from(customers)
-            .where(eq(customers.gstin, customerGstin))
+            .where(and(eq(customers.gstin, customerGstin), eq(customers.userId, session.user.id)))
             .limit(1);
 
           if (existingCustomer.length > 0) {
@@ -123,6 +130,7 @@ export async function POST(request: NextRequest) {
           const isB2B = !!customerGstin;
 
           const newCustomer = await db.insert(customers).values({
+            userId: session.user.id,
             name: firstItem.customerName,
             gstin: customerGstin,
             stateCode: customerStateCode,
@@ -239,7 +247,7 @@ export async function POST(request: NextRequest) {
         const existingInvoice = await db
           .select()
           .from(invoices)
-          .where(eq(invoices.invoiceNumber, invoiceNumber))
+          .where(and(eq(invoices.invoiceNumber, invoiceNumber), eq(invoices.userId, session.user.id)))
           .limit(1);
 
         if (existingInvoice.length > 0) {
@@ -253,6 +261,7 @@ export async function POST(request: NextRequest) {
 
         // Create invoice
         const invoiceResult = await db.insert(invoices).values({
+          userId: session.user.id,
           invoiceNumber,
           invoiceDate: parsedDate.toISOString(),
           customerName: firstItem.customerName,
@@ -276,6 +285,7 @@ export async function POST(request: NextRequest) {
         // Create invoice items
         for (const item of processedItems) {
           await db.insert(invoiceItems).values({
+            userId: session.user.id,
             invoiceId,
             ...item,
           });

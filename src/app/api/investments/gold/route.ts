@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db, goldHoldings, type GoldType, type GoldPurity } from '@/db';
+import { auth } from '@/auth';
 import { getCurrentGoldRate, calculateValue } from '@/lib/services/ibja';
 import { getQuote } from '@/lib/services/yahoo-finance';
 
@@ -13,10 +14,13 @@ const VALID_PURITIES: GoldPurity[] = ['999', '995', '916'];
 
 // GET /api/investments/gold — list all gold holdings
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rows = await db
       .select()
       .from(goldHoldings)
+      .where(eq(goldHoldings.userId, session.user.id))
       .orderBy(desc(goldHoldings.createdAt));
     return NextResponse.json({ gold: rows });
   } catch (err) {
@@ -51,6 +55,8 @@ interface CreateBody {
 
 // POST /api/investments/gold — create a gold holding
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = (await request.json()) as CreateBody;
     const {
@@ -155,6 +161,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(goldHoldings)
       .values({
+        userId: session.user.id,
         type,
         // Legacy NOT NULL fields (kept consistent with new fields)
         quantity: grams,

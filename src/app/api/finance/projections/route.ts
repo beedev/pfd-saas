@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, projectionCategories, projectionEntries, carryforwardBalances, financialGoals } from '@/db';
 import { eq, and, gte, lte, asc, desc, sum } from 'drizzle-orm';
+import { auth } from '@/auth';
 
 // GET - Get all projection categories with their current amounts and carryforward
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const asOfPeriod = searchParams.get('asOf'); // MMYYYY format
@@ -22,13 +25,14 @@ export async function GET(request: NextRequest) {
         sortOrder: projectionCategories.sortOrder,
       })
       .from(projectionCategories)
-      .where(eq(projectionCategories.isActive, true))
+      .where(and(eq(projectionCategories.isActive, true), eq(projectionCategories.userId, session.user.id)))
       .orderBy(asc(projectionCategories.sortOrder));
 
     // Get carryforward balances
     const carryforwards = await db
       .select()
-      .from(carryforwardBalances);
+      .from(carryforwardBalances)
+      .where(eq(carryforwardBalances.userId, session.user.id));
 
     // Get all entries for each category (for scheduled funding display)
     const allEntries = await db
@@ -38,6 +42,7 @@ export async function GET(request: NextRequest) {
         period: projectionEntries.period,
       })
       .from(projectionEntries)
+      .where(eq(projectionEntries.userId, session.user.id))
       .orderBy(asc(projectionEntries.period));
 
     // Helper to compare MMYYYY periods properly (returns true if a <= b)
@@ -64,7 +69,7 @@ export async function GET(request: NextRequest) {
     const goals = await db
       .select()
       .from(financialGoals)
-      .where(eq(financialGoals.isActive, true));
+      .where(and(eq(financialGoals.isActive, true), eq(financialGoals.userId, session.user.id)));
 
     // Build response with category details
     const categoryDetails = categories.map(cat => {
@@ -177,6 +182,8 @@ export async function GET(request: NextRequest) {
 
 // POST - Create new projection category
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { name, isInflow, goalId, monthlyAmount, startPeriod, endPeriod } = body;
@@ -190,6 +197,7 @@ export async function POST(request: NextRequest) {
 
     // Create the category
     const [category] = await db.insert(projectionCategories).values({
+      userId: session.user.id,
       name,
       isInflow: isInflow ?? false,
       goalId: goalId ?? null,
@@ -207,7 +215,9 @@ export async function POST(request: NextRequest) {
       );
 
       if (entries.length > 0) {
-        await db.insert(projectionEntries).values(entries);
+        await db.insert(projectionEntries).values(
+          entries.map((e) => ({ ...e, userId: session.user.id }))
+        );
       }
     }
 
@@ -223,6 +233,8 @@ export async function POST(request: NextRequest) {
 
 // PUT - Update projection amount (retrospective or from date)
 export async function PUT(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { categoryId, newAmount, fromPeriod, updateType } = body;
@@ -249,13 +261,13 @@ export async function PUT(request: NextRequest) {
       await db
         .update(projectionEntries)
         .set({ amount: newAmount, updatedAt: new Date() })
-        .where(eq(projectionEntries.categoryId, categoryId));
+        .where(and(eq(projectionEntries.categoryId, categoryId), eq(projectionEntries.userId, session.user.id)));
     } else if (updateType === 'from_date' && fromPeriod) {
       // Get existing entries for this category
       const existingEntries = await db
         .select({ period: projectionEntries.period })
         .from(projectionEntries)
-        .where(eq(projectionEntries.categoryId, categoryId));
+        .where(and(eq(projectionEntries.categoryId, categoryId), eq(projectionEntries.userId, session.user.id)));
 
       const existingPeriods = new Set(existingEntries.map(e => e.period));
 
@@ -279,6 +291,7 @@ export async function PUT(request: NextRequest) {
       const newEntries = allPeriods
         .filter(period => !existingPeriods.has(period))
         .map(period => ({
+          userId: session.user.id,
           categoryId,
           period,
           amount: newAmount,
@@ -302,7 +315,8 @@ export async function PUT(request: NextRequest) {
             .where(
               and(
                 eq(projectionEntries.categoryId, categoryId),
-                eq(projectionEntries.period, period)
+                eq(projectionEntries.period, period),
+                eq(projectionEntries.userId, session.user.id),
               )
             );
         }

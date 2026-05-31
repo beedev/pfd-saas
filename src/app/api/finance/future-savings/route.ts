@@ -2,27 +2,34 @@
  * GET    /api/finance/future-savings  — current plan { lumpSumPaisa, monthlyPaisa }
  * PATCH  /api/finance/future-savings  — body: { lumpSumPaisa?, monthlyPaisa? }
  *
- * Singleton row (id=1). Both fields default to 0 on first load. Either field
+ * Singleton row per user. Both fields default to 0 on first load. Either field
  * may be PATCHed independently; null/undefined values leave that field as-is.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, futureSavingsPlan } from '@/db';
+import { auth } from '@/auth';
 
-async function ensureRow() {
-  const rows = await db.select().from(futureSavingsPlan).limit(1);
+async function ensureRow(userId: string) {
+  const rows = await db
+    .select()
+    .from(futureSavingsPlan)
+    .where(eq(futureSavingsPlan.userId, userId))
+    .limit(1);
   if (rows.length) return rows[0];
   const [inserted] = await db
     .insert(futureSavingsPlan)
-    .values({ lumpSumPaisa: 0, monthlyPaisa: 0 })
+    .values({ userId, lumpSumPaisa: 0, monthlyPaisa: 0 })
     .returning();
   return inserted;
 }
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const plan = await ensureRow();
+    const plan = await ensureRow(session.user.id);
     return NextResponse.json({
       lumpSumPaisa: plan.lumpSumPaisa,
       monthlyPaisa: plan.monthlyPaisa,
@@ -35,6 +42,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const update: Partial<typeof futureSavingsPlan.$inferInsert> = {
@@ -51,11 +60,11 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    const existing = await ensureRow();
+    const existing = await ensureRow(session.user.id);
     const [updated] = await db
       .update(futureSavingsPlan)
       .set(update)
-      .where(eq(futureSavingsPlan.id, existing.id))
+      .where(and(eq(futureSavingsPlan.id, existing.id), eq(futureSavingsPlan.userId, session.user.id)))
       .returning();
 
     return NextResponse.json({

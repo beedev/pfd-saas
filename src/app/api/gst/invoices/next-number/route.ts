@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, invoices, businessProfile } from '@/db';
-import { desc, like, and, gte } from 'drizzle-orm';
+import { desc, like, and, gte, eq } from 'drizzle-orm';
+import { auth } from '@/auth';
 
 /**
  * Get the start date of the current Indian financial year (April 1).
@@ -22,9 +23,15 @@ function currentFySuffix(): string {
 
 // GET - Get next invoice number (resets per financial year)
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     // Get business profile for prefix and start number
-    const profile = await db.select().from(businessProfile).limit(1);
+    const profile = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
     const prefix = profile[0]?.invoicePrefix || '';
     const startNumber = profile[0]?.invoiceStartNumber || 1;
     const fyStart = currentFyStart();
@@ -34,7 +41,7 @@ export async function GET() {
     const latestInvoice = await db
       .select({ invoiceNumber: invoices.invoiceNumber })
       .from(invoices)
-      .where(gte(invoices.invoiceDate, fyStart))
+      .where(and(gte(invoices.invoiceDate, fyStart), eq(invoices.userId, session.user.id)))
       .orderBy(desc(invoices.invoiceNumber))
       .limit(1);
 

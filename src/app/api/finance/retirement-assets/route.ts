@@ -25,6 +25,7 @@ import {
   realEstate,
   type RetirementAssetSelection,
 } from '@/db';
+import { auth } from '@/auth';
 
 const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
 const ANNUITY_FREQ_TO_PER_YEAR: Record<string, number> = {
@@ -80,13 +81,15 @@ function findRow(
 }
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const [nps, pf, ins, props, selections] = await Promise.all([
-      db.select().from(npsAccounts),
-      db.select().from(providentFund),
-      db.select().from(insurancePolicies),
-      db.select().from(realEstate),
-      db.select().from(retirementAssetSelection),
+      db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
+      db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
+      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
+      db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
+      db.select().from(retirementAssetSelection).where(eq(retirementAssetSelection.userId, session.user.id)),
     ]);
 
     // ─── NPS ────────────────────────────────────────────────────────────
@@ -228,6 +231,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { assetClass, sourceId, included, mode, salePriceOverride, npsLumpsumPct, npsAnnuityRatePct, expectedFutureRent } = body;
@@ -245,6 +250,7 @@ export async function PATCH(request: NextRequest) {
         and(
           eq(retirementAssetSelection.assetClass, assetClass),
           eq(retirementAssetSelection.sourceId, sourceId),
+          eq(retirementAssetSelection.userId, session.user.id),
         ),
       )
       .limit(1);
@@ -269,9 +275,10 @@ export async function PATCH(request: NextRequest) {
       await db
         .update(retirementAssetSelection)
         .set(update)
-        .where(eq(retirementAssetSelection.id, existing[0].id));
+        .where(and(eq(retirementAssetSelection.id, existing[0].id), eq(retirementAssetSelection.userId, session.user.id)));
     } else {
       await db.insert(retirementAssetSelection).values({
+        userId: session.user.id,
         assetClass,
         sourceId,
         included: typeof included === 'boolean' ? included : true,

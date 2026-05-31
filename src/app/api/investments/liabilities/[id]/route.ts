@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, liabilities } from '@/db';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -16,7 +19,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(liabilities)
-      .where(eq(liabilities.id, numericId))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ liability: rows[0] });
@@ -27,6 +30,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -36,7 +41,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(liabilities)
-      .where(eq(liabilities.id, numericId))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const current = existing[0];
@@ -65,7 +70,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
         updatedAt: new Date(),
       })
-      .where(eq(liabilities.id, numericId))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
       .returning();
     return NextResponse.json({ liability: result[0] });
   } catch (err) {
@@ -75,13 +80,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(liabilities).where(eq(liabilities.id, numericId));
+    await db.delete(liabilities).where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete liability:', err);

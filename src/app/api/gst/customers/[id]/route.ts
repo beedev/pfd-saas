@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, customers } from '@/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
+import { auth } from '@/auth';
 
 // GET - Fetch single customer
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const customerId = parseInt(id, 10);
@@ -20,7 +23,7 @@ export async function GET(
     const result = await db
       .select()
       .from(customers)
-      .where(eq(customers.id, customerId))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
       .limit(1);
 
     if (result.length === 0) {
@@ -42,6 +45,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const customerId = parseInt(id, 10);
@@ -124,12 +129,12 @@ export async function PUT(
         isB2B,
         updatedAt: new Date(),
       })
-      .where(eq(customers.id, customerId));
+      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)));
 
     const updated = await db
       .select()
       .from(customers)
-      .where(eq(customers.id, customerId))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
       .limit(1);
 
     return NextResponse.json({ customer: updated[0] });
@@ -147,6 +152,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const customerId = parseInt(id, 10);
@@ -155,7 +162,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
     }
 
-    await db.delete(customers).where(eq(customers.id, customerId));
+    await db.delete(customers).where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

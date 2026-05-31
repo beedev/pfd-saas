@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, insurancePolicies, chitFunds } from '@/db';
+import { auth } from '@/auth';
 import { parseStatement, type DocType } from '@/lib/services/statement-parsers';
 
 export const runtime = 'nodejs';
@@ -22,6 +23,8 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const VALID_HINTS: DocType[] = ['lic', 'chit', 'mf-sip'];
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const form = await request.formData();
     const file = form.get('file');
@@ -59,7 +62,7 @@ export async function POST(request: NextRequest) {
           id: insurancePolicies.id,
         })
         .from(insurancePolicies)
-        .where(inArray(insurancePolicies.policyNumber, numbers));
+        .where(and(inArray(insurancePolicies.policyNumber, numbers), eq(insurancePolicies.userId, session.user.id)));
       const map = new Map(existing.map((r) => [r.policyNumber, r.id]));
       annotated = {
         ...parsed,
@@ -78,6 +81,7 @@ export async function POST(request: NextRequest) {
         .from(chitFunds)
         .where(
           and(
+            eq(chitFunds.userId, session.user.id),
             eq(chitFunds.foremanName, parsed.foremanName),
             eq(chitFunds.schemeName, parsed.schemeName),
             parsed.ticketNumber

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, asc } from 'drizzle-orm';
+import { and, eq, asc } from 'drizzle-orm';
 import { db, chitFunds, chitFundInstallments, type ChitPaymentMethod } from '@/db';
+import { auth } from '@/auth';
 import { calculateChitXirrFromSummary } from '@/lib/finance/chit-xirr';
 import { recomputeChitBudgetForPeriod, dateToPeriod } from '@/lib/finance/budget-sync';
 
@@ -15,6 +16,8 @@ function addMonths(iso: string, months: number): string {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -24,7 +27,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(chitFundInstallments)
-      .where(eq(chitFundInstallments.chitFundId, numericId))
+      .where(and(eq(chitFundInstallments.chitFundId, numericId), eq(chitFundInstallments.userId, session.user.id)))
       .orderBy(asc(chitFundInstallments.monthNumber));
     return NextResponse.json({ installments: rows });
   } catch (error) {
@@ -39,6 +42,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 //   paidOn, paymentMethod?, winnerName?, winnerBidDiscountPct?, notes?
 // }
 export async function POST(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -63,7 +68,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     if (!paidOn) return NextResponse.json({ error: 'paidOn required' }, { status: 400 });
 
-    const chitRows = await db.select().from(chitFunds).where(eq(chitFunds.id, numericId)).limit(1);
+    const chitRows = await db
+      .select()
+      .from(chitFunds)
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .limit(1);
     if (!chitRows.length) return NextResponse.json({ error: 'Chit fund not found' }, { status: 404 });
     const chit = chitRows[0];
 
@@ -79,6 +88,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const insertedInstallment = await db
       .insert(chitFundInstallments)
       .values({
+        userId: session.user.id,
         chitFundId: numericId,
         monthNumber: resolvedMonth,
         dueDate: resolvedDueDate,
@@ -134,7 +144,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         xirr: xirrPct,
         updatedAt: new Date(),
       })
-      .where(eq(chitFunds.id, numericId))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
       .returning();
 
     // Sync chit outflow to budget

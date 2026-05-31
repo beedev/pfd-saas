@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, insurancePolicies, type PolicyType, type PolicyStatus } from '@/db';
+import { auth } from '@/auth';
 
 const VALID_POLICY_TYPES: PolicyType[] = [
   'TERM_LIFE',
@@ -22,6 +23,8 @@ interface Params {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -31,7 +34,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(insurancePolicies)
-      .where(eq(insurancePolicies.id, numericId))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ policy: rows[0] });
@@ -69,6 +72,8 @@ function rupeesToPaisa(n: unknown): number | undefined {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -78,7 +83,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(insurancePolicies)
-      .where(eq(insurancePolicies.id, numericId))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const body = (await request.json()) as PatchBody;
@@ -135,7 +140,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(insurancePolicies)
       .set(update)
-      .where(eq(insurancePolicies.id, numericId))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
       .returning();
     return NextResponse.json({ policy: result[0] });
   } catch (err) {
@@ -145,13 +150,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(insurancePolicies).where(eq(insurancePolicies.id, numericId));
+    await db.delete(insurancePolicies).where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete policy:', err);

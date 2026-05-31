@@ -5,8 +5,11 @@ import fs from 'fs';
 import path from 'path';
 import { db, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { auth } from '@/auth';
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || searchParams.get('financialYear');
   const category = searchParams.get('category');
@@ -14,7 +17,7 @@ export async function GET(request: NextRequest) {
   const deductionId = searchParams.get('deductionId');
 
   try {
-    const conds = [] as ReturnType<typeof eq>[];
+    const conds = [eq(taxDocuments.userId, session.user.id)] as ReturnType<typeof eq>[];
     if (fy) conds.push(eq(taxDocuments.financialYear, fy));
     if (category) conds.push(eq(taxDocuments.category, category));
     if (deductionId) conds.push(eq(taxDocuments.deductionId, Number(deductionId)));
@@ -22,7 +25,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(taxDocuments)
-      .where(conds.length > 0 ? and(...conds) : undefined)
+      .where(and(...conds))
       .orderBy(desc(taxDocuments.uploadedAt));
     return NextResponse.json({ documents: rows });
   } catch (err) {
@@ -32,6 +35,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
@@ -59,6 +64,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(taxDocuments)
       .values({
+        userId: session.user.id,
         name: title,
         type: 'OTHER',
         fileSize: buffer.length,

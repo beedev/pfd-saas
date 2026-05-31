@@ -10,6 +10,7 @@ import {
   budgetCategories,
   fyCloseStatus,
 } from '@/db';
+import { auth } from '@/auth';
 
 interface ChecklistItem {
   label: string;
@@ -28,6 +29,8 @@ function fyDates(fy: string): { start: string; end: string } {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
@@ -42,7 +45,7 @@ export async function GET(request: NextRequest) {
     const lockRows = await db
       .select()
       .from(fyCloseStatus)
-      .where(eq(fyCloseStatus.financialYear, fy));
+      .where(and(eq(fyCloseStatus.financialYear, fy), eq(fyCloseStatus.userId, session.user.id)));
     const locks = new Map(lockRows.map((r) => [r.category, r.isLocked ?? false]));
     const isLocked = (cat: string) => locks.get(cat) ?? false;
 
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest) {
     const allInvoices = await db
       .select({ id: invoices.id, status: invoices.status, invoiceDate: invoices.invoiceDate })
       .from(invoices)
-      .where(and(gte(invoices.invoiceDate, start), lte(invoices.invoiceDate, end)));
+      .where(and(gte(invoices.invoiceDate, start), lte(invoices.invoiceDate, end), eq(invoices.userId, session.user.id)));
 
     const finalInvoices = allInvoices.filter((i) => i.status === 'FINAL' || i.status === 'FILED');
     const draftInvoices = allInvoices.filter((i) => i.status === 'DRAFT');
@@ -96,7 +99,7 @@ export async function GET(request: NextRequest) {
     const deductions = await db
       .select({ id: taxDeductions.id, section: taxDeductions.section })
       .from(taxDeductions)
-      .where(eq(taxDeductions.financialYear, fy));
+      .where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id)));
 
     const sections = new Set(deductions.map((d) => d.section));
     if (deductions.length === 0) {
@@ -118,7 +121,7 @@ export async function GET(request: NextRequest) {
         nextPremiumDueDate: insurancePolicies.nextPremiumDueDate,
       })
       .from(insurancePolicies)
-      .where(eq(insurancePolicies.status, 'ACTIVE'));
+      .where(and(eq(insurancePolicies.status, 'ACTIVE'), eq(insurancePolicies.userId, session.user.id)));
 
     const paidInFy = activePolicies.filter(
       (p) => p.lastPremiumPaidDate && p.lastPremiumPaidDate >= start && p.lastPremiumPaidDate <= end,
@@ -148,10 +151,13 @@ export async function GET(request: NextRequest) {
       .select({ period: budgetEntries.period })
       .from(budgetEntries)
       .where(
-        sql`${budgetEntries.period} IN (${sql.join(
-          months.map((m) => sql`${m}`),
-          sql`, `,
-        )})`,
+        and(
+          sql`${budgetEntries.period} IN (${sql.join(
+            months.map((m) => sql`${m}`),
+            sql`, `,
+          )})`,
+          eq(budgetEntries.userId, session.user.id),
+        ),
       );
 
     const budgetMonths = new Set(budgetRows.map((b) => b.period));
@@ -168,7 +174,11 @@ export async function GET(request: NextRequest) {
     }
 
     // 6. Business profile FY updated?
-    const profile = await db.select().from(businessProfile).limit(1);
+    const profile = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
     const profileFy = profile[0]?.financialYear || '';
     const nextFyStart = parseInt(fy.split('-')[0], 10) + 1;
     const nextFy = `${nextFyStart}-${String((nextFyStart + 1) % 100).padStart(2, '0')}`;
@@ -199,6 +209,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { fy } = body;
@@ -209,7 +221,7 @@ export async function POST(request: NextRequest) {
     const startYear = parseInt(fy.split('-')[0], 10);
     const nextFy = `${startYear + 1}-${String((startYear + 2) % 100).padStart(2, '0')}`;
 
-    // Update business profile to next FY
+    // Update business profile to next FY (scoped to this user)
     await db
       .update(businessProfile)
       .set({
@@ -217,7 +229,7 @@ export async function POST(request: NextRequest) {
         invoiceStartNumber: 1, // reset invoice numbering
         updatedAt: new Date(),
       })
-      .where(eq(businessProfile.id, 1));
+      .where(eq(businessProfile.userId, session.user.id));
 
     return NextResponse.json({
       success: true,
@@ -233,6 +245,8 @@ export async function POST(request: NextRequest) {
 
 /** PATCH — lock or unlock a category for a FY */
 export async function PATCH(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { fy, category, lock } = body;
@@ -245,7 +259,11 @@ export async function PATCH(request: NextRequest) {
     const existing = await db
       .select()
       .from(fyCloseStatus)
-      .where(and(eq(fyCloseStatus.financialYear, fy), eq(fyCloseStatus.category, category)));
+      .where(and(
+        eq(fyCloseStatus.financialYear, fy),
+        eq(fyCloseStatus.category, category),
+        eq(fyCloseStatus.userId, session.user.id),
+      ));
 
     if (existing.length > 0) {
       await db
@@ -254,9 +272,10 @@ export async function PATCH(request: NextRequest) {
           isLocked: lock,
           lockedAt: lock ? new Date() : null,
         })
-        .where(eq(fyCloseStatus.id, existing[0].id));
+        .where(and(eq(fyCloseStatus.id, existing[0].id), eq(fyCloseStatus.userId, session.user.id)));
     } else {
       await db.insert(fyCloseStatus).values({
+        userId: session.user.id,
         financialYear: fy,
         category,
         isLocked: lock,

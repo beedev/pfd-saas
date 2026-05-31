@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, budgetCategories, budgetEntries, creditCardExpenses, liabilities, investmentTransactions, chitFundInstallments } from '@/db';
 import { eq, and, gte, lte, lt, asc, sql } from 'drizzle-orm';
+import { auth } from '@/auth';
 
 type CardStatus = 'paid' | 'unpaid' | 'partial';
 
@@ -24,6 +25,8 @@ function deriveStatus(actual: number, planned: number): CardStatus | null {
 // GET - Get budget entries for a period range
 // Query params: from (MMYYYY), to (MMYYYY)
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const from = searchParams.get('from');
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
     const categories = await db
       .select()
       .from(budgetCategories)
-      .where(eq(budgetCategories.isActive, true))
+      .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, session.user.id)))
       .orderBy(asc(budgetCategories.type), asc(budgetCategories.sortOrder));
 
     // Get budget entries with optional period filter
@@ -52,9 +55,12 @@ export async function GET(request: NextRequest) {
       entriesQuery = entriesQuery.where(
         and(
           gte(budgetEntries.period, from),
-          lte(budgetEntries.period, to)
+          lte(budgetEntries.period, to),
+          eq(budgetEntries.userId, session.user.id),
         )
       ) as typeof entriesQuery;
+    } else {
+      entriesQuery = entriesQuery.where(eq(budgetEntries.userId, session.user.id)) as typeof entriesQuery;
     }
 
     const entries = await entriesQuery;
@@ -72,8 +78,14 @@ export async function GET(request: NextRequest) {
           eq(liabilities.type, 'CREDIT_CARD'),
           gte(creditCardExpenses.period, from),
           lte(creditCardExpenses.period, to),
+          eq(creditCardExpenses.userId, session.user.id),
+          eq(liabilities.userId, session.user.id),
         )
-      : eq(liabilities.type, 'CREDIT_CARD');
+      : and(
+          eq(liabilities.type, 'CREDIT_CARD'),
+          eq(creditCardExpenses.userId, session.user.id),
+          eq(liabilities.userId, session.user.id),
+        );
 
     const ccRows = await db
       .select({
@@ -132,6 +144,7 @@ export async function GET(request: NextRequest) {
             eq(investmentTransactions.type, 'SIP_EXECUTION'),
             gte(investmentTransactions.transactionDate, fromDate),
             lt(investmentTransactions.transactionDate, toDate),
+            eq(investmentTransactions.userId, session.user.id),
           ),
         );
       const sipActual = Number(sipRow[0]?.total ?? 0);
@@ -143,6 +156,7 @@ export async function GET(request: NextRequest) {
           and(
             gte(chitFundInstallments.paidOn, fromDate),
             lt(chitFundInstallments.paidOn, toDate),
+            eq(chitFundInstallments.userId, session.user.id),
           ),
         );
       const chitActual = Number(chitRow[0]?.total ?? 0);
@@ -204,6 +218,8 @@ export async function GET(request: NextRequest) {
 
 // POST - Create or update budget entry
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { categoryId, period, plannedAmount, actualAmount, notes } = body;
@@ -222,7 +238,8 @@ export async function POST(request: NextRequest) {
       .where(
         and(
           eq(budgetEntries.categoryId, categoryId),
-          eq(budgetEntries.period, period)
+          eq(budgetEntries.period, period),
+          eq(budgetEntries.userId, session.user.id),
         )
       );
 
@@ -237,11 +254,12 @@ export async function POST(request: NextRequest) {
           notes: notes !== undefined ? notes : existing[0].notes,
           updatedAt: new Date(),
         })
-        .where(eq(budgetEntries.id, existing[0].id))
+        .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, session.user.id)))
         .returning();
     } else {
       // Create new
       result = await db.insert(budgetEntries).values({
+        userId: session.user.id,
         categoryId,
         period,
         plannedAmount: plannedAmount ?? 0,
@@ -262,6 +280,8 @@ export async function POST(request: NextRequest) {
 
 // PUT - Bulk update budget entries
 export async function PUT(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { entries } = body;
@@ -287,7 +307,8 @@ export async function PUT(request: NextRequest) {
         .where(
           and(
             eq(budgetEntries.categoryId, categoryId),
-            eq(budgetEntries.period, period)
+            eq(budgetEntries.period, period),
+            eq(budgetEntries.userId, session.user.id),
           )
         );
 
@@ -301,10 +322,11 @@ export async function PUT(request: NextRequest) {
             notes: notes !== undefined ? notes : existing[0].notes,
             updatedAt: new Date(),
           })
-          .where(eq(budgetEntries.id, existing[0].id))
+          .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, session.user.id)))
           .returning();
       } else {
         result = await db.insert(budgetEntries).values({
+          userId: session.user.id,
           categoryId,
           period,
           plannedAmount: plannedAmount ?? 0,

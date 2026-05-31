@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, otherSourcesIncome } from '@/db';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    const existing = await db.select().from(otherSourcesIncome).where(eq(otherSourcesIncome.id, numericId)).limit(1);
+    const existing = await db.select().from(otherSourcesIncome).where(and(eq(otherSourcesIncome.id, numericId), eq(otherSourcesIncome.userId, session.user.id))).limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const body = await request.json();
@@ -24,7 +27,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (typeof body.amountRupees === 'number') update.amountPaisa = Math.round(body.amountRupees * 100);
     if (typeof body.notes === 'string') update.notes = body.notes || null;
 
-    const result = await db.update(otherSourcesIncome).set(update).where(eq(otherSourcesIncome.id, numericId)).returning();
+    const result = await db.update(otherSourcesIncome).set(update).where(and(eq(otherSourcesIncome.id, numericId), eq(otherSourcesIncome.userId, session.user.id))).returning();
     return NextResponse.json({ entry: result[0] });
   } catch (err) {
     console.error('Failed to update other income:', err);
@@ -33,13 +36,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(otherSourcesIncome).where(eq(otherSourcesIncome.id, numericId));
+    await db.delete(otherSourcesIncome).where(and(eq(otherSourcesIncome.id, numericId), eq(otherSourcesIncome.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete other income:', err);

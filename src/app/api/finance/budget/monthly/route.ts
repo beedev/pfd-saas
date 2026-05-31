@@ -10,6 +10,7 @@ import {
   investmentTransactions,
   chitFundInstallments,
 } from '@/db';
+import { auth } from '@/auth';
 
 type RowStatus = 'paid' | 'unpaid' | 'partial';
 type RowSource = 'cc' | 'sip' | 'chit' | 'manual';
@@ -44,6 +45,8 @@ function deriveStatus(actual: number, planned: number): RowStatus | null {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period');
@@ -56,7 +59,7 @@ export async function GET(request: NextRequest) {
     const categories = await db
       .select()
       .from(budgetCategories)
-      .where(eq(budgetCategories.isActive, true))
+      .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, session.user.id)))
       .orderBy(asc(budgetCategories.type), asc(budgetCategories.sortOrder));
 
     // Materialize recurring templates into budget_entries for this period
@@ -72,7 +75,7 @@ export async function GET(request: NextRequest) {
         endPeriod: recurringExpenses.endPeriod,
       })
       .from(recurringExpenses)
-      .where(eq(recurringExpenses.isActive, true));
+      .where(and(eq(recurringExpenses.isActive, true), eq(recurringExpenses.userId, session.user.id)));
 
     for (const rec of activeRecurring) {
       // Only materialize when the period falls within the template's window.
@@ -93,11 +96,13 @@ export async function GET(request: NextRequest) {
           and(
             eq(budgetEntries.categoryId, rec.categoryId),
             eq(budgetEntries.period, period),
+            eq(budgetEntries.userId, session.user.id),
           ),
         )
         .limit(1);
       if (existing.length === 0) {
         await db.insert(budgetEntries).values({
+          userId: session.user.id,
           categoryId: rec.categoryId,
           period,
           plannedAmount: rec.amount,
@@ -107,14 +112,14 @@ export async function GET(request: NextRequest) {
         await db
           .update(budgetEntries)
           .set({ plannedAmount: rec.amount, updatedAt: new Date() })
-          .where(eq(budgetEntries.id, existing[0].id));
+          .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, session.user.id)));
       }
     }
 
     const entries = await db
       .select()
       .from(budgetEntries)
-      .where(eq(budgetEntries.period, period));
+      .where(and(eq(budgetEntries.period, period), eq(budgetEntries.userId, session.user.id)));
 
     const recurring = await db
       .select({
@@ -123,7 +128,7 @@ export async function GET(request: NextRequest) {
         recurrence: recurringExpenses.recurrence,
       })
       .from(recurringExpenses)
-      .where(eq(recurringExpenses.isActive, true));
+      .where(and(eq(recurringExpenses.isActive, true), eq(recurringExpenses.userId, session.user.id)));
 
     // Pre-compute per-category source overrides
     const ccByName: Record<string, { stmt: number; paid: number }> = {};
@@ -139,6 +144,8 @@ export async function GET(request: NextRequest) {
         and(
           eq(liabilities.type, 'CREDIT_CARD'),
           eq(creditCardExpenses.period, period),
+          eq(creditCardExpenses.userId, session.user.id),
+          eq(liabilities.userId, session.user.id),
         ),
       );
     for (const row of ccRows) {
@@ -156,6 +163,7 @@ export async function GET(request: NextRequest) {
           eq(investmentTransactions.type, 'SIP_EXECUTION'),
           gte(investmentTransactions.transactionDate, from),
           lt(investmentTransactions.transactionDate, to),
+          eq(investmentTransactions.userId, session.user.id),
         ),
       );
     const sipActual = sipActualRow[0]?.total ?? 0;
@@ -167,6 +175,7 @@ export async function GET(request: NextRequest) {
         and(
           gte(chitFundInstallments.paidOn, from),
           lt(chitFundInstallments.paidOn, to),
+          eq(chitFundInstallments.userId, session.user.id),
         ),
       );
     const chitActual = chitActualRow[0]?.total ?? 0;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   db,
   priceSnapshots,
@@ -14,33 +14,44 @@ import {
   chitFunds,
   fixedDeposits,
 } from '@/db';
+import { auth } from '@/auth';
 
 const SOURCE = 'NETWORTH_SNAPSHOT';
 const CASH_VALUE_POLICIES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP'];
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   // Return today's snapshot if present
   const today = new Date().toISOString().slice(0, 10);
   const rows = await db
     .select()
     .from(priceSnapshots)
-    .where(and(eq(priceSnapshots.priceDate, today), eq(priceSnapshots.source, SOURCE)));
+    .where(
+      and(
+        eq(priceSnapshots.priceDate, today),
+        eq(priceSnapshots.source, SOURCE),
+        eq(priceSnapshots.userId, session.user.id),
+      ),
+    );
   return NextResponse.json({ date: today, snapshots: rows, hasToday: rows.length > 0 });
 }
 
 export async function POST(_request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const [stocks, mfs, gold, nps, pf, re, ins, debts, chits, fds] = await Promise.all([
-      db.select().from(holdings),
-      db.select().from(mutualFunds),
-      db.select().from(goldHoldings),
-      db.select().from(npsAccounts),
-      db.select().from(providentFund),
-      db.select().from(realEstate),
-      db.select().from(insurancePolicies),
-      db.select().from(liabilities),
-      db.select().from(chitFunds),
-      db.select().from(fixedDeposits),
+      db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
+      db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
+      db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
+      db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
+      db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
+      db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
+      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
+      db.select().from(liabilities).where(eq(liabilities.userId, session.user.id)),
+      db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
+      db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
     ]);
 
     const stocksPaisa = stocks.reduce((s, h) => s + (h.currentValue || 0), 0);
@@ -89,10 +100,12 @@ export async function POST(_request: NextRequest) {
         .where(
           and(
             eq(priceSnapshots.assetSymbol, r.symbol),
-            eq(priceSnapshots.priceDate, today)
+            eq(priceSnapshots.priceDate, today),
+            eq(priceSnapshots.userId, session.user.id),
           )
         );
       await db.insert(priceSnapshots).values({
+        userId: session.user.id,
         assetType: 'NETWORTH',
         assetSymbol: r.symbol,
         assetName: r.name,

@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, financialGoals, projectionCategories, carryforwardBalances, projectionEntries } from '@/db';
-import { eq, and, gte, lte, asc, sum } from 'drizzle-orm';
+import { eq, and, lte, asc, sum } from 'drizzle-orm';
+import { auth } from '@/auth';
 
 // GET - Get all financial goals with progress calculation
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     // Get all active goals
     const goals = await db
       .select()
       .from(financialGoals)
-      .where(eq(financialGoals.isActive, true))
+      .where(and(eq(financialGoals.isActive, true), eq(financialGoals.userId, session.user.id)))
       .orderBy(asc(financialGoals.id));
 
     // Get projection categories linked to goals
@@ -21,12 +24,13 @@ export async function GET() {
         isInflow: projectionCategories.isInflow,
       })
       .from(projectionCategories)
-      .where(eq(projectionCategories.isActive, true));
+      .where(and(eq(projectionCategories.isActive, true), eq(projectionCategories.userId, session.user.id)));
 
     // Get carryforward balances for linked categories
     const carryforwards = await db
       .select()
-      .from(carryforwardBalances);
+      .from(carryforwardBalances)
+      .where(eq(carryforwardBalances.userId, session.user.id));
 
     // Get current period (MMYYYY format)
     const now = new Date();
@@ -39,7 +43,7 @@ export async function GET() {
         totalAmount: sum(projectionEntries.amount),
       })
       .from(projectionEntries)
-      .where(lte(projectionEntries.period, currentPeriod))
+      .where(and(lte(projectionEntries.period, currentPeriod), eq(projectionEntries.userId, session.user.id)))
       .groupBy(projectionEntries.categoryId);
 
     // Build goal details with progress
@@ -114,6 +118,8 @@ export async function GET() {
 
 // POST - Create a new financial goal
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { name, targetAmount, targetDate, color } = body;
@@ -126,6 +132,7 @@ export async function POST(request: NextRequest) {
     }
 
     const [goal] = await db.insert(financialGoals).values({
+      userId: session.user.id,
       name,
       targetAmount,
       targetDate: targetDate || null,
@@ -146,6 +153,8 @@ export async function POST(request: NextRequest) {
 
 // PUT - Update a financial goal
 export async function PUT(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { id, name, targetAmount, targetDate, color, currentAmount } = body;
@@ -167,7 +176,7 @@ export async function PUT(request: NextRequest) {
     await db
       .update(financialGoals)
       .set(updateData)
-      .where(eq(financialGoals.id, id));
+      .where(and(eq(financialGoals.id, id), eq(financialGoals.userId, session.user.id)));
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -181,6 +190,8 @@ export async function PUT(request: NextRequest) {
 
 // DELETE - Deactivate a financial goal
 export async function DELETE(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
@@ -195,7 +206,7 @@ export async function DELETE(request: NextRequest) {
     await db
       .update(financialGoals)
       .set({ isActive: false })
-      .where(eq(financialGoals.id, parseInt(id)));
+      .where(and(eq(financialGoals.id, parseInt(id)), eq(financialGoals.userId, session.user.id)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

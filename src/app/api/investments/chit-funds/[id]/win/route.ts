@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, asc } from 'drizzle-orm';
+import { and, eq, asc } from 'drizzle-orm';
 import { db, chitFunds, chitFundInstallments } from '@/db';
+import { auth } from '@/auth';
 import { calculateXirr } from '@/lib/finance/xirr';
 import { buildChitCashFlows } from '@/lib/finance/chit-xirr';
 
@@ -21,6 +22,8 @@ interface Params {
 // separately. The prior formula V × (1−bid%) × (1−foreman%) double-counted
 // foreman and is corrected here.
 export async function POST(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -40,7 +43,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     if (!winDate) return NextResponse.json({ error: 'winDate required' }, { status: 400 });
 
-    const rows = await db.select().from(chitFunds).where(eq(chitFunds.id, numericId)).limit(1);
+    const rows = await db
+      .select()
+      .from(chitFunds)
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Chit fund not found' }, { status: 404 });
     const chit = rows[0];
 
@@ -84,7 +91,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const installs = await db
       .select()
       .from(chitFundInstallments)
-      .where(eq(chitFundInstallments.chitFundId, numericId))
+      .where(and(eq(chitFundInstallments.chitFundId, numericId), eq(chitFundInstallments.userId, session.user.id)))
       .orderBy(asc(chitFundInstallments.monthNumber));
 
     const flows = buildChitCashFlows({
@@ -111,7 +118,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         xirr: xirrPct,
         updatedAt: new Date(),
       })
-      .where(eq(chitFunds.id, numericId))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
       .returning();
 
     return NextResponse.json({ chitFund: updated[0] });

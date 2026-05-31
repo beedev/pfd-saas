@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, customers } from '@/db';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
+import { auth } from '@/auth';
 
 // GET - List all customers
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const allCustomers = await db
       .select()
       .from(customers)
+      .where(eq(customers.userId, session.user.id))
       .orderBy(desc(customers.createdAt));
 
     return NextResponse.json({ customers: allCustomers });
@@ -24,6 +28,8 @@ export async function GET() {
 
 // POST - Create new customer
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -84,6 +90,7 @@ export async function POST(request: NextRequest) {
     const validatedSupplyType = validSupplyTypes.includes(supplyType) ? supplyType : 'REGULAR';
 
     const result = await db.insert(customers).values({
+      userId: session.user.id,
       name,
       gstin: validatedGstin,
       pan: pan?.toUpperCase().trim() || null,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   db,
   sips,
@@ -7,6 +7,7 @@ import {
   investmentTransactions,
   type SIPFrequency,
 } from '@/db';
+import { auth } from '@/auth';
 
 // Computes the next execution date based on frequency
 function computeNextExecution(startDate: string, frequency: SIPFrequency): string {
@@ -30,6 +31,8 @@ function computeNextExecution(startDate: string, frequency: SIPFrequency): strin
 
 // GET /api/investments/sips — list all SIPs joined with their MF
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rows = await db
       .select({
@@ -38,6 +41,7 @@ export async function GET() {
       })
       .from(sips)
       .leftJoin(mutualFunds, eq(sips.mutualFundId, mutualFunds.id))
+      .where(eq(sips.userId, session.user.id))
       .orderBy(desc(sips.createdAt));
 
     const enriched = rows.map((row) => {
@@ -69,6 +73,8 @@ export async function GET() {
 
 // POST /api/investments/sips — register a new SIP
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -106,7 +112,7 @@ export async function POST(request: NextRequest) {
     const mfRows = await db
       .select()
       .from(mutualFunds)
-      .where(eq(mutualFunds.id, mutualFundId))
+      .where(and(eq(mutualFunds.id, mutualFundId), eq(mutualFunds.userId, session.user.id)))
       .limit(1);
     if (!mfRows.length) {
       return NextResponse.json({ error: 'mutual fund not found' }, { status: 404 });
@@ -121,6 +127,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(sips)
       .values({
+        userId: session.user.id,
         mutualFundId,
         startingUnits,
         startingNav: startingNavPaisa,
@@ -144,6 +151,7 @@ export async function POST(request: NextRequest) {
     // Insert a starting-position transaction so XIRR has a seed.
     if (startingUnits > 0 && totalInvestedSoFarPaisa > 0) {
       await db.insert(investmentTransactions).values({
+        userId: session.user.id,
         type: 'BUY',
         assetType: 'MUTUAL_FUND',
         assetId: mutualFundId,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, mutualFunds } from '@/db';
+import { auth } from '@/auth';
 import { getByIsin, getBySchemeCode } from '@/lib/services/amfi';
 
 interface Params {
@@ -8,6 +9,8 @@ interface Params {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -18,7 +21,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const result = await db
       .select()
       .from(mutualFunds)
-      .where(eq(mutualFunds.id, numericId))
+      .where(and(eq(mutualFunds.id, numericId), eq(mutualFunds.userId, session.user.id)))
       .limit(1);
 
     if (!result.length) {
@@ -50,6 +53,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -61,7 +66,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(mutualFunds)
-      .where(eq(mutualFunds.id, numericId))
+      .where(and(eq(mutualFunds.id, numericId), eq(mutualFunds.userId, session.user.id)))
       .limit(1);
     if (!existing.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -103,7 +108,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(mutualFunds)
       .set(updates)
-      .where(eq(mutualFunds.id, numericId))
+      .where(and(eq(mutualFunds.id, numericId), eq(mutualFunds.userId, session.user.id)))
       .returning();
 
     return NextResponse.json({ mutualFund: result[0] });
@@ -114,13 +119,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(mutualFunds).where(eq(mutualFunds.id, numericId));
+    await db.delete(mutualFunds).where(and(eq(mutualFunds.id, numericId), eq(mutualFunds.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting mutual fund:', error);

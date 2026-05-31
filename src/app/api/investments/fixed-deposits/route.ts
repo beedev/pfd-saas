@@ -12,7 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import {
   db,
   fixedDeposits,
@@ -20,13 +20,17 @@ import {
   type FDInterestType,
   type FDStatus,
 } from '@/db';
+import { auth } from '@/auth';
 import { calculateFdMaturityPaisa, monthsBetween } from '@/lib/finance/fd';
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rows = await db
       .select()
       .from(fixedDeposits)
+      .where(eq(fixedDeposits.userId, session.user.id))
       .orderBy(desc(fixedDeposits.maturityDate));
     return NextResponse.json({ fixedDeposits: rows });
   } catch (err) {
@@ -39,6 +43,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -97,6 +103,7 @@ export async function POST(request: NextRequest) {
     const [created] = await db
       .insert(fixedDeposits)
       .values({
+        userId: session.user.id,
         bankName: bankName.trim(),
         accountNumber: accountNumber?.trim() || null,
         principalPaisa,

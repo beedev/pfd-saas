@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, taxDeductions } from '@/db';
+import { auth } from '@/auth';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { id } = await params;
   const row = await db
     .select()
     .from(taxDeductions)
-    .where(eq(taxDeductions.id, Number(id)))
+    .where(and(eq(taxDeductions.id, Number(id)), eq(taxDeductions.userId, session.user.id)))
     .limit(1);
   if (row.length === 0) return NextResponse.json({ error: 'not found' }, { status: 404 });
   return NextResponse.json({ deduction: row[0] });
@@ -20,6 +23,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { id } = await params;
   const body = await request.json();
   const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -49,7 +54,7 @@ export async function PATCH(
   const result = await db
     .update(taxDeductions)
     .set(update)
-    .where(eq(taxDeductions.id, Number(id)))
+    .where(and(eq(taxDeductions.id, Number(id)), eq(taxDeductions.userId, session.user.id)))
     .returning();
   if (result.length === 0) return NextResponse.json({ error: 'not found' }, { status: 404 });
   return NextResponse.json({ deduction: result[0] });
@@ -59,7 +64,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   const { id } = await params;
-  await db.delete(taxDeductions).where(eq(taxDeductions.id, Number(id)));
+  await db.delete(taxDeductions).where(and(eq(taxDeductions.id, Number(id)), eq(taxDeductions.userId, session.user.id)));
   return NextResponse.json({ ok: true });
 }

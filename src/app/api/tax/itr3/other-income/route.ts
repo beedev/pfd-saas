@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, desc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { db, otherSourcesIncome } from '@/db';
+import { auth } from '@/auth';
 
 const VALID_SOURCES = ['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST', 'DIVIDEND', 'OTHER'] as const;
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
     const rows = fy
-      ? await db.select().from(otherSourcesIncome).where(eq(otherSourcesIncome.financialYear, fy)).orderBy(desc(otherSourcesIncome.id))
-      : await db.select().from(otherSourcesIncome).orderBy(desc(otherSourcesIncome.id));
+      ? await db.select().from(otherSourcesIncome).where(and(eq(otherSourcesIncome.financialYear, fy), eq(otherSourcesIncome.userId, session.user.id))).orderBy(desc(otherSourcesIncome.id))
+      : await db.select().from(otherSourcesIncome).where(eq(otherSourcesIncome.userId, session.user.id)).orderBy(desc(otherSourcesIncome.id));
     return NextResponse.json({ entries: rows });
   } catch (err) {
     console.error('Failed to list other income:', err);
@@ -19,6 +22,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { financialYear, source, description, amountRupees, notes } = body;
@@ -34,6 +39,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(otherSourcesIncome)
       .values({
+        userId: session.user.id,
         financialYear,
         source,
         description,

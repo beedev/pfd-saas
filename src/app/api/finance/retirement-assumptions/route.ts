@@ -2,26 +2,33 @@
  * GET    /api/finance/retirement-assumptions   — current planning inputs
  * PATCH  /api/finance/retirement-assumptions   — partial update of any field
  *
- * Singleton row (id=1). Defaults applied on first use.
+ * Singleton row per user. Defaults applied on first use.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, retirementAssumptions } from '@/db';
+import { auth } from '@/auth';
 
-async function ensureRow() {
-  const rows = await db.select().from(retirementAssumptions).limit(1);
+async function ensureRow(userId: string) {
+  const rows = await db
+    .select()
+    .from(retirementAssumptions)
+    .where(eq(retirementAssumptions.userId, userId))
+    .limit(1);
   if (rows.length) return rows[0];
   const [inserted] = await db
     .insert(retirementAssumptions)
-    .values({})
+    .values({ userId })
     .returning();
   return inserted;
 }
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const row = await ensureRow();
+    const row = await ensureRow(session.user.id);
     return NextResponse.json(row);
   } catch (err) {
     console.error('GET retirement-assumptions:', err);
@@ -30,9 +37,11 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
-    const existing = await ensureRow();
+    const existing = await ensureRow(session.user.id);
     const update: Partial<typeof retirementAssumptions.$inferInsert> = {
       updatedAt: new Date(),
     };
@@ -75,7 +84,7 @@ export async function PATCH(request: NextRequest) {
     const [updated] = await db
       .update(retirementAssumptions)
       .set(update)
-      .where(eq(retirementAssumptions.id, existing.id))
+      .where(and(eq(retirementAssumptions.id, existing.id), eq(retirementAssumptions.userId, session.user.id)))
       .returning();
     return NextResponse.json(updated);
   } catch (err) {

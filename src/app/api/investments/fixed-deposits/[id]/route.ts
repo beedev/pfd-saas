@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   db,
   fixedDeposits,
@@ -17,6 +17,7 @@ import {
   type FDInterestType,
   type FDStatus,
 } from '@/db';
+import { auth } from '@/auth';
 import { calculateFdMaturityPaisa, monthsBetween } from '@/lib/finance/fd';
 
 interface Params {
@@ -24,6 +25,8 @@ interface Params {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -33,7 +36,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(fixedDeposits)
-      .where(eq(fixedDeposits.id, numericId))
+      .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)))
       .limit(1);
     if (!rows.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -46,6 +49,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -56,7 +61,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       await db
         .select()
         .from(fixedDeposits)
-        .where(eq(fixedDeposits.id, numericId))
+        .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)))
         .limit(1)
     )[0];
     if (!existing) {
@@ -128,7 +133,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const [updated] = await db
       .update(fixedDeposits)
       .set(update)
-      .where(eq(fixedDeposits.id, numericId))
+      .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)))
       .returning();
     return NextResponse.json({ fixedDeposit: updated });
   } catch (err) {
@@ -138,13 +143,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(fixedDeposits).where(eq(fixedDeposits.id, numericId));
+    await db.delete(fixedDeposits).where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('DELETE fd:', err);

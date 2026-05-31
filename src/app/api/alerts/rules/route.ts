@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db, alertRules } from '@/db';
+import { auth } from '@/auth';
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rules = await db
       .select()
       .from(alertRules)
+      .where(eq(alertRules.userId, session.user.id))
       .orderBy(desc(alertRules.createdAt));
     return NextResponse.json({ rules });
   } catch (err) {
@@ -16,6 +20,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { name, category, ruleType, symbol, assetId, operator, threshold, cooldownHours } = body;
@@ -30,6 +36,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(alertRules)
       .values({
+        userId: session.user.id,
         name,
         category,
         ruleType,

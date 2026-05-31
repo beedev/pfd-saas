@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq, desc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { db, salaryIncome } from '@/db';
+import { auth } from '@/auth';
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
 
     const rows = fy
-      ? await db.select().from(salaryIncome).where(eq(salaryIncome.financialYear, fy)).orderBy(desc(salaryIncome.id))
-      : await db.select().from(salaryIncome).orderBy(desc(salaryIncome.id));
+      ? await db.select().from(salaryIncome).where(and(eq(salaryIncome.financialYear, fy), eq(salaryIncome.userId, session.user.id))).orderBy(desc(salaryIncome.id))
+      : await db.select().from(salaryIncome).where(eq(salaryIncome.userId, session.user.id)).orderBy(desc(salaryIncome.id));
 
     return NextResponse.json({ entries: rows });
   } catch (err) {
@@ -19,6 +22,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -43,6 +48,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(salaryIncome)
       .values({
+        userId: session.user.id,
         financialYear,
         employerName,
         employerTan: String(employerTan).trim().toUpperCase(),

@@ -10,6 +10,7 @@ import {
   incomeTaxPaid,
   invoices,
 } from '@/db';
+import { auth } from '@/auth';
 
 /**
  * One-shot summary endpoint for the ITR-3 hub. Returns totals & per-section
@@ -27,6 +28,8 @@ function fyDateRange(fy: string): [string, string] {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
@@ -35,7 +38,7 @@ export async function GET(request: NextRequest) {
     const [startDate, endDate] = fyDateRange(fy);
 
     // Schedule S — salary employers
-    const salaries = await db.select().from(salaryIncome).where(eq(salaryIncome.financialYear, fy));
+    const salaries = await db.select().from(salaryIncome).where(and(eq(salaryIncome.financialYear, fy), eq(salaryIncome.userId, session.user.id)));
     const totalGrossSalary = salaries.reduce((s, r) => s + r.grossSalaryPaisa, 0);
     const totalTaxableSalary = salaries.reduce((s, r) => s + r.taxableSalaryPaisa, 0);
     const totalSalaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
@@ -53,6 +56,7 @@ export async function GET(request: NextRequest) {
         and(
           gte(invoices.invoiceDate, startDate),
           lte(invoices.invoiceDate, endDate),
+          eq(invoices.userId, session.user.id),
         ),
       );
     const consultingTurnover = issuedInvoices.reduce((s, r) => s + (r.taxableAmount ?? 0), 0);
@@ -81,7 +85,7 @@ export async function GET(request: NextRequest) {
       .map(([month, v]) => ({ month, ...v }));
 
     // Schedule CG — capital gains
-    const cgRows = await db.select().from(capitalGains).where(eq(capitalGains.financialYear, fy));
+    const cgRows = await db.select().from(capitalGains).where(and(eq(capitalGains.financialYear, fy), eq(capitalGains.userId, session.user.id)));
     const ltcgEquity = cgRows
       .filter((r) => r.holdingPeriod === 'LTCG' && r.assetType === 'EQUITY_MF')
       .reduce((s, r) => s + r.capitalGain, 0);
@@ -93,11 +97,11 @@ export async function GET(request: NextRequest) {
       .reduce((s, r) => s + r.capitalGain, 0);
 
     // Schedule OS — other sources
-    const osRows = await db.select().from(otherSourcesIncome).where(eq(otherSourcesIncome.financialYear, fy));
+    const osRows = await db.select().from(otherSourcesIncome).where(and(eq(otherSourcesIncome.financialYear, fy), eq(otherSourcesIncome.userId, session.user.id)));
     const totalOtherSources = osRows.reduce((s, r) => s + r.amountPaisa, 0);
 
     // Schedule VI-A — Section 80 deductions (already exists)
-    const deductionRows = await db.select().from(taxDeductions).where(eq(taxDeductions.financialYear, fy));
+    const deductionRows = await db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id)));
     // Prefer Phase-6 amountPaisa, else fallback to legacy deductibleAmount
     const totalDeductions = deductionRows.reduce(
       (s, r) => s + (r.amountPaisa ?? r.deductibleAmount ?? 0),
@@ -105,13 +109,13 @@ export async function GET(request: NextRequest) {
     );
 
     // Non-salary TDS
-    const tdsRows = await db.select().from(tdsCredits).where(eq(tdsCredits.financialYear, fy));
+    const tdsRows = await db.select().from(tdsCredits).where(and(eq(tdsCredits.financialYear, fy), eq(tdsCredits.userId, session.user.id)));
     const totalNonSalaryTds = tdsRows.reduce((s, r) => s + r.tdsPaisa, 0);
     const tds2Count = tdsRows.filter((r) => r.deductorTan).length;
     const tds3Count = tdsRows.filter((r) => r.deductorPan && !r.deductorTan).length;
 
     // Schedule IT — advance + self-assessment tax paid
-    const itRows = await db.select().from(incomeTaxPaid).where(eq(incomeTaxPaid.financialYear, fy));
+    const itRows = await db.select().from(incomeTaxPaid).where(and(eq(incomeTaxPaid.financialYear, fy), eq(incomeTaxPaid.userId, session.user.id)));
     const advanceTaxRows = itRows.filter((r) => r.paymentType === 'ADVANCE_TAX' || r.paymentType === 'SELF_ASSESSMENT');
     const totalAdvanceTax = advanceTaxRows.reduce((s, r) => s + r.amount, 0);
 

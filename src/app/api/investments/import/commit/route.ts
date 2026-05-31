@@ -18,6 +18,7 @@ import {
   chitFunds,
   type PolicyType,
 } from '@/db';
+import { auth } from '@/auth';
 import type {
   LicPaymentMode,
   ChitParsed,
@@ -69,7 +70,7 @@ const VALID_POLICY_TYPES: PolicyType[] = [
   'ACCIDENT',
 ];
 
-async function commitLic(body: LicCommitBody) {
+async function commitLic(body: LicCommitBody, userId: string) {
   const rows = body.data.policies;
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error('policies array is required and must be non-empty');
@@ -96,7 +97,7 @@ async function commitLic(body: LicCommitBody) {
       const existing = await db
         .select({ id: insurancePolicies.id, notes: insurancePolicies.notes })
         .from(insurancePolicies)
-        .where(eq(insurancePolicies.policyNumber, row.policyNumber))
+        .where(and(eq(insurancePolicies.policyNumber, row.policyNumber), eq(insurancePolicies.userId, userId)))
         .limit(1);
 
       if (existing[0]) {
@@ -115,10 +116,11 @@ async function commitLic(body: LicCommitBody) {
             notes: mergedNotes || null,
             updatedAt: new Date(),
           })
-          .where(eq(insurancePolicies.id, existing[0].id));
+          .where(and(eq(insurancePolicies.id, existing[0].id), eq(insurancePolicies.userId, userId)));
         updated++;
       } else {
         await db.insert(insurancePolicies).values({
+          userId,
           policyNumber: row.policyNumber,
           policyType: defaultType,
           status: 'ACTIVE',
@@ -155,7 +157,7 @@ interface ChitCommitBody {
   data: ChitParsed;
 }
 
-async function commitChit(body: ChitCommitBody) {
+async function commitChit(body: ChitCommitBody, userId: string) {
   const c = body.data;
   if (!c.foremanName || !c.schemeName || !c.startDate || !c.expectedEndDate) {
     throw new Error('chit is missing required fields (foremanName / schemeName / startDate / expectedEndDate)');
@@ -167,6 +169,7 @@ async function commitChit(body: ChitCommitBody) {
     .from(chitFunds)
     .where(
       and(
+        eq(chitFunds.userId, userId),
         eq(chitFunds.foremanName, c.foremanName),
         eq(chitFunds.schemeName, c.schemeName),
         c.ticketNumber
@@ -213,13 +216,14 @@ async function commitChit(body: ChitCommitBody) {
         notes: mergedNotes || null,
         updatedAt: new Date(),
       })
-      .where(eq(chitFunds.id, existing[0].id));
+      .where(and(eq(chitFunds.id, existing[0].id), eq(chitFunds.userId, userId)));
     return { inserted: 0, updated: 1, chitId: existing[0].id, xirr: computedXirr };
   }
 
   const inserted = await db
     .insert(chitFunds)
     .values({
+      userId,
       foremanName: c.foremanName,
       schemeName: c.schemeName,
       registrationNumber: c.registrationNumber,
@@ -257,6 +261,8 @@ async function commitChit(body: ChitCommitBody) {
 /* ─── dispatcher ──────────────────────────────────────────────────────── */
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = (await request.json()) as
       | LicCommitBody
@@ -269,11 +275,11 @@ export async function POST(request: NextRequest) {
 
     switch (body.type) {
       case 'lic': {
-        const result = await commitLic(body);
+        const result = await commitLic(body, session.user.id);
         return NextResponse.json({ type: 'lic', ...result });
       }
       case 'chit': {
-        const result = await commitChit(body);
+        const result = await commitChit(body, session.user.id);
         return NextResponse.json({ type: 'chit', ...result });
       }
       case 'mf-sip':

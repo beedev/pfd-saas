@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db, mutualFunds, type MutualFundType } from '@/db';
+import { auth } from '@/auth';
 import { getByIsin, getBySchemeCode } from '@/lib/services/amfi';
 
 // GET /api/investments/mutual-funds — list all mutual fund holdings
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rows = await db
       .select()
       .from(mutualFunds)
+      .where(eq(mutualFunds.userId, session.user.id))
       .orderBy(desc(mutualFunds.createdAt));
     return NextResponse.json({ mutualFunds: rows });
   } catch (error) {
@@ -23,6 +27,8 @@ export async function GET() {
 // POST /api/investments/mutual-funds — create a mutual fund holding
 // Body: { isin?, schemeCode?, schemeName, fundType, folioNumber?, units, nav?, totalInvestment, notes? }
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -92,6 +98,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(mutualFunds)
       .values({
+        userId: session.user.id,
         isin: resolvedIsin,
         schemeName: schemeName.trim(),
         fundType: fundType as MutualFundType,

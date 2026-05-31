@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db, providentFund, type PFAccountType } from '@/db';
+import { auth } from '@/auth';
 
 const VALID_TYPES: PFAccountType[] = ['EPF', 'PPF', 'VPF'];
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const rows = await db.select().from(providentFund).orderBy(desc(providentFund.createdAt));
+    const rows = await db
+      .select()
+      .from(providentFund)
+      .where(eq(providentFund.userId, session.user.id))
+      .orderBy(desc(providentFund.createdAt));
     return NextResponse.json({ accounts: rows });
   } catch (err) {
     console.error('Failed to fetch PF accounts:', err);
@@ -32,6 +39,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = (await request.json()) as CreateBody;
     if (!body.accountType || !VALID_TYPES.includes(body.accountType)) {
@@ -73,6 +82,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(providentFund)
       .values({
+        userId: session.user.id,
         accountType: body.accountType,
         accountNumber: body.accountNumber || null,
         accountHolder: body.accountHolder.trim(),

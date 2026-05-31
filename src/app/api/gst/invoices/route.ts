@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, invoices, invoiceItems, customers, businessProfile } from '@/db';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
+import { auth } from '@/auth';
 
 // GET - List all invoices (supports ?fy=2026-27 or ?period=MMYYYY)
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period'); // MMYYYY format
@@ -18,6 +21,7 @@ export async function GET(request: NextRequest) {
       })
       .from(invoices)
       .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .where(eq(invoices.userId, session.user.id))
       .orderBy(desc(invoices.invoiceDate));
 
     let filteredResults = results;
@@ -53,6 +57,8 @@ export async function GET(request: NextRequest) {
 
 // POST - Create new invoice
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const {
@@ -73,7 +79,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Get business profile for supplier state
-    const profile = await db.select().from(businessProfile).limit(1);
+    const profile = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
         { error: 'Business profile not set up. Please configure your business details first.' },
@@ -86,7 +96,7 @@ export async function POST(request: NextRequest) {
     const customer = await db
       .select()
       .from(customers)
-      .where(eq(customers.id, customerId))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
       .limit(1);
 
     if (customer.length === 0) {
@@ -173,6 +183,7 @@ export async function POST(request: NextRequest) {
 
     // Create invoice
     const invoiceResult = await db.insert(invoices).values({
+      userId: session.user.id,
       invoiceNumber,
       invoiceDate: new Date(invoiceDate).toISOString(),
       customerName: customer[0].name,
@@ -198,6 +209,7 @@ export async function POST(request: NextRequest) {
     // Create invoice items
     for (const item of processedItems) {
       await db.insert(invoiceItems).values({
+        userId: session.user.id,
         invoiceId,
         ...item,
       });
@@ -207,13 +219,13 @@ export async function POST(request: NextRequest) {
     const completeInvoice = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.id, invoiceId))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
       .limit(1);
 
     const invoiceItemsResult = await db
       .select()
       .from(invoiceItems)
-      .where(eq(invoiceItems.invoiceId, invoiceId));
+      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
 
     return NextResponse.json(
       {

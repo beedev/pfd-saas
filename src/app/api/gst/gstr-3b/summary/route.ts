@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, invoices, purchaseInvoices, businessProfile } from '@/db';
 import { eq, and } from 'drizzle-orm';
 import { paisaToRupees } from '@/lib/calculations/tax';
+import { auth } from '@/auth';
 
 interface Section3_1 {
   description: string;
@@ -30,6 +31,8 @@ interface Section6_1 {
 
 // GET - Generate GSTR-3B summary for a period
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period'); // MMYYYY format
@@ -42,7 +45,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Get business profile
-    const profile = await db.select().from(businessProfile).limit(1);
+    const profile = await db
+      .select()
+      .from(businessProfile)
+      .where(eq(businessProfile.userId, session.user.id))
+      .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
         { error: 'Business profile not set up' },
@@ -57,7 +64,8 @@ export async function GET(request: NextRequest) {
       .where(
         and(
           eq(invoices.returnPeriod, period),
-          eq(invoices.status, 'FINAL')
+          eq(invoices.status, 'FINAL'),
+          eq(invoices.userId, session.user.id)
         )
       );
 
@@ -68,7 +76,8 @@ export async function GET(request: NextRequest) {
       .where(
         and(
           eq(purchaseInvoices.returnPeriod, period),
-          eq(purchaseInvoices.itcEligible, true)
+          eq(purchaseInvoices.itcEligible, true),
+          eq(purchaseInvoices.userId, session.user.id)
         )
       );
 

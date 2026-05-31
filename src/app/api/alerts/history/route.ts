@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { db, alertHistory, alertRules } from '@/db';
+import { auth } from '@/auth';
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const rows = await db
       .select({
@@ -17,6 +20,7 @@ export async function GET() {
       })
       .from(alertHistory)
       .leftJoin(alertRules, eq(alertHistory.ruleId, alertRules.id))
+      .where(eq(alertHistory.userId, session.user.id))
       .orderBy(desc(alertHistory.sentAt))
       .limit(100);
 
