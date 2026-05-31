@@ -18,7 +18,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, lte } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db, scheduledJobs, type JobType } from '@/db';
 import { runSipAutoExecute } from '@/lib/cron/sip-auto-execute';
 import { runAlertsCheck } from '@/lib/cron/alerts-check';
@@ -50,16 +50,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const now = new Date();
+  // Compare in DB-time. The migration's NOW() wrote next_run_at as
+  // wall-clock IST (timestamp without timezone). A JS Date sent through
+  // postgres-js serialises to UTC, so a JS-side `<=` comparison fails
+  // even when rows are clearly due in DB-time. Letting Postgres' own
+  // NOW() do the comparison keeps both sides in the same frame.
+  // TODO: migrate every timestamp column to `timestamptz` to remove
+  // this entire class of bug (~80 columns, deferred to a later sprint).
   const due = await db
     .select()
     .from(scheduledJobs)
     .where(
-      and(eq(scheduledJobs.enabled, true), lte(scheduledJobs.nextRunAt, now)),
+      and(
+        eq(scheduledJobs.enabled, true),
+        sql`${scheduledJobs.nextRunAt} <= NOW()`,
+      ),
     );
 
+  const tickStartedAt = new Date().toISOString();
   if (due.length === 0) {
-    return NextResponse.json({ now: now.toISOString(), dispatched: 0, jobs: [] });
+    return NextResponse.json({ now: tickStartedAt, dispatched: 0, jobs: [] });
   }
 
   const reports: JobReport[] = [];
@@ -98,16 +108,17 @@ export async function POST(request: NextRequest) {
     // Update the scheduled_jobs row regardless of success — bump
     // next_run_at so a failing job doesn't immediately re-fire on the
     // very next tick. Sprint 7+ could add an exponential backoff.
-    const advance = ADVANCE_MS[job.jobType] ?? 60 * 60 * 1000;
+    // Compute next_run_at in DB-time (same reason as the WHERE above).
+    const advanceMs = ADVANCE_MS[job.jobType] ?? 60 * 60 * 1000;
     await db
       .update(scheduledJobs)
       .set({
-        lastRunAt: new Date(),
+        lastRunAt: sql`NOW()`,
         lastRunStatus: report.status,
         lastRunError: report.error ?? null,
         runCount: (job.runCount ?? 0) + 1,
-        nextRunAt: new Date(now.getTime() + advance),
-        updatedAt: new Date(),
+        nextRunAt: sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
+        updatedAt: sql`NOW()`,
       })
       .where(eq(scheduledJobs.id, job.id));
 
@@ -115,7 +126,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
-    now: now.toISOString(),
+    now: tickStartedAt,
     dispatched: reports.length,
     jobs: reports,
   });
