@@ -73,6 +73,11 @@ interface Goal {
   inflationPct: number;
 }
 
+interface OtherAllocation {
+  goalId: number;
+  goalName: string;
+  allocationPct: number;
+}
 interface AggregateAsset {
   kind: 'aggregate';
   assetClass: string;
@@ -80,6 +85,8 @@ interface AggregateAsset {
   valuePaisa: number;
   liquidity: 'liquid' | 'semi-liquid' | 'locked';
   included: boolean;
+  allocationPct: number;
+  otherAllocations: OtherAllocation[];
   basis?: string;
 }
 interface ItemizedAsset {
@@ -95,6 +102,8 @@ interface ItemizedAsset {
     maturityDate: string | null;
     valuePaisa: number;
     included: boolean;
+    allocationPct: number;
+    otherAllocations: OtherAllocation[];
   }>;
   includedSumPaisa: number;
 }
@@ -316,18 +325,29 @@ export default function GoalDetailPage() {
     }
   };
 
-  const toggleAsset = async (
+  const updateAsset = async (
     assetClass: string,
     sourceId: number | null,
     next: boolean,
+    allocationPct?: number,
   ) => {
     try {
+      const body: Record<string, unknown> = {
+        assetClass,
+        sourceId,
+        included: next,
+      };
+      if (allocationPct !== undefined) body.allocationPct = allocationPct;
       const r = await fetch(`/api/finance/goals/${goalId}/assets`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetClass, sourceId, included: next }),
+        body: JSON.stringify(body),
       });
-      if (!r.ok) throw new Error('toggle failed');
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast.error(data?.error || 'Update failed');
+        return false;
+      }
       // Reload to recompute mapped total + projection
       const [assetsRes, projRes] = await Promise.all([
         fetch(`/api/finance/goals/${goalId}/assets`).then((r) => r.json()),
@@ -338,8 +358,10 @@ export default function GoalDetailPage() {
       setAssets(assetsRes.classes || []);
       setMappedTotal(assetsRes.includedTotalPaisa || 0);
       setProjection(projRes?.projection ?? null);
+      return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Toggle failed');
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+      return false;
     }
   };
 
@@ -624,7 +646,9 @@ export default function GoalDetailPage() {
               <AssetRowCard
                 key={row.assetClass}
                 row={row}
-                onToggle={(sourceId, next) => toggleAsset(row.assetClass, sourceId, next)}
+                onUpdate={(sourceId, next, allocationPct) =>
+                  updateAsset(row.assetClass, sourceId, next, allocationPct)
+                }
               />
             ))}
           </div>
@@ -915,27 +939,43 @@ function Detail({
 
 function AssetRowCard({
   row,
-  onToggle,
+  onUpdate,
 }: {
   row: AssetRow;
-  onToggle: (sourceId: number | null, next: boolean) => void;
+  onUpdate: (
+    sourceId: number | null,
+    next: boolean,
+    allocationPct?: number,
+  ) => Promise<boolean> | void;
 }) {
   if (row.kind === 'aggregate') {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--dxp-border)] p-3">
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-[var(--dxp-text)]">{row.label}</p>
-          <p className="text-xs text-[var(--dxp-text-secondary)]">
-            {formatINRCompact(row.valuePaisa)} · {row.liquidity}
-            {row.basis ? ` · ${row.basis}` : ''}
-          </p>
+      <div className="rounded-md border border-[var(--dxp-border)] p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-[var(--dxp-text)]">{row.label}</p>
+            <p className="text-xs text-[var(--dxp-text-secondary)]">
+              {formatINRCompact(row.valuePaisa)} · {row.liquidity}
+              {row.basis ? ` · ${row.basis}` : ''}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+            {row.included && (
+              <AllocationInput
+                allocationPct={row.allocationPct}
+                otherAllocations={row.otherAllocations}
+                valuePaisa={row.valuePaisa}
+                onCommit={(pct) => onUpdate(null, true, pct)}
+              />
+            )}
+            <input
+              type="checkbox"
+              checked={row.included}
+              onChange={(e) => onUpdate(null, e.target.checked)}
+              className="h-5 w-5 cursor-pointer accent-[var(--dxp-brand)]"
+            />
+          </div>
         </div>
-        <input
-          type="checkbox"
-          checked={row.included}
-          onChange={(e) => onToggle(null, e.target.checked)}
-          className="h-5 w-5 cursor-pointer accent-[var(--dxp-brand)]"
-        />
       </div>
     );
   }
@@ -971,13 +1011,28 @@ function AssetRowCard({
       ),
     },
     {
+      key: 'allocationPct',
+      header: 'Allocation',
+      render: (_v, it) =>
+        it.included ? (
+          <AllocationInput
+            allocationPct={it.allocationPct}
+            otherAllocations={it.otherAllocations}
+            valuePaisa={it.valuePaisa}
+            onCommit={(pct) => onUpdate(it.id, true, pct)}
+          />
+        ) : (
+          <span className="text-xs text-[var(--dxp-text-muted)]">—</span>
+        ),
+    },
+    {
       key: 'included',
       header: 'Include',
       render: (_v, it) => (
         <input
           type="checkbox"
           checked={it.included}
-          onChange={(e) => onToggle(it.id, e.target.checked)}
+          onChange={(e) => onUpdate(it.id, e.target.checked)}
           className="h-5 w-5 cursor-pointer accent-[var(--dxp-brand)]"
         />
       ),
@@ -1000,6 +1055,88 @@ function AssetRowCard({
       ) : (
         <DataTable data={row.items} columns={columns} emptyMessage="No items" />
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline percentage input with claimed-by subtitle. Commits on blur or
+ * Enter. Shows inline validation if the combined allocation would
+ * exceed 100%, but does NOT auto-clamp — leaves the choice to the user.
+ */
+function AllocationInput({
+  allocationPct,
+  otherAllocations,
+  valuePaisa,
+  onCommit,
+}: {
+  allocationPct: number;
+  otherAllocations: OtherAllocation[];
+  valuePaisa: number;
+  onCommit: (pct: number) => Promise<boolean> | void;
+}) {
+  const [value, setValue] = useState<string>(String(allocationPct));
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset local state when server-side value changes
+  useEffect(() => {
+    setValue(String(allocationPct));
+    setError(null);
+  }, [allocationPct]);
+
+  const otherSum = otherAllocations.reduce((s, o) => s + o.allocationPct, 0);
+  const earmarkedPaisa = Math.round((valuePaisa * allocationPct) / 100);
+  const unallocated = Math.max(0, 100 - allocationPct - otherSum);
+
+  const commit = () => {
+    const pct = parseFloat(value);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      setError('Must be 0–100');
+      return;
+    }
+    if (otherSum + pct > 100 + 0.001) {
+      const over = otherSum + pct - 100;
+      setError(`Total across goals would be ${otherSum + pct}% — reduce by ${over}%.`);
+      return;
+    }
+    if (pct === allocationPct) return; // no-op
+    setError(null);
+    void onCommit(pct);
+  };
+
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <div className="flex items-center gap-1">
+        <Input
+          type="number"
+          min={0}
+          max={100}
+          step={1}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
+            }
+          }}
+          className="w-20"
+        />
+        <span className="text-xs text-[var(--dxp-text-secondary)]">%</span>
+      </div>
+      <p className="text-xs text-[var(--dxp-text-secondary)]">
+        {formatINRCompact(earmarkedPaisa)} earmarked here
+      </p>
+      {otherAllocations.length > 0 && (
+        <p className="text-xs text-[var(--dxp-text-muted)]">
+          Also:{' '}
+          {otherAllocations
+            .map((o) => `${o.allocationPct}% to ${o.goalName}`)
+            .join(', ')}
+          {unallocated > 0 ? ` · ${unallocated}% unallocated` : ''}
+        </p>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }

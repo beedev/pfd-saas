@@ -977,6 +977,14 @@ export const savingsAssetInclusion = pgTable('savings_asset_inclusion', {
   // insurance_policies.id) or one row per chit fund (sourceId = chit_funds.id).
   sourceId: integer('source_id'),
   included: boolean('included').notNull().default(false),
+  /** Sprint 3.5 follow-up — percentage of the asset's value allocated
+   *  to this goal. Range 0–100. Across all goal-specific rows for the
+   *  same (user, asset_class, source_id), the sum SHOULD be ≤ 100;
+   *  remainder is "unallocated" and only contributes to global savings
+   *  (the goal_id IS NULL toggle used by /projections). Enforced at the
+   *  API layer (sum check on PATCH); the DB has a per-row CHECK only.
+   *  Goal projection math weighs asset_value × allocation_pct / 100. */
+  allocationPct: real('allocation_pct').notNull().default(100),
   goalId: integer('goal_id').references(() => financialGoals.id, { onDelete: 'cascade' }),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

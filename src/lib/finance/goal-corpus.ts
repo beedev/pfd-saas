@@ -32,6 +32,9 @@ export interface CorpusContext {
     sourceId: number | null;
     included: boolean;
     goalId: number | null;
+    /** 0–100 — fraction of this asset's value that flows to this goal.
+     *  Defaults to 100 when no allocation has been set explicitly. */
+    allocationPct: number;
   }>;
   holdingsTotal: number;
   mfTotal: number;
@@ -85,6 +88,7 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
       sourceId: r.sourceId ?? null,
       included: r.included,
       goalId: r.goalId ?? null,
+      allocationPct: r.allocationPct ?? 100,
     })),
     holdingsTotal: stocks.reduce((s, h) => s + (h.currentValue || 0), 0),
     mfTotal: mfs.reduce((s, f) => s + (f.currentValue || 0), 0),
@@ -120,43 +124,48 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
  * goal. Per-class semantics:
  *   STOCKS/MUTUAL_FUNDS/NPS/PF → aggregate (sourceId NULL counts all)
  *   GOLD/FIXED_DEPOSITS/SMALL_SAVINGS/CHIT_FUNDS/INSURANCE_POLICIES → per-item
+ *
+ * Each contribution is weighted by the inclusion row's allocation_pct.
+ * E.g. if MFs (₹10L) are 50% to House and 50% to Education, each goal
+ * sees ₹5L from MFs. allocationPct defaults to 100 for legacy rows.
  */
 export function corpusForGoal(ctx: CorpusContext, goalId: number): number {
   const incs = ctx.inclusions.filter((r) => r.goalId === goalId && r.included);
 
   let total = 0;
   for (const r of incs) {
+    const weight = (r.allocationPct ?? 100) / 100;
     switch (r.assetClass) {
       case 'STOCKS':
-        if (r.sourceId === null) total += ctx.holdingsTotal;
+        if (r.sourceId === null) total += ctx.holdingsTotal * weight;
         break;
       case 'MUTUAL_FUNDS':
-        if (r.sourceId === null) total += ctx.mfTotal;
+        if (r.sourceId === null) total += ctx.mfTotal * weight;
         break;
       case 'NPS':
-        if (r.sourceId === null) total += ctx.npsTotal;
+        if (r.sourceId === null) total += ctx.npsTotal * weight;
         break;
       case 'PF':
-        if (r.sourceId === null) total += ctx.pfTotal;
+        if (r.sourceId === null) total += ctx.pfTotal * weight;
         break;
       case 'GOLD':
-        total += ctx.golds.find((x) => x.id === r.sourceId)?.value ?? 0;
+        total += (ctx.golds.find((x) => x.id === r.sourceId)?.value ?? 0) * weight;
         break;
       case 'FIXED_DEPOSITS':
-        total += ctx.fds.find((x) => x.id === r.sourceId)?.value ?? 0;
+        total += (ctx.fds.find((x) => x.id === r.sourceId)?.value ?? 0) * weight;
         break;
       case 'SMALL_SAVINGS':
-        total += ctx.ssas.find((x) => x.id === r.sourceId)?.value ?? 0;
+        total += (ctx.ssas.find((x) => x.id === r.sourceId)?.value ?? 0) * weight;
         break;
       case 'CHIT_FUNDS':
-        total += ctx.chits.find((x) => x.id === r.sourceId)?.value ?? 0;
+        total += (ctx.chits.find((x) => x.id === r.sourceId)?.value ?? 0) * weight;
         break;
       case 'INSURANCE_POLICIES':
-        total += ctx.policies.find((x) => x.id === r.sourceId)?.value ?? 0;
+        total += (ctx.policies.find((x) => x.id === r.sourceId)?.value ?? 0) * weight;
         break;
     }
   }
-  return total;
+  return Math.round(total);
 }
 
 /**
@@ -174,10 +183,11 @@ export function yearlyContributionForGoal(
   let total = 0;
   for (const r of incs) {
     if (r.assetClass === 'MUTUAL_FUNDS') {
+      const weight = (r.allocationPct ?? 100) / 100;
       if (r.sourceId === null) {
-        total += ctx.mfSipYearly;
+        total += ctx.mfSipYearly * weight;
       } else if (ctx.mfIdSet.has(r.sourceId)) {
-        total += ctx.sipPerMfId.get(r.sourceId) ?? 0;
+        total += (ctx.sipPerMfId.get(r.sourceId) ?? 0) * weight;
       }
     }
   }
@@ -186,5 +196,5 @@ export function yearlyContributionForGoal(
     if (ev.frequency === 'MONTHLY') total += ev.amountPaisa * 12;
     else if (ev.frequency === 'YEARLY') total += ev.amountPaisa;
   }
-  return total;
+  return Math.round(total);
 }
