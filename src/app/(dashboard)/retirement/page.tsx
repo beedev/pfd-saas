@@ -1299,10 +1299,24 @@ function ClassRow({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white">
-      <button
-        type="button"
+      {/*
+        Row header. Was a <button>, but the conditional "↑ grows" toggle
+        below renders as a nested <button> — invalid HTML, hydration
+        warning. role="button" + keyboard handlers gives identical UX
+        without breaking the spec.
+      */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 rounded-lg"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 rounded-lg cursor-pointer"
       >
         <div className="flex items-center gap-2">
           {open ? (
@@ -1356,7 +1370,7 @@ function ClassRow({
             </p>
           )}
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-gray-100 px-3 py-2 space-y-1">
