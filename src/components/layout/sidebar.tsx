@@ -72,6 +72,7 @@ const navigation: NavSection[] = [
   {
     section: 'Planning & Budget',
     items: [
+      { name: 'Income', href: '/income', icon: Banknote },
       { name: 'Budget', href: '/budget', icon: Wallet },
       { name: 'Monthly Expenses', href: '/budget/monthly', icon: Wallet },
       { name: 'Goals', href: '/goals', icon: Target },

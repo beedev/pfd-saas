@@ -64,6 +64,13 @@
       "when": 1780229735441,
       "tag": "0008_chemical_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1780232711221,
+      "tag": "0009_steady_sugar_man",
+      "breakpoints": true
     }
   ]
 }

@@ -1691,6 +1691,14 @@ export type OtherIncomeSource =
   | 'FD_INTEREST'
   | 'PF_INTEREST'
   | 'DIVIDEND'
+  // Sprint 3 Phase 2 — broader categorisation for the /income summary.
+  // These map to ITR sections users actually file under.
+  | 'AGRICULTURAL'     // Section 10(1) exempt — but reported for rate determination
+  | 'PENSION'          // Section 17(2) — treated as salary for tax purposes
+  | 'GIFT'             // Section 56(2)(x) — taxable above ₹50k from non-relatives
+  | 'BUSINESS'         // Section 28 — proprietorship / professional income
+  | 'FREELANCE'        // 44ADA presumptive / freelance consulting
+  | 'INSURANCE_MATURITY' // Section 10(10D) typically exempt
   | 'OTHER';
 
 export const otherSourcesIncome = pgTable('other_sources_income', {
@@ -1699,6 +1707,11 @@ export const otherSourcesIncome = pgTable('other_sources_income', {
   source: text('source').$type<OtherIncomeSource>().notNull(),
   description: text('description').notNull(),
   amountPaisa: bigint('amount_paisa', { mode: 'number' }).notNull(),
+  // Sprint 3 Phase 2 — surface tax-exempt income (e.g. agricultural under
+  // Section 10(1), life-insurance maturity under 10(10D)) in the /income
+  // summary while still reporting them for ITR rate determination.
+  isTaxExempt: boolean('is_tax_exempt').notNull().default(false),
+  taxSection: text('tax_section'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),

@@ -351,6 +351,52 @@ await guardSection('financial_goals', 'financial_goals', userId, async () => {
   `;
 });
 
+// ─── salary_income ─────────────────────────────────────────────────
+await guardSection('salary_income', 'salary_income', userId, async () => {
+  // Sprint 3 Phase 2 — seed a Form-16-shaped salary row so /income has
+  // something to aggregate.
+  await sql`
+    INSERT INTO salary_income
+      (user_id, financial_year, employer_name, employer_tan,
+       gross_salary_paisa, exemptions_paisa, section16_paisa,
+       taxable_salary_paisa, tds_paisa)
+    VALUES (${userId}, ${fyNow}, 'Demo Tech Pvt Ltd', 'MUMA12345E',
+            ${lakh(24)}, ${lakh(0.6)}, ${50000_00},
+            ${lakh(22.9)}, ${lakh(2.8)})
+  `;
+});
+
+// ─── other_sources_income ──────────────────────────────────────────
+await guardSection('other_sources_income', 'other_sources_income', userId, async () => {
+  // Interest from FDs (taxable)
+  await sql`
+    INSERT INTO other_sources_income
+      (user_id, financial_year, source, description, amount_paisa,
+       is_tax_exempt, tax_section)
+    VALUES (${userId}, ${fyNow}, 'FD_INTEREST',
+            'Demo Bank FD interest', ${21750_00},
+            false, NULL)
+  `;
+  // Dividend (taxable)
+  await sql`
+    INSERT INTO other_sources_income
+      (user_id, financial_year, source, description, amount_paisa,
+       is_tax_exempt, tax_section)
+    VALUES (${userId}, ${fyNow}, 'DIVIDEND',
+            'Mutual fund + stock dividends', ${15400_00},
+            false, NULL)
+  `;
+  // Agricultural (exempt) — demonstrates tax-exempt classification
+  await sql`
+    INSERT INTO other_sources_income
+      (user_id, financial_year, source, description, amount_paisa,
+       is_tax_exempt, tax_section)
+    VALUES (${userId}, ${fyNow}, 'AGRICULTURAL',
+            'Family farm — rice + coconut', ${lakh(1.2)},
+            true, 'Section 10(1)')
+  `;
+});
+
 // ─── tax_deductions ────────────────────────────────────────────────
 await guardSection('tax_deductions', 'tax_deductions', userId, async () => {
   await sql`
