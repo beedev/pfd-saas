@@ -1,0 +1,21 @@
+{
+  "name": "Personal Finance Dashboard",
+  "short_name": "pfd",
+  "description": "Investments, taxes, GST, and net-worth tracking for Indian retail investors.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fef3c7",
+  "theme_color": "#92400e",
+  "categories": ["finance", "productivity"],
+  "lang": "en-IN",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

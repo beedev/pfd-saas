@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- pfd-saas placeholder icon. Rupee glyph on the amber the login + onboarding
+       pages already use. Replace with a real designed icon before launch. -->
+  <rect width="512" height="512" rx="96" fill="#92400e"/>
+  <text x="50%" y="56%" text-anchor="middle" dominant-baseline="middle"
+        font-size="320" font-weight="700"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        fill="#fef3c7">₹</text>
+</svg>

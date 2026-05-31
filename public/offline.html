@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Offline · pfd-saas</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #fef3c7 0%, #ffffff 50%, #fef3c7 100%);
+      color: #111827;
+      padding: 24px;
+    }
+    .card {
+      max-width: 24rem;
+      width: 100%;
+      padding: 2rem;
+      background: #fff;
+      border: 1px solid #fde68a;
+      border-radius: 1rem;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.04), 0 8px 10px -6px rgba(0,0,0,0.02);
+      text-align: center;
+    }
+    .icon {
+      width: 3.5rem; height: 3.5rem;
+      margin: 0 auto 1rem;
+      background: #fef3c7;
+      border-radius: 0.875rem;
+      display: flex; align-items: center; justify-content: center;
+      color: #92400e;
+      font-size: 1.75rem;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem; }
+    p  { font-size: 0.875rem; color: #4b5563; margin: 0 0 1.5rem; line-height: 1.5; }
+    button {
+      width: 100%;
+      padding: 0.625rem 1rem;
+      background: #92400e;
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:hover { background: #78350f; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">⚡</div>
+    <h1>You're offline</h1>
+    <p>
+      pfd-saas needs a connection to fetch your live data (prices, NAVs,
+      gold rates). Try again once you're back online.
+    </p>
+    <button onclick="location.reload()">Retry</button>
+  </div>
+</body>
+</html>
