@@ -258,7 +258,7 @@ export default function NetWorthDashboard() {
                 <p className="text-xs text-[var(--dxp-text-secondary)]">{sparkline.length} snapshots</p>
               </div>
               <div className="h-12 w-64">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <ReLineChart data={sparkline}>
                     <Line type="monotone" dataKey="value" stroke="#2563eb" dot={false} strokeWidth={2} />
                   </ReLineChart>

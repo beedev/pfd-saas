@@ -1022,7 +1022,7 @@ export default function RetirementPage() {
         </CardHeader>
         <CardContent>
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={projection.series}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" tick={{ fontSize: 11 }} />
@@ -1111,7 +1111,7 @@ export default function RetirementPage() {
             ]}
           />
           <div className="mt-3 h-80">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <ComposedChart data={projection.runwaySeries}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis

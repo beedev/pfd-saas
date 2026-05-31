@@ -792,7 +792,7 @@ export default function ChitFundDetailPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <ReLineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
