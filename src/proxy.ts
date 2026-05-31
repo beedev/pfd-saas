@@ -1,5 +1,9 @@
 /**
- * Edge middleware — session-cookie presence check only.
+ * Edge proxy — session-cookie presence check only.
+ *
+ * Next.js 16 renamed the middleware file convention to `proxy.ts`. Same
+ * API, same default export, same matcher config — only the filename
+ * differs.
  *
  * Auth.js v5 with `session: { strategy: 'database' }` cannot run in
  * Edge: its adapter (postgres-js) needs Node APIs, and wrapping with
@@ -11,9 +15,6 @@
  * in route handlers via `auth()` from src/auth.ts, which has the
  * adapter. An attacker with a random ≥16-char cookie can reach a page
  * but every server-side query will reject them.
- *
- * Next.js 16 has begun renaming middleware.ts → proxy.ts; the rename
- * is logged in the dev output already. Sprint 2 swaps the filename.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
@@ -44,7 +45,7 @@ const SESSION_COOKIE_NAMES = [
   '__Secure-authjs.session-token',
 ];
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
