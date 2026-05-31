@@ -16,14 +16,40 @@ countries later.
 
 ## Status
 
-**Sprint 2 complete.** Building on Sprint 1's multi-tenant foundation:
+**Sprint 3 complete.** Five India-specific modules shipped on top of
+Sprint 2's productized core:
+
+- **Health Insurance** (Phase 1): separate table from life insurance,
+  family-floater data model, member cards with policy numbers, claims
+  log, portability history. Auto-migrated HEALTH rows out of
+  `insurance_policies` during the split.
+- **Income** (Phase 2): unified `/income` summary aggregating
+  salary_income + other_sources_income (with `is_tax_exempt` +
+  `tax_section` flags) + capital_gains + real_estate.monthly_rent. GST
+  invoice income joins via `invoices.taxable_amount`. YoY trend
+  separates Salary / Freelance / Other / Capital gains.
+- **Vehicles** (Phase 3): vehicles + insurance policies + PUC + service
+  log (4 tables). Alert types `VEHICLE_INSURANCE_DUE` and
+  `PUC_EXPIRY_DUE` wired into cron.
+- **Subscriptions** (Phase 4): 10 categories
+  (STREAMING/SOFTWARE/CLOUD/FITNESS/NEWS/GAMING/AI/EDUCATION/
+  PRODUCTIVITY/OTHER) with monthly-drag normalization across
+  MONTHLY/QUARTERLY/SEMI_ANNUAL/ANNUAL/LIFETIME billing cycles.
+- **Small Savings + EPF split** (Phase 5): `provident_fund` renamed to
+  `epf_accounts` (EPF-only); new `small_savings_accounts` table covers
+  PPF/VPF/NSC/KVP/SSY/SCSS with per-scheme interest projection
+  (`src/lib/finance/small-savings.ts` — yearly compound with SCSS
+  quarterly-payout flag). Wired into networth snapshot, savings-asset
+  selection, and tax/summary 80C source list.
+
+Sprint 2 deliverables (still in force):
 - Onboarding wizard with GST/no-GST branching
 - Mobile-responsive (sidebar drawer + DataTable card layout on `<md`)
 - PWA shell — installable, offline fallback page, manifest, service worker
 - Per-tenant cron: `/api/cron/tick` dispatches `daily_digest`,
   `alerts_check`, `sip_auto_execute` per user from a `scheduled_jobs`
   ledger
-- Synthetic demo seed (`scripts/seed-demo.mjs`) populates 20 sections
+- Synthetic demo seed (`scripts/seed-demo.mjs`) populates 25 sections
   for a fresh user
 - Real magic-link email via SMTP (Gmail / Resend / Postmark — auto-falls
   back to console-log stub when `EMAIL_SERVER` is unset)
@@ -33,13 +59,23 @@ countries later.
   reaches every constraint, not just every query)
 
 Two-user data isolation verified end-to-end. See `ORCHESTRATOR_CONTEXT.md`
-(gitignored) for the multi-sprint roadmap. Sprint 3 (India modules) is
-next; Sprint 4-6 scoped phase-by-phase as we enter them.
+(gitignored) for the multi-sprint roadmap. Sprint 4 (tax hardening) is
+next; Sprint 5-6 scoped phase-by-phase as we enter them.
 
 Deferred from Sprint 2:
 - Docker / docker-compose self-host scaffold (real SMTP via Gmail
   obsoleted the Mailpit dev-SMTP need; full Docker comes in Sprint 5
   with deployment infrastructure).
+
+Deferred from Sprint 3:
+- `/api/finance/retirement-assets` wiring for small_savings. PPF and SSY
+  belong in the retirement corpus calculation but the per-asset inclusion
+  model needs scheme-aware projection math; rolled into Sprint 4 alongside
+  the broader tax/retirement integration.
+- MF CAS PDF parser. Awaiting a sample PDF.
+- Migration of `timestamp` → `timestamptz` across all 50+ tables. Known
+  tech debt — flagged when the per-tenant cron timezone bug surfaced in
+  Sprint 2 Phase 5.
 
 ## Key invariants (don't break these)
 

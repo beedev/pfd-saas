@@ -16,12 +16,19 @@ in minutes. Pre-launch; no public deploy yet.
 Tracks the full INR portfolio of an Indian retail investor:
 
 - **Investments:** Stocks, Mutual Funds, SIPs, Gold (SGB/ETF/Physical/Digital),
-  NPS Tier-I/II, EPF/PPF/VPF, Real Estate, Chit Funds, Fixed Deposits, Term
-  & Life Insurance.
+  NPS Tier-I/II, EPF, **Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS)** with
+  per-scheme interest projection, Real Estate, Chit Funds, Fixed Deposits,
+  Life Insurance, **Health Insurance** (family-floater with member cards +
+  claims + portability), **Vehicles** (with insurance/PUC/service log).
+- **Subscriptions:** 10-category subscription tracker (streaming /
+  software / cloud / AI / fitness / news / gaming / education /
+  productivity / other) with monthly-drag normalization.
+- **Income:** Unified summary across salary / freelance (GST invoices) /
+  other income / capital gains / rental, with tax-exempt flagging.
 - **Liabilities:** Loans (home/personal/vehicle) with EMI amortization +
   prepay simulator, credit cards with statement tracking.
 - **Tax (Indian):** Section 80 deductions, capital gains (LTCG/STCG),
-  income tax paid ledger, 80G donations, ITR-3 filing-pack generator.
+  income tax paid ledger, 80G donations, ITR filing-pack generator.
 - **GST (Indian small business):** Customers, Vendors, Invoices,
   Purchase Invoices, GSTR-1 and GSTR-3B summaries.
 - **Planning:** Net worth time series, monthly cashflow analytics,
@@ -224,7 +231,7 @@ Sprint sequence:
 - **Sprint 1** ✅ Foundation — Postgres + multi-tenancy + Auth
 - **Sprint 1.5** ✅ Data import + smoke test (one-time, for the owner)
 - **Sprint 2** ✅ Productize — onboarding, mobile-responsive, PWA, per-tenant cron, demo data, real SMTP. Docker self-host scaffold deferred to Sprint 5.
-- **Sprint 3** ⏳ India modules — Health Insurance, Income tracker, Vehicle Insurance, Subscriptions, Small Savings Schemes
+- **Sprint 3** ✅ India modules — Health Insurance (cards/claims/portability), Income tracker, Vehicles (insurance/PUC/service log), Subscriptions, Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS with interest projection)
 - **Sprint 4** ⏳ Tax hardening — regime toggle, slab abstraction, Form 26AS, ITR-1/2 export
 - **Sprint 5** ⏳ SaaS infra — Razorpay billing, pricing tiers, Docker self-host, marketing + docs sites
 - **Sprint 6** ⏳ Launch — deploy, domain, legal, observability, backups, beta, public
