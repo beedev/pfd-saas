@@ -4,85 +4,141 @@ Guidance for Claude Code when working in this repo.
 
 ## What this is
 
-`pfd-saas` is the generic SaaS edition of the personal finance planner originally
-built at [beedev/pfd](https://github.com/beedev/pfd). It is multi-tenant
-(per-user data isolation), supports both **SQLite** (self-hosted) and
-**Postgres** (cloud SaaS) via the `DATABASE_URL` env var, and runs as a
-**PWA** so users can install it to their phone home screens.
+`pfd-saas` is the SaaS edition of the personal finance planner originally
+built at [beedev/pfd](https://github.com/beedev/pfd). Multi-tenant: every
+domain table carries `user_id NOT NULL` and every API route scopes its
+queries by the authenticated session's `user.id`. Postgres only — there's
+no dual-DB code path. Self-hosters get docker-compose in Sprint 2.
 
 Target market: India-only for v1. INR everywhere. All Indian tax modules
 (NPS / EPF / PPF / 80C / GST / ITR) stay; structure leaves room for other
 countries later.
 
+## Status
+
+**Sprint 1 complete.** Multi-tenant Postgres skeleton with magic-link
+auth and the owner's real data imported and verified. Two-user isolation
+confirmed end-to-end. See `ORCHESTRATOR_CONTEXT.md` (gitignored, local
+workflow doc) for the multi-sprint roadmap. Subsequent sprints (Sprint 2
+productize → Sprint 3 India modules → Sprint 4 tax hardening → Sprint 5
+SaaS infra → Sprint 6 launch) are scoped phase-by-phase as we enter
+them.
+
 ## Key invariants (don't break these)
 
-- **All money in paisa** (integer). Display layer divides by 100. Never store
+- **All money in paisa** (integer for small values, `bigint` for anything
+  that can hold a sum — see schema.ts; the bigint sweep landed in
+  migration 0003). Display layer divides by 100. Never store
   rupees-as-decimal.
-- **Every domain table has `userId`** (FK to `users`). Every query must scope
-  by current session's user. Middleware double-checks.
-- **DB backend is env-driven** (`DATABASE_URL=sqlite://...` or
-  `postgres://...`). Drizzle schema written portably; avoid SQLite-only
-  functions (`unixepoch()`, etc).
-- **No personal data in committed files** — seed scripts, fixtures, and
-  examples must be synthetic.
-- **API integrations**: Yahoo Finance v8 (stocks), AMFI NAVAll.txt + mfapi.in
-  (MFs), Yahoo GC=F × USDINR=X (gold). All free, no API keys.
+- **Every domain table has `user_id text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE`.**
+  Enforced by migration 0004. The DB rejects un-stamped inserts.
+- **Every query is scoped by `session.user.id`.** SELECT/UPDATE/DELETE
+  combine via `and(...)`; INSERT stamps `userId` as the first field of
+  `.values({...})`. The pattern reference is `src/app/api/investments/nps/`.
+- **Edge middleware does cookie presence only.** Full session validation
+  happens in route handlers via `auth()` from `src/auth.ts`. Don't try to
+  wire Auth.js into middleware — `MissingAdapter` will silently break it.
+- **No personal data in committed files.** Seeds, fixtures, demos must be
+  synthetic. Local DB dumps live in `backups/` (gitignored).
+- **Stubs are tracked.** Every external integration not yet wired is in
+  `STUBS.md`. When you replace one with the real thing, move its entry
+  to "Replaced" with the date and commit hash.
+- **API integrations stay free:** Yahoo Finance v8 (stocks), AMFI
+  NAVAll.txt + mfapi.in (MFs), Yahoo GC=F × USDINR=X (gold). No API
+  keys, no rate limits at single-user scale.
 
 ## Stack
 
 - Next.js 16, App Router, Turbopack dev
-- Drizzle ORM (better-sqlite3 + postgres-js adapters)
-- Auth.js (NextAuth) with email magic-link
+- Postgres 17 via postgres-js + Drizzle ORM
+- Auth.js v5 (next-auth@5.0.0-beta) with EmailProvider + DrizzleAdapter,
+  database session strategy
 - Tailwind 4 + @dxp/ui design system (symlinked from sibling dxp repo)
-- Recharts for graphs
-- sonner for toasts
-- pdfjs-dist for PDF imports (row-aware extraction)
+- Recharts, sonner, pdfjs-dist
 
 ## Dev commands
 
 ```bash
 npm install
-npm run db:generate            # generate Drizzle migrations
-npm run db:migrate             # apply migrations
-npm run dev                    # dev server on :3000 (Turbopack)
+npm run db:generate            # generate Drizzle migration from schema.ts
+npm run db:migrate             # apply pending migrations
+npm run dev -- --port 3000     # dev server (port assigned by ~/.appregistry)
 npm run build                  # production build
-npm start                      # production server
 npm run lint
 ```
 
+No test suite yet; the smoke-test convention is to load the owner's
+imported data (Sprint 1.5) and walk every page.
+
 ## Environment variables
 
-- `DATABASE_URL` — `sqlite://./local.db` or `postgres://...`
+- `DATABASE_URL` — `postgresql://user@host:port/dbname`
 - `AUTH_SECRET` — random 32+ bytes (`openssl rand -base64 32`)
-- `EMAIL_SERVER` / `EMAIL_FROM` — for Auth.js magic-link emails
-- `NEXT_PUBLIC_APP_URL` — canonical URL for callbacks
+- `NEXTAUTH_URL` — `http://localhost:3000` for dev; canonical https URL
+  in prod
+- `EMAIL_FROM` — sender address on outgoing magic-link emails (used by
+  Auth.js display; the actual send is stubbed in Sprint 1)
+- `EMAIL_SERVER` — SMTP connection string, real Sprint 5+, ignored while
+  stubbed
 
-## What stays from the original repo
+## Sign-in flow (Sprint 1 — email send is STUBBED)
 
-All the math: XIRR, EMI/amortization, prepay simulator, retirement bucket
-SWP, PV-of-growing-annuity, ladder PV, chit fund math.
+1. Visit `/` → middleware redirects to `/login`.
+2. Enter email, submit.
+3. Land on `/login/check-email`. In dev, the page itself tells you the
+   stub is active.
+4. Grab the magic-link URL from either:
+   - the `npm run dev` terminal (banner: `🔑 MAGIC LINK ...`)
+   - `tmp/magic-links.log` (newline-delimited JSON)
+5. Paste the URL in the same browser, Auth.js validates the token,
+   creates a row in `session`, redirects to `/`.
 
-All the asset modules: Stocks, MFs, SIPs, Gold, NPS, PF, Real Estate,
-Insurance, Liabilities, Chit Funds, Fixed Deposits.
+See `STUBS.md` for the full list of stubbed integrations.
 
-All UI primitives, charts, snapshot machinery, alert framework.
+## Importing personal-v1 data into a fresh pfd-saas
 
-## What's new for SaaS
+Two-step script flow (only relevant for the original owner — synthetic
+demo data for everyone else lands in Sprint 2 Phase 6):
 
-- Auth (Auth.js magic-link)
-- Multi-tenant userId everywhere
-- Postgres adapter alongside SQLite
-- PWA shell + mobile-responsive layout
-- Onboarding wizard + empty states
-- Health insurance, income tracker, vehicle insurance, small savings, etc.
-- Pricing tiers + billing (Razorpay)
+```bash
+node scripts/import/01-export-v1.mjs                          # SQLite → JSON
+node scripts/import/02-import.mjs --owner-email=<your-email>  # JSON → Postgres
+```
+
+`01-export-v1.mjs` is read-only against the personal v1 DB. `02-import.mjs`
+requires you to have signed in once (so a `user` row exists with that
+email); it stamps `user_id` on every imported row.
+
+## What's preserved from the personal v1
+
+- All the math: XIRR, EMI/amortization, prepay simulator, retirement
+  bucket SWP, PV of growing annuity, ladder PV, chit-fund cash flows.
+- All asset modules: Stocks, MFs, SIPs, Gold, NPS, PF (EPF), Real Estate,
+  Insurance, Liabilities, Chit Funds, Fixed Deposits.
+- All UI primitives, charts, snapshot machinery, alert framework.
+- GST module (Customers, Vendors, Invoices, Purchase Invoices, GSTR-1,
+  GSTR-3B).
+
+## What's removed or changed in pfd-saas
+
+- The `transformation_*` weight-loss tables/routes are gone — not a
+  finance product.
+- Money columns are `bigint` where they hold sums (real estate value,
+  chit value, total balance, etc.). Per-unit prices, IDs, counters,
+  ages stay `integer`.
+- Cron-driven endpoints (`/api/alerts/check`, `/api/daily-digest`,
+  `/api/investments/sips/auto-execute`) return 503 with `TODO(sprint-2)`.
+  Per-tenant cron scheduling lands in Sprint 2 Phase 5.
 
 ## Don't
 
 - Don't hardcode any user-specific data anywhere.
-- Don't add SQLite-only schema features without a Postgres equivalent.
 - Don't bypass auth/userId scoping in any new query.
-- Don't commit `.env*`, `*.db`, `uploads/`, or `.claude/`.
+- Don't add `db.<verb>` calls to library code without threading `userId`
+  through (see `src/lib/finance/budget-sync.ts` for the pattern).
+- Don't commit `.env*`, `personal-finance.db*`, `pfd_saas.dump`,
+  `tmp/`, `backups/`, `uploads/`, or `.claude/`.
+- Don't hand-edit the auto-managed App Registry section at the bottom.
 
 ## App Registry (auto-managed — do not edit manually)
 
