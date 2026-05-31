@@ -224,16 +224,36 @@ await guardSection('real_estate', 'real_estate', userId, async () => {
   `;
 });
 
-// ─── insurance_policies ────────────────────────────────────────────
+// ─── insurance_policies (life only — health goes in its own table below) ──
 await guardSection('insurance_policies', 'insurance_policies', userId, async () => {
   await sql`
     INSERT INTO insurance_policies (user_id, policy_number, policy_type, status, policy_holder, insurer, sum_assured, premium_amount, premium_frequency, policy_start_date, policy_term, premium_payment_term, next_premium_due_date)
     VALUES (${userId}, ${`DEMO-TERM-${userId.slice(0,4).toUpperCase()}`}, 'TERM_LIFE', 'ACTIVE', 'Demo User', 'Demo Life Insurance Co', ${cr(1.5)}, ${12000_00}, 'ANNUAL', ${monthsAgoIso(36)}, 30, 30, ${monthsAheadIso(8)})
   `;
-  await sql`
-    INSERT INTO insurance_policies (user_id, policy_number, policy_type, status, policy_holder, insurer, sum_assured, premium_amount, premium_frequency, policy_start_date, policy_term, premium_payment_term, next_premium_due_date)
-    VALUES (${userId}, ${`DEMO-HEALTH-${userId.slice(0,4).toUpperCase()}`}, 'HEALTH', 'ACTIVE', 'Demo User', 'Demo Health Insurance Co', ${lakh(15)}, ${18500_00}, 'ANNUAL', ${monthsAgoIso(12)}, 1, 1, ${monthsAheadIso(11)})
+});
+
+// ─── health_insurance_policies + cards ─────────────────────────────
+await guardSection('health_insurance_policies', 'health_insurance_policies', userId, async () => {
+  const inserted = await sql`
+    INSERT INTO health_insurance_policies
+      (user_id, insurer, policy_number, policy_type, status, policy_holder,
+       sum_insured_paisa, premium_paisa, premium_frequency,
+       start_date, renewal_date, waiting_period_months, served_waiting_months,
+       cashless_available, network_hospital_count)
+    VALUES (${userId}, 'Demo Health Insurance Co',
+            ${`DEMO-HEALTH-${userId.slice(0,4).toUpperCase()}`},
+            'FAMILY_FLOATER', 'ACTIVE', 'Demo User',
+            ${lakh(15)}, ${18500_00}, 'ANNUAL',
+            ${monthsAgoIso(12)}, ${monthsAheadIso(11)}, 48, 12,
+            true, 8500)
+    RETURNING id
   `;
+  const policyId = inserted[0].id;
+
+  // Family floater = three cards.
+  await sql`INSERT INTO health_insurance_cards (user_id, policy_id, member_name, member_id, relationship, date_of_birth, gender) VALUES (${userId}, ${policyId}, 'Demo User',          ${`MEM-${policyId}-001`}, 'SELF',     '1988-04-12', 'M')`;
+  await sql`INSERT INTO health_insurance_cards (user_id, policy_id, member_name, member_id, relationship, date_of_birth, gender) VALUES (${userId}, ${policyId}, 'Demo User Spouse',   ${`MEM-${policyId}-002`}, 'SPOUSE',   '1990-08-22', 'F')`;
+  await sql`INSERT INTO health_insurance_cards (user_id, policy_id, member_name, member_id, relationship, date_of_birth, gender) VALUES (${userId}, ${policyId}, 'Demo User Daughter', ${`MEM-${policyId}-003`}, 'DAUGHTER', '2018-03-05', 'F')`;
 });
 
 // ─── liabilities ───────────────────────────────────────────────────
