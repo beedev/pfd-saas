@@ -1,40 +1,56 @@
 /**
  * Dashboard layout — wraps every authenticated page.
  *
- * Server component. Reads the current user's `business_profile` to decide
- * whether to show the GST section in the sidebar. Sprint 2 Phase 1 gate:
- * users who don't file GST shouldn't see GST nav items.
+ * Server component. Two responsibilities at the layout level:
  *
- * Signal is "does a business_profile row exist for this user?" — the row
- * gets created during onboarding (Sprint 2 Phase 2) only when the user
- * says "yes, I file GST". Simpler than a boolean column; matches the
- * one-row-or-none semantics naturally.
+ *   1. Onboarding gate. If the user has no `user_preferences` row, send
+ *      them to /onboarding. The wizard creates the row (Sprint 2 Phase 2).
+ *      Existing users were backfilled by migration 0005 so they skip.
+ *
+ *   2. GST sidebar gate. Sprint 2 Phase 1: users who don't file GST don't
+ *      see the GST nav section. Signal is `business_profile` row presence.
+ *
+ * Middleware (edge) just checks the session cookie. The DB work happens
+ * here where we have full Node access.
  */
 
 import { eq } from 'drizzle-orm';
+import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Toaster } from '@/components/ui/sonner';
 import { auth } from '@/auth';
-import { db, businessProfile } from '@/db';
+import { db, businessProfile, userPreferences } from '@/db';
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Middleware guarantees a session before we render — but double-check
-  // anyway, since this is a server component and the type guard helps
-  // the downstream DB call.
   const session = await auth();
-  let hasBusinessProfile = false;
-  if (session?.user) {
-    const rows = await db
-      .select({ id: businessProfile.id })
-      .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
-      .limit(1);
-    hasBusinessProfile = rows.length > 0;
+  if (!session?.user) {
+    // Middleware should have caught this, but defence in depth.
+    redirect('/login');
   }
+
+  // Onboarding gate — has the user finished the wizard (or been
+  // backfilled)?
+  const prefs = await db
+    .select({ userId: userPreferences.userId })
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, session.user.id))
+    .limit(1);
+
+  if (prefs.length === 0) {
+    redirect('/onboarding');
+  }
+
+  // GST sidebar gate.
+  const bp = await db
+    .select({ id: businessProfile.id })
+    .from(businessProfile)
+    .where(eq(businessProfile.userId, session.user.id))
+    .limit(1);
+  const hasBusinessProfile = bp.length > 0;
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">

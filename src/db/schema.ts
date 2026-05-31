@@ -66,6 +66,39 @@ export const verificationTokens = pgTable(
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
+/**
+ * Per-user, GST-agnostic preferences captured during onboarding.
+ *
+ * 1:1 with `user` — userId IS the primary key, so each user has exactly
+ * one row or none. Row existence is the canonical "has the user finished
+ * onboarding?" signal; the dashboard layout redirects to /onboarding
+ * when this row is missing.
+ *
+ * GST-specific data (gstin, businessName, stateCode, etc.) lives in
+ * `business_profile` — created only when the user toggles "yes, I file
+ * GST" during onboarding. The two tables together cover all per-user
+ * settings.
+ */
+export const userPreferences = pgTable('user_preferences', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  displayName: text('display_name').notNull(),
+  // INR-locked for v1; column is here so future markets can override.
+  baseCurrency: text('base_currency').notNull().default('INR'),
+  // Calendar month the financial year starts in. 4 = April (Indian default).
+  financialYearStartMonth: integer('financial_year_start_month').notNull().default(4),
+  // When the wizard was completed. NULL for backfilled rows (migration
+  // created them so existing users don't get redirected; they never saw
+  // the wizard themselves).
+  onboardedAt: timestamp('onboarded_at', { mode: 'date' }),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+});
+
+export type UserPreferences = typeof userPreferences.$inferSelect;
+export type NewUserPreferences = typeof userPreferences.$inferInsert;
+
 /* ─── Domain tables ─────────────────────────────────────────────────── */
 
 // Business Profile (single row for self)
