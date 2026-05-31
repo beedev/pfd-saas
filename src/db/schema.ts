@@ -8,7 +8,7 @@ import type { AdapterAccountType } from 'next-auth/adapters';
  * adapter's expectations exactly — don't rename them.
  *
  * `user.id` is a text UUID generated client-side. Every domain table in
- * this schema carries `userId: text('user_id').references(() => users.id)`
+ * this schema carries `userId: text('user_id').notNull().references(() => users.id)`
  * so all queries can be scoped to a single tenant.
  * ──────────────────────────────────────────────────────────────────────── */
 
@@ -86,7 +86,7 @@ export const businessProfile = pgTable('business_profile', {
   invoiceStartNumber: bigint('invoice_start_number', { mode: 'number' }).default(1),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('business_profile_user_id_idx').on(table.userId),
 ]);
@@ -110,7 +110,7 @@ export const customers = pgTable('customers', {
   supplyType: text('supply_type').$type<SupplyType>().default('REGULAR'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('customers_gstin_idx').on(table.gstin),
   index('customers_state_idx').on(table.stateCode),
@@ -131,7 +131,7 @@ export const vendors = pgTable('vendors', {
   phone: text('phone'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('vendors_gstin_idx').on(table.gstin),
   index('vendors_user_id_idx').on(table.userId),
@@ -186,7 +186,7 @@ export const invoices = pgTable('invoices', {
 
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('invoice_number_idx').on(table.invoiceNumber),
   index('invoice_period_idx').on(table.returnPeriod),
@@ -217,7 +217,7 @@ export const invoiceItems = pgTable('invoice_items', {
   igstAmount: bigint('igst_amount', { mode: 'number' }).default(0),
 
   totalAmount: bigint('total_amount', { mode: 'number' }).notNull(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('item_invoice_idx').on(table.invoiceId),
   index('item_sac_idx').on(table.sacCode),
@@ -252,7 +252,7 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
 
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('purchase_vendor_idx').on(table.vendorId),
   index('purchase_period_idx').on(table.returnPeriod),
@@ -286,7 +286,7 @@ export const taxPayments = pgTable('tax_payments', {
 
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('payment_period_idx').on(table.returnPeriod),
   index('tax_payments_user_id_idx').on(table.userId),
@@ -306,7 +306,7 @@ export const budgetCategories = pgTable('budget_categories', {
   sortOrder: integer('sort_order').default(0),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('budget_categories_user_id_idx').on(table.userId),
 ]);
@@ -321,7 +321,7 @@ export const budgetEntries = pgTable('budget_entries', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('budget_period_idx').on(table.period),
   uniqueIndex('budget_category_period_idx').on(table.categoryId, table.period),
@@ -342,7 +342,7 @@ export const recurringExpenses = pgTable('recurring_expenses', {
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('recurring_expenses_category_idx').on(table.categoryId),
   index('recurring_expenses_active_idx').on(table.isActive),
@@ -358,7 +358,7 @@ export const budgetCarryForward = pgTable('budget_carry_forward', {
   period: text('period').notNull().unique(),   // MMYYYY — the month this carry-forward GOES INTO
   amount: bigint('amount', { mode: 'number' }).notNull().default(0), // paisa
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('budget_carry_forward_user_id_idx').on(table.userId),
 ]);
@@ -373,7 +373,7 @@ export const financialGoals = pgTable('financial_goals', {
   color: text('color'),                       // for charts (e.g., "#4CAF50")
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('financial_goals_user_id_idx').on(table.userId),
 ]);
@@ -387,7 +387,7 @@ export const projectionCategories = pgTable('projection_categories', {
   sortOrder: integer('sort_order').default(0),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('projection_categories_user_id_idx').on(table.userId),
 ]);
@@ -401,7 +401,7 @@ export const projectionEntries = pgTable('projection_entries', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('projection_period_idx').on(table.period),
   index('projection_category_idx').on(table.categoryId),
@@ -416,7 +416,7 @@ export const carryforwardBalances = pgTable('carryforward_balances', {
   amount: bigint('amount', { mode: 'number' }).notNull(),            // in paisa
   asOfDate: text('as_of_date').notNull(),         // ISO date
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('carryforward_category_idx').on(table.categoryId),
   index('carryforward_balances_user_id_idx').on(table.userId),
@@ -444,7 +444,7 @@ export const savingsAssetInclusion = pgTable('savings_asset_inclusion', {
   included: boolean('included').notNull().default(false),
   goalId: integer('goal_id').references(() => financialGoals.id, { onDelete: 'cascade' }),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('savings_asset_class_idx').on(table.assetClass),
   index('savings_asset_source_idx').on(table.assetClass, table.sourceId),
@@ -470,7 +470,7 @@ export const futureSavingsPlan = pgTable('future_savings_plan', {
   lumpSumPaisa: bigint('lump_sum_paisa', { mode: 'number' }).notNull().default(0),
   monthlyPaisa: bigint('monthly_paisa', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('future_savings_plan_user_id_idx').on(table.userId),
 ]);
@@ -502,7 +502,7 @@ export const retirementAssetSelection = pgTable('retirement_asset_selection', {
   npsLumpsumPct: real('nps_lumpsum_pct'),          // default 60
   npsAnnuityRatePct: real('nps_annuity_rate_pct'), // default 6
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('retirement_asset_class_idx').on(table.assetClass),
   uniqueIndex('retirement_asset_unique_idx').on(table.assetClass, table.sourceId),
@@ -558,7 +558,7 @@ export const retirementAssumptions = pgTable('retirement_assumptions', {
   stableYrsHeld: real('stable_yrs_held').notNull().default(3),
   retirementDurationYears: integer('retirement_duration_years').notNull().default(25),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('retirement_assumptions_user_id_idx').on(table.userId),
 ]);
@@ -584,7 +584,7 @@ export const holdings = pgTable('holdings', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('holdings_symbol_idx').on(table.symbol),
   uniqueIndex('holdings_symbol_unique').on(table.symbol),
@@ -614,7 +614,7 @@ export const mutualFunds = pgTable('mutual_funds', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('mf_isin_idx').on(table.isin),
   index('mf_folio_idx').on(table.folioNumber),
@@ -645,7 +645,7 @@ export const sips = pgTable('sips', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('sip_mf_idx').on(table.mutualFundId),
   index('sip_status_idx').on(table.status),
@@ -696,7 +696,7 @@ export const chitFunds = pgTable('chit_funds', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('chit_status_idx').on(table.status),
   index('chit_foreman_idx').on(table.foremanName),
@@ -717,7 +717,7 @@ export const chitFundInstallments = pgTable('chit_fund_installments', {
   winnerBidDiscountPct: real('winner_bid_discount_pct'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('chit_install_fund_idx').on(table.chitFundId),
   index('chit_install_month_idx').on(table.monthNumber),
@@ -770,7 +770,7 @@ export const goldHoldings = pgTable('gold_holdings', {
 
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('gold_type_idx').on(table.type),
   index('gold_holdings_user_id_idx').on(table.userId),
@@ -804,7 +804,7 @@ export const npsAccounts = pgTable('nps_accounts', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('nps_account_number_idx').on(table.accountNumber),
   index('nps_pan_idx').on(table.pan),
@@ -844,7 +844,7 @@ export const fixedDeposits = pgTable('fixed_deposits', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('fd_bank_idx').on(table.bankName),
   index('fd_status_idx').on(table.status),
@@ -879,7 +879,7 @@ export const providentFund = pgTable('provident_fund', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('pf_account_type_idx').on(table.accountType),
   index('pf_uan_idx').on(table.universalAccountNumber),
@@ -927,7 +927,7 @@ export const realEstate = pgTable('real_estate', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('re_type_idx').on(table.type),
   index('re_city_idx').on(table.city),
@@ -973,7 +973,7 @@ export const insurancePolicies = pgTable('insurance_policies', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('policy_number_idx').on(table.policyNumber),
   index('policy_type_idx').on(table.policyType),
@@ -1014,7 +1014,7 @@ export const liabilities = pgTable('liabilities', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('liability_type_idx').on(table.type),
   index('liability_status_idx').on(table.status),
@@ -1039,7 +1039,7 @@ export const creditCardExpenses = pgTable('credit_card_expenses', {
   settledOn: text('settled_on'),               // ISO date — when statement was actually paid
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('cc_expense_liability_idx').on(table.liabilityId),
   index('cc_expense_period_idx').on(table.period),
@@ -1067,7 +1067,7 @@ export const loanAmortization = pgTable('loan_amortization', {
   paidOn: text('paid_on'),                             // ISO date
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('amort_liability_idx').on(table.liabilityId),
   index('amort_month_idx').on(table.monthNumber),
@@ -1097,7 +1097,7 @@ export const investmentTransactions = pgTable('investment_transactions', {
   referenceNumber: text('reference_number'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('tx_asset_type_idx').on(table.assetType),
   index('tx_date_idx').on(table.transactionDate),
@@ -1142,7 +1142,7 @@ export const taxDeductions = pgTable('tax_deductions', {
   linkedAssetId: integer('linked_asset_id'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('deduction_section_idx').on(table.section),
   index('deduction_fy_idx').on(table.financialYear),
@@ -1179,7 +1179,7 @@ export const taxDocuments = pgTable('tax_documents', {
   uploadedAt: timestamp('uploaded_at', { mode: 'date' }).defaultNow(),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('doc_type_idx').on(table.type),
   index('doc_fy_idx').on(table.financialYear),
@@ -1226,7 +1226,7 @@ export const yearlyInvestmentPlan = pgTable('yearly_investment_plan', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('plan_fy_idx').on(table.financialYear),
   index('yearly_investment_plan_user_id_idx').on(table.userId),
@@ -1252,7 +1252,7 @@ export const priceSnapshots = pgTable('price_snapshots', {
   changePercent: real('change_percent'),
   source: text('source').notNull(),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('snapshot_asset_idx').on(table.assetSymbol),
   index('snapshot_date_idx').on(table.priceDate),
@@ -1284,7 +1284,7 @@ export const alertRules = pgTable('alert_rules', {
   cooldownHours: integer('cooldown_hours').default(24),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('alert_rule_category_idx').on(table.category),
   index('alert_rule_enabled_idx').on(table.isEnabled),
@@ -1298,7 +1298,7 @@ export const alertHistory = pgTable('alert_history', {
   message: text('message').notNull(),
   triggeredValue: real('triggered_value'),
   sentAt: timestamp('sent_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('alert_history_rule_idx').on(table.ruleId),
   index('alert_history_sent_idx').on(table.sentAt),
@@ -1334,7 +1334,7 @@ export const capitalGains = pgTable('capital_gains', {
   taxAmount: bigint('tax_amount', { mode: 'number' }).notNull(),             // paisa
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('cg_fy_idx').on(table.financialYear),
   index('capital_gains_user_id_idx').on(table.userId),
@@ -1357,7 +1357,7 @@ export const incomeTaxPaid = pgTable('income_tax_paid', {
   referenceNumber: text('reference_number'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('itp_fy_idx').on(table.financialYear),
   index('income_tax_paid_user_id_idx').on(table.userId),
@@ -1383,7 +1383,7 @@ export const salaryIncome = pgTable('salary_income', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('salary_income_fy_idx').on(table.financialYear),
   index('salary_income_user_id_idx').on(table.userId),
@@ -1407,7 +1407,7 @@ export const tdsCredits = pgTable('tds_credits', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('tds_credits_fy_idx').on(table.financialYear),
   index('tds_credits_category_idx').on(table.category),
@@ -1433,7 +1433,7 @@ export const otherSourcesIncome = pgTable('other_sources_income', {
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('other_income_fy_idx').on(table.financialYear),
   index('other_sources_income_user_id_idx').on(table.userId),
@@ -1451,7 +1451,7 @@ export const taxSectionPreferences = pgTable('tax_section_preferences', {
   section: text('section').notNull(),
   isExcluded: boolean('is_excluded').default(false),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('tax_pref_fy_section_idx').on(table.financialYear, table.section),
   index('tax_section_preferences_user_id_idx').on(table.userId),
@@ -1474,7 +1474,7 @@ export const fyCloseStatus = pgTable('fy_close_status', {
   lockedBy: text('locked_by'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
-  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   uniqueIndex('fy_close_fy_cat_idx').on(table.financialYear, table.category),
   index('fy_close_status_user_id_idx').on(table.userId),
