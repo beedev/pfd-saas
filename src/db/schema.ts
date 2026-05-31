@@ -828,7 +828,46 @@ export const budgetCarryForward = pgTable('budget_carry_forward', {
   uniqueIndex('budget_carry_forward_period_unique').on(table.userId, table.period),
 ]);
 
-// Financial Goals (for 3-year projections tracking)
+/**
+ * Financial Goals — Sprint 3.5 Phase 3 brought the disbursement model.
+ *
+ * A goal is a *milestone* — something you'll spend money on at a specific
+ * future point. Retirement is NOT modelled here (it's a life *stage*,
+ * not a milestone — see retirementAssumptions + /retirement page).
+ *
+ * Disbursement shape:
+ *   LUMPSUM           — one shot of target_amount on target_date
+ *                       (house down payment, car purchase, vacation)
+ *   FIXED_PERIOD_SWP  — equal yearly disbursements of
+ *                       disbursement_amount_per_yr_paisa across
+ *                       disbursement_years starting on
+ *                       disbursement_start_date (kid's college 4yr)
+ *   INFLATION_SWP     — same as FIXED_PERIOD_SWP but each year's amount
+ *                       grows by growth_pct_per_yr (typically inflation)
+ *
+ * Asset mapping lives in savings_asset_inclusion keyed by goal_id.
+ * Earmarked cashflow inflows live in cashflow_events.goal_id.
+ *
+ * Projection math (lib/finance/goal-projection.ts) runs year-by-year:
+ *   year_corpus = year_corpus × (1 + expected_return_pct/100)
+ *                 + Σ earmarked inflows for the year
+ *                 − Σ goal disbursements for the year
+ */
+export type GoalType =
+  | 'HOUSE'
+  | 'CAR'
+  | 'EDUCATION'
+  | 'TRAVEL'
+  | 'EMERGENCY'
+  | 'WEDDING'
+  | 'BUSINESS'
+  | 'OTHER';
+
+export type DisbursementType =
+  | 'LUMPSUM'
+  | 'FIXED_PERIOD_SWP'
+  | 'INFLATION_SWP';
+
 export const financialGoals = pgTable('financial_goals', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),               // e.g., "Marriage", "Pilot Training"
@@ -837,10 +876,41 @@ export const financialGoals = pgTable('financial_goals', {
   currentAmount: bigint('current_amount', { mode: 'number' }).default(0),  // in paisa
   color: text('color'),                       // for charts (e.g., "#4CAF50")
   isActive: boolean('is_active').default(true),
+  // Sprint 3.5 Phase 3 — disbursement model. Defaults pick LUMPSUM so
+  // existing rows behave as "one shot at target_date" without surgery.
+  goalType: text('goal_type').$type<GoalType>().notNull().default('OTHER'),
+  disbursementType: text('disbursement_type')
+    .$type<DisbursementType>()
+    .notNull()
+    .default('LUMPSUM'),
+  /** For LUMPSUM: ignored (target_amount is the lumpsum). For SWP
+   *  flavours: the per-year withdrawal at start_date. Subsequent years
+   *  grow by growth_pct_per_yr for INFLATION_SWP. */
+  disbursementAmountPerYrPaisa: bigint('disbursement_amount_per_yr_paisa', {
+    mode: 'number',
+  }),
+  /** For SWP flavours: number of years to spread disbursements across.
+   *  Null for LUMPSUM. */
+  disbursementYears: integer('disbursement_years'),
+  /** First disbursement date. For LUMPSUM this equals target_date.
+   *  For SWP this is the start of the withdrawal phase. */
+  disbursementStartDate: text('disbursement_start_date'),
+  /** Yearly growth applied to disbursement amounts (only meaningful
+   *  for INFLATION_SWP — flat for LUMPSUM/FIXED_PERIOD). Typically
+   *  set to inflation_pct for INFLATION_SWP. */
+  growthPctPerYr: real('growth_pct_per_yr').notNull().default(0),
+  /** Assumed yearly portfolio return during the accumulation phase.
+   *  Drives year_corpus = year_corpus × (1 + expected_return/100). */
+  expectedReturnPct: real('expected_return_pct').notNull().default(8),
+  /** Reference inflation for the goal — used to grow target_amount
+   *  if user opts into inflation-adjusted target tracking, and as the
+   *  default growth_pct for INFLATION_SWP. */
+  inflationPct: real('inflation_pct').notNull().default(6),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('financial_goals_user_id_idx').on(table.userId),
+  index('financial_goals_type_idx').on(table.goalType),
 ]);
 
 // Projection Categories (columns in the projection grid)

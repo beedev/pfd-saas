@@ -99,6 +99,13 @@
       "when": 1780241715917,
       "tag": "0013_colorful_zaladane",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780242634103,
+      "tag": "0014_late_husk",
+      "breakpoints": true
     }
   ]
 }
