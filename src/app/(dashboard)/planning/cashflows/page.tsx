@@ -1,0 +1,749 @@
+'use client';
+
+/**
+ * Cashflow Events — list & timeline view.
+ *
+ * Three layers:
+ *   1. Tile strip — total inflow this FY, next 12 months, one-time
+ *      upcoming count, recurring active count.
+ *   2. Timeline — one horizontal bar per event positioned on a 0-40 year
+ *      axis from today. Bars grouped by source_kind so the user can
+ *      see at a glance "what kicks in when". Pure div / CSS — recharts
+ *      would be overkill for ~30 rows.
+ *   3. DataTable — all events with edit (inline) + delete affordances.
+ *
+ * First-load behaviour: if the user has zero events, fires one
+ * /derive POST automatically so the page never shows empty when there's
+ * any upstream signal to derive from.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { toast } from 'sonner';
+
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  DataTable,
+  Input,
+  Select,
+  StatsDisplay,
+  type Column,
+} from '@dxp/ui';
+import {
+  Activity,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from 'lucide-react';
+
+type CashflowSourceKind =
+  | 'INSURANCE_MATURITY' | 'ANNUITY' | 'PENSION' | 'NPS_LUMPSUM' | 'NPS_ANNUITY'
+  | 'PPF_MATURITY' | 'SSY_MATURITY' | 'NSC_MATURITY' | 'KVP_MATURITY'
+  | 'RENTAL' | 'SALARY' | 'BUSINESS' | 'INHERITANCE' | 'OTHER';
+
+type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';
+type CashflowTaxTreatment = 'TAX_FREE' | 'TAXABLE' | 'TDS';
+
+interface CashflowEvent {
+  id: number;
+  name: string;
+  sourceKind: CashflowSourceKind;
+  sourceId: number | null;
+  startDate: string;
+  endDate: string | null;
+  amountPaisa: number;
+  frequency: CashflowFrequency;
+  growthPctPerYear: number;
+  taxTreatment: CashflowTaxTreatment;
+  autoDerived: boolean;
+  notes: string | null;
+}
+
+const KIND_LABELS: Record<CashflowSourceKind, string> = {
+  INSURANCE_MATURITY: 'Insurance maturity',
+  ANNUITY: 'Annuity',
+  PENSION: 'Pension',
+  NPS_LUMPSUM: 'NPS lumpsum',
+  NPS_ANNUITY: 'NPS annuity',
+  PPF_MATURITY: 'PPF maturity',
+  SSY_MATURITY: 'SSY maturity',
+  NSC_MATURITY: 'NSC maturity',
+  KVP_MATURITY: 'KVP maturity',
+  RENTAL: 'Rental',
+  SALARY: 'Salary',
+  BUSINESS: 'Business',
+  INHERITANCE: 'Inheritance',
+  OTHER: 'Other',
+};
+
+const KIND_OPTIONS: Array<{ label: string; value: CashflowSourceKind }> = (
+  Object.keys(KIND_LABELS) as CashflowSourceKind[]
+).map((k) => ({ label: KIND_LABELS[k], value: k }));
+
+const FREQUENCY_OPTIONS: Array<{ label: string; value: CashflowFrequency }> = [
+  { label: 'One-time', value: 'ONE_TIME' },
+  { label: 'Monthly', value: 'MONTHLY' },
+  { label: 'Yearly', value: 'YEARLY' },
+];
+
+const TAX_OPTIONS: Array<{ label: string; value: CashflowTaxTreatment }> = [
+  { label: 'Tax-free', value: 'TAX_FREE' },
+  { label: 'Taxable', value: 'TAXABLE' },
+  { label: 'TDS deducted', value: 'TDS' },
+];
+
+const formatINR = (paisa: number) =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(paisa / 100);
+
+/** Annualised value of a single event in a given year — used for tile
+ * sums and timeline bar width scaling. */
+function annualInflowForYear(e: CashflowEvent, year: number): number {
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  const startsAfter = e.startDate > yearEnd;
+  const endsBefore = e.endDate != null && e.endDate < yearStart;
+  if (startsAfter || endsBefore) return 0;
+
+  // Apply growth from start_date to year start (compounded).
+  const startYear = new Date(e.startDate).getFullYear();
+  const yearsFromStart = Math.max(0, year - startYear);
+  const grown = e.amountPaisa * Math.pow(1 + (e.growthPctPerYear || 0) / 100, yearsFromStart);
+
+  switch (e.frequency) {
+    case 'ONE_TIME': {
+      const evYear = new Date(e.startDate).getFullYear();
+      return evYear === year ? grown : 0;
+    }
+    case 'MONTHLY':
+      return grown * 12;
+    case 'YEARLY':
+      return grown;
+  }
+}
+
+/** Get current Indian financial year as { startYear, endYear, label }. */
+function currentFY(): { startYear: number; endYear: number; label: string } {
+  const d = new Date();
+  const startYear = d.getMonth() + 1 >= 4 ? d.getFullYear() : d.getFullYear() - 1;
+  return {
+    startYear,
+    endYear: startYear + 1,
+    label: `FY ${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`,
+  };
+}
+
+export default function CashflowEventsPage() {
+  const [events, setEvents] = useState<CashflowEvent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDeriving, setIsDeriving] = useState(false);
+  const [editTarget, setEditTarget] = useState<CashflowEvent | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CashflowEvent | null>(null);
+  const [hasAutoDerived, setHasAutoDerived] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/cashflow-events').then((r) => r.json());
+      setEvents(r.events || []);
+      return r.events as CashflowEvent[];
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to load cashflow events');
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const derive = useCallback(async (silent = false): Promise<void> => {
+    setIsDeriving(true);
+    try {
+      const r = await fetch('/api/cashflow-events/derive', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Failed to derive');
+      if (!silent) {
+        toast.success(
+          `Synced — ${data.upserted} new, ${data.kept} kept, ${data.deleted} removed`,
+        );
+      }
+      await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to derive';
+      if (!silent) toast.error(msg);
+      console.error(e);
+    } finally {
+      setIsDeriving(false);
+    }
+  }, [load]);
+
+  useEffect(() => {
+    (async () => {
+      const initial = await load();
+      // First-time visit gets one auto-derive so the page is never
+      // empty when there's anything upstream. Guarded by hasAutoDerived
+      // so React StrictMode double-invokes don't double-fire it.
+      if (initial.length === 0 && !hasAutoDerived) {
+        setHasAutoDerived(true);
+        await derive(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ─── derived state for the tiles ──────────────────────────────── */
+  const fy = useMemo(() => currentFY(), []);
+
+  const totalFY = useMemo(
+    () => events.reduce((sum, e) => sum + annualInflowForYear(e, fy.startYear), 0),
+    [events, fy.startYear],
+  );
+
+  const total12mo = useMemo(() => {
+    // Sum each event's contribution over today → today+12mo.
+    const now = new Date();
+    const horizon = new Date();
+    horizon.setMonth(horizon.getMonth() + 12);
+    const todayIso = now.toISOString().slice(0, 10);
+    const horizonIso = horizon.toISOString().slice(0, 10);
+
+    return events.reduce((sum, e) => {
+      if (e.startDate > horizonIso) return sum;
+      if (e.endDate && e.endDate < todayIso) return sum;
+      switch (e.frequency) {
+        case 'ONE_TIME':
+          return e.startDate >= todayIso && e.startDate <= horizonIso
+            ? sum + e.amountPaisa
+            : sum;
+        case 'MONTHLY':
+          return sum + e.amountPaisa * 12;
+        case 'YEARLY':
+          return sum + e.amountPaisa;
+      }
+    }, 0);
+  }, [events]);
+
+  const oneTimeUpcomingCount = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return events.filter((e) => e.frequency === 'ONE_TIME' && e.startDate >= today).length;
+  }, [events]);
+
+  const recurringActiveCount = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return events.filter(
+      (e) =>
+        e.frequency !== 'ONE_TIME' &&
+        e.startDate <= today &&
+        (!e.endDate || e.endDate >= today),
+    ).length;
+  }, [events]);
+
+  /* ─── timeline computation ─────────────────────────────────────── */
+  const HORIZON_YEARS = 40;
+  const timelineData = useMemo(() => {
+    if (!events.length) return [];
+    const todayMs = Date.now();
+    const horizonMs = todayMs + HORIZON_YEARS * 365.25 * 86400 * 1000;
+    const range = horizonMs - todayMs;
+
+    return events
+      .slice()
+      .sort((a, b) => a.sourceKind.localeCompare(b.sourceKind) || a.startDate.localeCompare(b.startDate))
+      .map((e) => {
+        const startMs = new Date(e.startDate).getTime();
+        const endMs = e.endDate
+          ? new Date(e.endDate).getTime()
+          : e.frequency === 'ONE_TIME'
+          ? startMs + 86400 * 1000 * 60 // a "blip" — show 60 days of width so it's visible
+          : horizonMs;
+
+        const leftPct = Math.max(0, ((startMs - todayMs) / range) * 100);
+        const widthPct = Math.max(0.6, Math.min(100 - leftPct, ((endMs - startMs) / range) * 100));
+        return { event: e, leftPct, widthPct };
+      });
+  }, [events]);
+
+  /* ─── delete ───────────────────────────────────────────────────── */
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      const r = await fetch(`/api/cashflow-events/${deleteTarget.id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error('delete failed');
+      toast.success('Removed');
+      setDeleteTarget(null);
+      await load();
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to delete');
+    }
+  };
+
+  /* ─── inline edit (modal) ──────────────────────────────────────── */
+  const onSaveEdit = async (updated: CashflowEvent, amountRupees: number) => {
+    try {
+      const r = await fetch(`/api/cashflow-events/${updated.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: updated.name,
+          sourceKind: updated.sourceKind,
+          startDate: updated.startDate,
+          endDate: updated.endDate,
+          amountRupees,
+          frequency: updated.frequency,
+          growthPctPerYear: updated.growthPctPerYear,
+          taxTreatment: updated.taxTreatment,
+          notes: updated.notes,
+          // Promote to manual override — protects the user's edit from
+          // future /derive calls.
+          autoDerived: false,
+        }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update');
+      }
+      toast.success('Updated');
+      setEditTarget(null);
+      await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to update';
+      toast.error(msg);
+    }
+  };
+
+  /* ─── table columns ────────────────────────────────────────────── */
+  const columns: Column<CashflowEvent>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (_v, e) => (
+        <div className="flex flex-col">
+          <span className="font-semibold text-[var(--dxp-text)]">{e.name}</span>
+          {e.notes && (
+            <span className="text-xs text-[var(--dxp-text-muted)]">{e.notes}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'sourceKind',
+      header: 'Type',
+      render: (_v, e) => (
+        <div className="flex flex-col gap-1">
+          <span className="text-sm text-[var(--dxp-text-secondary)]">
+            {KIND_LABELS[e.sourceKind]}
+          </span>
+          {!e.autoDerived && <Badge variant="info">Manual</Badge>}
+        </div>
+      ),
+    },
+    {
+      key: 'startDate',
+      header: 'Start',
+      render: (_v, e) => (
+        <span className="text-sm text-[var(--dxp-text-secondary)]">{e.startDate}</span>
+      ),
+    },
+    {
+      key: 'endDate',
+      header: 'End',
+      render: (_v, e) => (
+        <span className="text-sm text-[var(--dxp-text-muted)]">
+          {e.endDate || (e.frequency === 'ONE_TIME' ? '—' : 'lifelong')}
+        </span>
+      ),
+    },
+    {
+      key: 'amountPaisa',
+      header: 'Amount',
+      render: (_v, e) => (
+        <span className="font-mono font-semibold text-[var(--dxp-text)]">
+          {formatINR(e.amountPaisa)}
+        </span>
+      ),
+    },
+    {
+      key: 'frequency',
+      header: 'Frequency',
+      render: (_v, e) => (
+        <Badge variant={e.frequency === 'ONE_TIME' ? 'warning' : 'success'}>
+          {e.frequency}
+        </Badge>
+      ),
+    },
+    {
+      key: 'growthPctPerYear',
+      header: 'Growth',
+      render: (_v, e) => (
+        <span className="font-mono text-sm text-[var(--dxp-text-secondary)]">
+          {e.growthPctPerYear ? `${e.growthPctPerYear.toFixed(1)}%` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'taxTreatment',
+      header: 'Tax',
+      render: (_v, e) => (
+        <Badge variant={e.taxTreatment === 'TAX_FREE' ? 'success' : 'warning'}>
+          {e.taxTreatment}
+        </Badge>
+      ),
+    },
+    {
+      key: 'id',
+      header: '',
+      render: (_v, e) => (
+        <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              setEditTarget(e);
+            }}
+            aria-label="Edit"
+          >
+            <Pencil className="h-4 w-4 text-[var(--dxp-text-secondary)]" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              setDeleteTarget(e);
+            }}
+            aria-label="Delete"
+          >
+            <Trash2 className="h-4 w-4 text-rose-500" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--dxp-text-muted)]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">
+            Cashflow Events
+          </h1>
+          <p className="text-[var(--dxp-text-secondary)]">
+            Future income & maturity events that fund your goals. Auto-derived from your portfolio.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => derive(false)}
+            disabled={isDeriving}
+          >
+            {isDeriving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Re-derive from assets
+          </Button>
+          <Link href="/planning/cashflows/new">
+            <Button variant="primary">
+              <Plus className="mr-2 h-4 w-4" />
+              Add event
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      <StatsDisplay
+        currency="INR"
+        locale="en-IN"
+        columns={4}
+        stats={[
+          { label: `Inflow ${fy.label}`, value: totalFY / 100, format: 'currency' },
+          { label: 'Inflow next 12 months', value: total12mo / 100, format: 'currency' },
+          { label: 'One-time upcoming', value: oneTimeUpcomingCount, format: 'number' },
+          { label: 'Recurring active', value: recurringActiveCount, format: 'number' },
+        ]}
+      />
+
+      {/* Timeline. Horizontal axis is today → today+40y. Each row is one
+          event. Bars are pure CSS — we compute leftPct / widthPct in
+          memo. Recharts would be overkill for this small dataset. */}
+      <Card>
+        <CardHeader>
+          <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+            <Activity className="h-5 w-5 text-[var(--dxp-brand)]" />
+            Forward timeline · 40 year horizon
+          </h3>
+          <p className="text-xs text-[var(--dxp-text-secondary)]">
+            Each bar shows when an event starts and how long it pays. Hover for details.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {timelineData.length === 0 ? (
+            <p className="py-8 text-center text-[var(--dxp-text-muted)]">
+              No events yet. Click <strong>Re-derive from assets</strong> to populate from your portfolio.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {/* Decade gridlines */}
+              <div className="relative h-5 w-full">
+                {[0, 10, 20, 30, 40].map((y) => (
+                  <span
+                    key={y}
+                    className="absolute text-xs text-[var(--dxp-text-muted)]"
+                    style={{ left: `${(y / HORIZON_YEARS) * 100}%`, transform: 'translateX(-50%)' }}
+                  >
+                    +{y}y
+                  </span>
+                ))}
+              </div>
+              <div className="space-y-1">
+                {timelineData.map(({ event: e, leftPct, widthPct }) => (
+                  <div
+                    key={e.id}
+                    className="group relative grid grid-cols-[200px_1fr] items-center gap-3"
+                  >
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="truncate text-xs font-semibold text-[var(--dxp-text)]">
+                        {e.name}
+                      </span>
+                      <span className="truncate text-[10px] text-[var(--dxp-text-muted)]">
+                        {KIND_LABELS[e.sourceKind]}
+                      </span>
+                    </div>
+                    <div className="relative h-6 w-full rounded bg-[var(--dxp-surface-alt)]">
+                      <div
+                        className={`absolute top-0 h-full rounded transition-all ${
+                          e.frequency === 'ONE_TIME'
+                            ? 'bg-amber-400 hover:bg-amber-500'
+                            : 'bg-[var(--dxp-brand)] hover:opacity-80'
+                        }`}
+                        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                        title={`${e.name} · ${formatINR(e.amountPaisa)} ${e.frequency} · ${e.startDate}${
+                          e.endDate ? ` → ${e.endDate}` : ''
+                        }`}
+                      />
+                      <span className="absolute right-2 top-0 text-[10px] text-[var(--dxp-text-secondary)] opacity-0 transition-opacity group-hover:opacity-100">
+                        {formatINR(e.amountPaisa)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h3 className="text-base font-bold text-[var(--dxp-text)]">
+            All events ({events.length})
+          </h3>
+        </CardHeader>
+        <CardContent>
+          <DataTable<CashflowEvent>
+            columns={columns}
+            data={events}
+            emptyMessage="No events yet — add one or re-derive."
+          />
+        </CardContent>
+      </Card>
+
+      {editTarget && (
+        <EditEventModal
+          event={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSave={onSaveEdit}
+        />
+      )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <Card className="w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <h3 className="text-base font-bold text-[var(--dxp-text)]">Delete event?</h3>
+              <p className="text-xs text-[var(--dxp-text-secondary)]">
+                Removes <strong>{deleteTarget.name}</strong>. If this event was
+                auto-derived, the next re-derive will recreate it.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+                  Cancel
+                </Button>
+                <Button variant="danger" onClick={confirmDelete}>
+                  Delete
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Edit modal ──────────────────────────────────────────────────── */
+
+interface EditModalProps {
+  event: CashflowEvent;
+  onClose: () => void;
+  onSave: (updated: CashflowEvent, amountRupees: number) => Promise<void>;
+}
+
+function EditEventModal({ event, onClose, onSave }: EditModalProps) {
+  const [draft, setDraft] = useState<CashflowEvent>(event);
+  const [amountRupees, setAmountRupees] = useState(String(event.amountPaisa / 100));
+  const [isSaving, setIsSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = parseFloat(amountRupees);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      toast.error('Amount must be a positive number');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSave(draft, amt);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-[var(--dxp-text)]">Edit event</h3>
+            <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-xs text-[var(--dxp-text-secondary)]">
+            Saving promotes this to a manual override — future re-derives won&apos;t touch it.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Name</label>
+                <Input
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Source kind</label>
+                <Select
+                  value={draft.sourceKind}
+                  onChange={(v) => setDraft({ ...draft, sourceKind: v as CashflowSourceKind })}
+                  options={KIND_OPTIONS}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Frequency</label>
+                <Select
+                  value={draft.frequency}
+                  onChange={(v) => setDraft({ ...draft, frequency: v as CashflowFrequency })}
+                  options={FREQUENCY_OPTIONS}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Start date</label>
+                <Input
+                  type="date"
+                  value={draft.startDate}
+                  onChange={(e) => setDraft({ ...draft, startDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">
+                  End date <span className="text-xs text-[var(--dxp-text-muted)]">(blank = lifelong)</span>
+                </label>
+                <Input
+                  type="date"
+                  value={draft.endDate ?? ''}
+                  onChange={(e) => setDraft({ ...draft, endDate: e.target.value || null })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Amount (₹)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={amountRupees}
+                  onChange={(e) => setAmountRupees(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Growth (%/yr)</label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={draft.growthPctPerYear}
+                  onChange={(e) => setDraft({ ...draft, growthPctPerYear: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Tax treatment</label>
+                <Select
+                  value={draft.taxTreatment}
+                  onChange={(v) => setDraft({ ...draft, taxTreatment: v as CashflowTaxTreatment })}
+                  options={TAX_OPTIONS}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm font-semibold text-[var(--dxp-text)] block mb-1">Notes</label>
+                <textarea
+                  value={draft.notes ?? ''}
+                  onChange={(e) => setDraft({ ...draft, notes: e.target.value || null })}
+                  rows={2}
+                  className="w-full rounded border border-[var(--dxp-border)] bg-[var(--dxp-surface)] p-2 text-sm text-[var(--dxp-text)] focus:border-[var(--dxp-brand)] focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={onClose} disabled={isSaving}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" disabled={isSaving}>
+                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save changes
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

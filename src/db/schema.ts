@@ -919,6 +919,103 @@ export const savingsAssetInclusion = pgTable('savings_asset_inclusion', {
 export type SavingsAssetInclusion = typeof savingsAssetInclusion.$inferSelect;
 
 /**
+ * Cashflow Events — Sprint 3.5 Phase 2.
+ *
+ * First-class inflow timeline. Both retirement projection and per-goal
+ * funding projection consume this same table when running their
+ * year-by-year engines. Without this, retirement income from NPS,
+ * LIC maturities, rental, salary etc. would have to be re-derived
+ * everywhere we need it.
+ *
+ * Two flavours of row coexist:
+ *   • auto_derived = true  — generated from an asset table by the
+ *     derivation lib (insurance maturity → INSURANCE_MATURITY event;
+ *     NPS at age 60 → NPS_LUMPSUM + NPS_ANNUITY events; rental
+ *     income → RENTAL recurring event; etc.). Re-deriving is
+ *     idempotent — these rows are replaced on each run keyed by
+ *     (user_id, source_kind, source_id, frequency).
+ *   • auto_derived = false — user-entered manual events (govt
+ *     pension, expected inheritance, side income, deferred NPS
+ *     payout). Preserved across re-derivation.
+ *
+ * Setting auto_derived = false on a row that was originally derived
+ * is the "override" pattern: the user tweaked the auto-suggested
+ * amount/date, so we treat it as manual and stop overwriting it.
+ *
+ * source_id references the underlying asset's id (in whatever table
+ * source_kind implies). Soft FK only — if the asset is deleted, the
+ * derivation re-run drops the orphan row.
+ */
+export type CashflowSourceKind =
+  | 'INSURANCE_MATURITY'
+  | 'ANNUITY'
+  | 'PENSION'
+  | 'NPS_LUMPSUM'
+  | 'NPS_ANNUITY'
+  | 'PPF_MATURITY'
+  | 'SSY_MATURITY'
+  | 'NSC_MATURITY'
+  | 'KVP_MATURITY'
+  | 'RENTAL'
+  | 'SALARY'
+  | 'BUSINESS'
+  | 'INHERITANCE'
+  | 'OTHER';
+
+export type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';
+
+export type CashflowTaxTreatment = 'TAX_FREE' | 'TAXABLE' | 'TDS';
+
+export const cashflowEvents = pgTable('cashflow_events', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  sourceKind: text('source_kind').$type<CashflowSourceKind>().notNull(),
+  /** FK-by-convention into the source table implied by source_kind. */
+  sourceId: integer('source_id'),
+  /** ISO date when the event kicks in. */
+  startDate: text('start_date').notNull(),
+  /** ISO date when the event stops. NULL = lifelong (e.g., NPS annuity,
+   *  govt pension). One-time events may set end_date = start_date or
+   *  leave it null — frequency=ONE_TIME is the authoritative flag. */
+  endDate: text('end_date'),
+  amountPaisa: bigint('amount_paisa', { mode: 'number' }).notNull(),
+  frequency: text('frequency').$type<CashflowFrequency>().notNull(),
+  /** Yearly compounding growth rate as a percentage. 0 = flat, 6 =
+   *  inflation-linked. Applied to amount_paisa for each subsequent
+   *  year from start_date. */
+  growthPctPerYear: real('growth_pct_per_year').notNull().default(0),
+  taxTreatment: text('tax_treatment')
+    .$type<CashflowTaxTreatment>()
+    .notNull()
+    .default('TAXABLE'),
+  /** Optional earmark — if this event is destined to fund a specific
+   *  goal. Goal projection will count it as a dedicated inflow toward
+   *  that goal's demand. */
+  goalId: integer('goal_id').references(() => financialGoals.id, { onDelete: 'set null' }),
+  autoDerived: boolean('auto_derived').notNull().default(false),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('cashflow_events_user_id_idx').on(table.userId),
+  index('cashflow_events_kind_idx').on(table.sourceKind),
+  index('cashflow_events_date_idx').on(table.startDate),
+  index('cashflow_events_goal_idx').on(table.goalId),
+  // Idempotency key for re-derivation: per user, per source instrument,
+  // per kind. NPS produces two events per account (lumpsum + annuity)
+  // distinguished by source_kind — they don't collide.
+  uniqueIndex('cashflow_events_derive_unique').on(
+    table.userId,
+    table.sourceKind,
+    table.sourceId,
+  ),
+]);
+
+export type CashflowEvent = typeof cashflowEvents.$inferSelect;
+export type NewCashflowEvent = typeof cashflowEvents.$inferInsert;
+
+/**
  * Future Savings Plan — singleton row holding forward-looking inputs that
  * project current asset-backed savings onto goal target dates. Replaces the
  * old manual carryforward-style categories (which were source-less and prone

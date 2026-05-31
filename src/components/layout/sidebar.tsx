@@ -39,6 +39,7 @@ import {
   Newspaper,
   Bell,
   CalendarCheck,
+  Activity,
 } from 'lucide-react';
 
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
@@ -100,6 +101,7 @@ const navigation: NavSection[] = [
       { name: 'Subscriptions', href: '/subscriptions', icon: Tag },
       { name: 'Budget', href: '/budget', icon: Wallet },
       { name: 'Monthly Expenses', href: '/budget/monthly', icon: Wallet },
+      { name: 'Cashflow Events', href: '/planning/cashflows', icon: Activity },
       { name: 'Goals', href: '/goals', icon: Target },
       { name: 'Projections', href: '/projections', icon: BarChart3 },
       { name: 'Retirement', href: '/retirement', icon: Sunset },

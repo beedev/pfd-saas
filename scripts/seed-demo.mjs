@@ -644,6 +644,227 @@ await guardSection('scheduled_jobs', 'scheduled_jobs', userId, async () => {
   }
 });
 
+// ─── cashflow_events (derived from the above sections) ───────────
+// This runs AFTER all the asset sections so the SQL projections see
+// every row. We hand-write the derivation in SQL rather than importing
+// the TS lib because seed-demo.mjs is plain Node. Logic mirrors
+// src/lib/finance/cashflow-derivation.ts; keep them in sync if you
+// change the rules.
+//
+// ON CONFLICT DO NOTHING uses the (user_id, source_kind, source_id)
+// unique index — re-running the seed is idempotent.
+await guardSection('cashflow_events_derived', 'cashflow_events', userId, async () => {
+  // Insurance maturities (ENDOWMENT/ULIP/WHOLE_LIFE with a future maturity_date)
+  await sql`
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, insurer || ' ' || policy_type || ' maturity',
+      'INSURANCE_MATURITY', id, maturity_date, maturity_date,
+      COALESCE(NULLIF(maturity_benefit, 0), sum_assured),
+      'ONE_TIME', 0, 'TAX_FREE', true,
+      'Policy ' || policy_number || ' matures on ' || maturity_date
+    FROM insurance_policies
+    WHERE user_id = ${userId}
+      AND (status IS NULL OR status = 'ACTIVE')
+      AND policy_type IN ('ENDOWMENT', 'ULIP', 'WHOLE_LIFE', 'MONEY_BACK')
+      AND maturity_date IS NOT NULL
+      AND maturity_date > ${today}
+      AND COALESCE(NULLIF(maturity_benefit, 0), sum_assured) > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  // Insurance annuities (policies with annuity_amount set)
+  await sql`
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, insurer || ' ' || policy_type || ' annuity',
+      'ANNUITY', id, annuity_start_date, NULL,
+      CASE COALESCE(annuity_frequency, 'MONTHLY')
+        WHEN 'YEARLY'      THEN annuity_amount
+        WHEN 'ANNUAL'      THEN annuity_amount
+        WHEN 'HALF_YEARLY' THEN ROUND(annuity_amount * 2 / 12)
+        WHEN 'QUARTERLY'   THEN ROUND(annuity_amount * 4 / 12)
+        ELSE annuity_amount
+      END,
+      CASE COALESCE(annuity_frequency, 'MONTHLY')
+        WHEN 'YEARLY' THEN 'YEARLY'
+        WHEN 'ANNUAL' THEN 'YEARLY'
+        ELSE 'MONTHLY'
+      END,
+      0, 'TAXABLE', true,
+      'Policy ' || policy_number || ' pays ' || COALESCE(annuity_frequency, 'monthly')
+    FROM insurance_policies
+    WHERE user_id = ${userId}
+      AND (status IS NULL OR status = 'ACTIVE')
+      AND annuity_amount IS NOT NULL
+      AND annuity_amount > 0
+      AND annuity_start_date IS NOT NULL
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  // Real estate rentals
+  await sql`
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, 'Rental — ' || property_name,
+      'RENTAL', id, COALESCE(rent_start_date, ${today}), NULL,
+      monthly_rent, 'MONTHLY', 5, 'TAXABLE', true,
+      CASE WHEN rent_tenant_name IS NOT NULL THEN 'Tenant: ' || rent_tenant_name ELSE NULL END
+    FROM real_estate
+    WHERE user_id = ${userId}
+      AND status IN ('OWNED', 'RENTED')
+      AND monthly_rent IS NOT NULL
+      AND monthly_rent > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  // Small savings maturities (PPF/VPF/NSC/KVP/SSY — SCSS handled separately)
+  await sql`
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, scheme_type || ' maturity (' || account_number || ')',
+      CASE scheme_type
+        WHEN 'PPF'  THEN 'PPF_MATURITY'
+        WHEN 'VPF'  THEN 'PPF_MATURITY'
+        WHEN 'NSC'  THEN 'NSC_MATURITY'
+        WHEN 'KVP'  THEN 'KVP_MATURITY'
+        WHEN 'SSY'  THEN 'SSY_MATURITY'
+      END,
+      id, maturity_date, maturity_date,
+      current_balance_paisa, 'ONE_TIME', 0,
+      CASE WHEN scheme_type IN ('NSC', 'KVP') THEN 'TAXABLE' ELSE 'TAX_FREE' END,
+      true,
+      'Current balance at ' || maturity_date || '; projection not applied (conservative).'
+    FROM small_savings_accounts
+    WHERE user_id = ${userId}
+      AND scheme_type IN ('PPF', 'VPF', 'NSC', 'KVP', 'SSY')
+      AND status NOT IN ('CLOSED', 'MATURED')
+      AND maturity_date > ${today}
+      AND current_balance_paisa > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  // SCSS quarterly payouts → monthly ANNUITY
+  await sql`
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, 'SCSS payout (' || account_number || ')',
+      'ANNUITY', id, opening_date, maturity_date,
+      ROUND(current_balance_paisa * interest_rate_percent / 100 / 12),
+      'MONTHLY', 0, 'TAXABLE', true,
+      'Quarterly interest payouts on SCSS principal — normalised to monthly'
+    FROM small_savings_accounts
+    WHERE user_id = ${userId}
+      AND scheme_type = 'SCSS'
+      AND status NOT IN ('CLOSED', 'MATURED')
+      AND current_balance_paisa > 0
+      AND ROUND(current_balance_paisa * interest_rate_percent / 100 / 12) > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  // Salary income — most recent FY per employer, ends at retirement
+  await sql`
+    WITH ret AS (
+      SELECT current_age, target_age
+      FROM retirement_assumptions
+      WHERE user_id = ${userId}
+      LIMIT 1
+    ),
+    latest AS (
+      SELECT DISTINCT ON (employer_name, employer_tan)
+        id, employer_name, employer_tan, financial_year, taxable_salary_paisa
+      FROM salary_income
+      WHERE user_id = ${userId}
+      ORDER BY employer_name, employer_tan, financial_year DESC
+    )
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, 'Salary — ' || l.employer_name,
+      'SALARY', l.id, ${today},
+      ((${today})::date + ((r.target_age - r.current_age) || ' years')::interval)::date::text,
+      ROUND(l.taxable_salary_paisa / 12),
+      'MONTHLY', 8, 'TAXABLE', true,
+      'Based on FY ' || l.financial_year || ' Form 16; ends at retirement (age ' || r.target_age || ').'
+    FROM latest l, ret r
+    WHERE ROUND(l.taxable_salary_paisa / 12) > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  // NPS Tier-I split — 60% lumpsum + 40% annuity at retirement
+  await sql`
+    WITH ret AS (
+      SELECT current_age, target_age
+      FROM retirement_assumptions
+      WHERE user_id = ${userId}
+      LIMIT 1
+    )
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, 'NPS Tier-I lumpsum (' || account_number || ')',
+      'NPS_LUMPSUM', id,
+      COALESCE(expected_maturity_date, ((${today})::date + ((r.target_age - r.current_age) || ' years')::interval)::date::text),
+      COALESCE(expected_maturity_date, ((${today})::date + ((r.target_age - r.current_age) || ' years')::interval)::date::text),
+      ROUND(total_value * 0.6),
+      'ONE_TIME', 0, 'TAX_FREE', true,
+      '60% withdrawal of corpus at retirement (NPS rule)'
+    FROM nps_accounts, ret r
+    WHERE user_id = ${userId}
+      AND tier = 'TIER1'
+      AND (status IS NULL OR status = 'ACTIVE')
+      AND total_value > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+
+  await sql`
+    WITH ret AS (
+      SELECT current_age, target_age
+      FROM retirement_assumptions
+      WHERE user_id = ${userId}
+      LIMIT 1
+    )
+    INSERT INTO cashflow_events
+      (user_id, name, source_kind, source_id, start_date, end_date,
+       amount_paisa, frequency, growth_pct_per_year, tax_treatment,
+       auto_derived, notes)
+    SELECT
+      ${userId}, 'NPS Tier-I annuity (' || account_number || ')',
+      'NPS_ANNUITY', id,
+      COALESCE(expected_maturity_date, ((${today})::date + ((r.target_age - r.current_age) || ' years')::interval)::date::text),
+      NULL,
+      ROUND(total_value * 0.4 * 0.06 / 12),
+      'MONTHLY', 0, 'TAXABLE', true,
+      '40% of corpus × 6% annuity rate / 12 — recheck against provider quote'
+    FROM nps_accounts, ret r
+    WHERE user_id = ${userId}
+      AND tier = 'TIER1'
+      AND (status IS NULL OR status = 'ACTIVE')
+      AND total_value > 0
+      AND ROUND(total_value * 0.4 * 0.06 / 12) > 0
+    ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
+  `;
+});
+
 // ─── summary ───────────────────────────────────────────────────────
 console.log(`\nSeed complete for ${OWNER_EMAIL} (user.id=${userId}).`);
 console.log(`  Sections seeded: ${sectionsRun.length} — ${sectionsRun.join(', ')}`);
