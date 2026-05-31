@@ -124,8 +124,31 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error('Onboarding insert failed:', err);
-    const message = err instanceof Error ? err.message : 'Onboarding failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Postgres unique-violation = SQLSTATE 23505. Return a friendly 409
+    // with column-specific guidance instead of leaking the raw query
+    // string back to the form.
+    const code = (err as { code?: unknown })?.code;
+    const detail = String((err as { detail?: unknown })?.detail ?? '');
+    if (code === '23505') {
+      if (detail.toLowerCase().includes('gstin')) {
+        return NextResponse.json(
+          {
+            error:
+              'That GSTIN is already registered to another account. ' +
+              'A GSTIN is one-per-business globally — if this is yours, contact support.',
+          },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json(
+        { error: 'A unique field collided. Please review your inputs.' },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json(
+      { error: 'Could not complete onboarding. Please try again.' },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ ok: true });
