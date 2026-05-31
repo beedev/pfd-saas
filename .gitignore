@@ -78,3 +78,6 @@ uploads/
 
 # stub-mode artifacts (magic-links, Telegram payloads, etc.)
 tmp/
+
+# Local DB snapshots — never commit a tenant DB
+backups/
