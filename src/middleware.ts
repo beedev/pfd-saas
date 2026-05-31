@@ -21,6 +21,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 const PUBLIC_PATHS = new Set([
   '/login',
   '/login/check-email',
+  // PWA assets. Must be reachable pre-auth — the manifest is loaded by
+  // every page (including /login); the service worker fails registration
+  // if the script fetch hits even one redirect. None of these expose
+  // tenant data.
+  '/sw.js',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/offline.html',
 ]);
 
 const PUBLIC_PREFIXES = [
