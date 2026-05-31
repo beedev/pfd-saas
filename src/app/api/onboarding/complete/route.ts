@@ -27,7 +27,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
-import { db, businessProfile, userPreferences } from '@/db';
+import {
+  db,
+  businessProfile,
+  scheduledJobs,
+  userPreferences,
+  type JobType,
+} from '@/db';
+
+// Default cron jobs every new user gets seeded with. Schedule is baked
+// in code (Sprint 7+ adds per-user override). next_run_at = NOW() means
+// the first tick after sign-up will run them.
+const DEFAULT_JOBS: JobType[] = ['daily_digest', 'alerts_check', 'sip_auto_execute'];
 
 /**
  * Walk the `cause` chain of a thrown value looking for a Postgres-shaped
@@ -147,6 +158,17 @@ export async function POST(request: NextRequest) {
           financialYear: body.financialYear!.trim(),
         });
       }
+
+      // Seed the user's cron job rows so the dispatcher picks them up
+      // from the next tick. Same set as migration 0007's backfill.
+      await tx.insert(scheduledJobs).values(
+        DEFAULT_JOBS.map((jobType) => ({
+          userId,
+          jobType,
+          enabled: true,
+          nextRunAt: new Date(),
+        })),
+      );
     });
   } catch (err) {
     console.error('Onboarding insert failed:', err);

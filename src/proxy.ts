@@ -35,6 +35,7 @@ const PUBLIC_PATHS = new Set([
 const PUBLIC_PREFIXES = [
   '/_next/',
   '/api/auth/',
+  '/api/cron/', // cron endpoints gate on Authorization: Bearer <CRON_SECRET>
   '/favicon.ico',
 ];
 

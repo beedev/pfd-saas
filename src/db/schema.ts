@@ -99,6 +99,47 @@ export const userPreferences = pgTable('user_preferences', {
 export type UserPreferences = typeof userPreferences.$inferSelect;
 export type NewUserPreferences = typeof userPreferences.$inferInsert;
 
+/**
+ * Per-user cron job ledger. Drives the `/api/cron/tick` dispatcher
+ * (Sprint 2 Phase 5). One row per user × job type:
+ *
+ *   - daily_digest        — once per day, generates portfolio digest
+ *   - alerts_check        — every ~5 min during market hours
+ *   - sip_auto_execute    — once per day, runs SIPs due today
+ *
+ * `next_run_at` is the canonical "is this job due?" signal. The tick
+ * endpoint selects rows where next_run_at <= NOW() and enabled = true,
+ * runs the job, then bumps next_run_at forward (per-job logic decides
+ * the next slot).
+ *
+ * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
+ */
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute';
+export type JobStatus = 'pending' | 'success' | 'failed';
+
+export const scheduledJobs = pgTable('scheduled_jobs', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  jobType: text('job_type').$type<JobType>().notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  nextRunAt: timestamp('next_run_at', { mode: 'date' }).notNull(),
+  lastRunAt: timestamp('last_run_at', { mode: 'date' }),
+  lastRunStatus: text('last_run_status').$type<JobStatus>(),
+  lastRunError: text('last_run_error'),
+  // How many times this row has been run. Useful for diagnosing stuck
+  // jobs and for rate-limit-style throttling later.
+  runCount: integer('run_count').notNull().default(0),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('scheduled_jobs_user_id_idx').on(table.userId),
+  index('scheduled_jobs_next_run_idx').on(table.nextRunAt),
+  uniqueIndex('scheduled_jobs_user_job_unique').on(table.userId, table.jobType),
+]);
+
+export type ScheduledJob = typeof scheduledJobs.$inferSelect;
+export type NewScheduledJob = typeof scheduledJobs.$inferInsert;
+
 /* ─── Domain tables ─────────────────────────────────────────────────── */
 
 // Business Profile (single row for self)

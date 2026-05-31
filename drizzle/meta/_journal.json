@@ -50,6 +50,13 @@
       "when": 1780217138913,
       "tag": "0006_large_ultimatum",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780225067064,
+      "tag": "0007_petite_sauron",
+      "breakpoints": true
     }
   ]
 }
