@@ -19,6 +19,7 @@ import {
   Briefcase,
   Building2,
   ExternalLink,
+  FileText,
   PiggyBank,
   TrendingUp,
 } from 'lucide-react';
@@ -28,13 +29,14 @@ interface IncomeSummary {
   currentFy: string;
   stream: {
     salary: { count: number; totalPaisa: number };
+    freelance: { count: number; totalPaisa: number };
     otherTaxable: { count: number; totalPaisa: number };
     otherExempt: { count: number; totalPaisa: number };
     rental: { count: number; totalPaisa: number };
     capitalGains: { ltcgPaisa: number; stcgPaisa: number; totalPaisa: number };
   };
   totalsPaisa: { all: number; taxable: number; exempt: number };
-  trend: Array<{ fy: string; salaryPaisa: number; otherPaisa: number; cgPaisa: number; totalPaisa: number }>;
+  trend: Array<{ fy: string; salaryPaisa: number; freelancePaisa: number; otherPaisa: number; cgPaisa: number; totalPaisa: number }>;
 }
 
 function formatINR(paisa: number): string {
@@ -100,6 +102,14 @@ export default function IncomePage() {
               href="/tax/itr3/salary"
             />
             <StreamRow
+              icon={FileText}
+              title="Freelance / Business (GST)"
+              detail={`${stream.freelance.count} finalised invoice(s)`}
+              amount={stream.freelance.totalPaisa}
+              href="/gst/invoices"
+              note="Taxable amount (pre-GST). GST collected is not income."
+            />
+            <StreamRow
               icon={Building2}
               title="Rental"
               detail={`${stream.rental.count} property/properties tenanted`}
@@ -146,6 +156,7 @@ export default function IncomePage() {
                 <tr>
                   <th className="px-3 py-2 text-left">FY</th>
                   <th className="px-3 py-2 text-right">Salary</th>
+                  <th className="px-3 py-2 text-right">Freelance</th>
                   <th className="px-3 py-2 text-right">Other sources</th>
                   <th className="px-3 py-2 text-right">Capital gains</th>
                   <th className="px-3 py-2 text-right">Total</th>
@@ -159,6 +170,7 @@ export default function IncomePage() {
                       {row.fy === fy && <span className="ml-2 text-xs text-amber-700">current</span>}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.salaryPaisa)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{formatINR(row.freelancePaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.otherPaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.cgPaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono font-semibold">{formatINR(row.totalPaisa)}</td>

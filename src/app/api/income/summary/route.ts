@@ -23,6 +23,7 @@ import { auth } from '@/auth';
 import {
   db,
   capitalGains,
+  invoices,
   otherSourcesIncome,
   realEstate,
   salaryIncome,
@@ -57,11 +58,15 @@ export async function GET() {
   const fy = currentFy();
 
   try {
-    const [salaries, others, gains, properties] = await Promise.all([
+    const [salaries, others, gains, properties, invs] = await Promise.all([
       db.select().from(salaryIncome).where(eq(salaryIncome.userId, userId)).orderBy(desc(salaryIncome.financialYear)),
       db.select().from(otherSourcesIncome).where(eq(otherSourcesIncome.userId, userId)).orderBy(desc(otherSourcesIncome.financialYear)),
       db.select().from(capitalGains).where(eq(capitalGains.userId, userId)).orderBy(desc(capitalGains.saleDate)),
       db.select().from(realEstate).where(eq(realEstate.userId, userId)),
+      // Finalised GST invoices = freelance / consulting / business income.
+      // taxable_amount (not total_amount) is the actual earnings; total
+      // includes GST collected on behalf of govt.
+      db.select().from(invoices).where(eq(invoices.userId, userId)).orderBy(desc(invoices.invoiceDate)),
     ]);
 
     // Current FY aggregates
@@ -85,8 +90,13 @@ export async function GET() {
       .filter((g) => g.holdingPeriod === 'STCG')
       .reduce((s, g) => s + (g.taxableGain ?? 0), 0);
 
-    const allTotal = salaryTotal + otherTaxableTotal + otherExemptTotal + rentalTotal + ltcg + stcg;
-    const taxableTotal = salaryTotal + otherTaxableTotal + rentalTotal + ltcg + stcg;
+    // Finalised invoices issued in the current FY. Status='FINAL' filters
+    // out drafts. taxableAmount = pre-GST income.
+    const invsThisFy = invs.filter((i) => i.status === 'FINAL' && dateToFy(i.invoiceDate) === fy);
+    const freelanceTotal = invsThisFy.reduce((s, i) => s + (i.taxableAmount ?? 0), 0);
+
+    const allTotal = salaryTotal + otherTaxableTotal + otherExemptTotal + rentalTotal + ltcg + stcg + freelanceTotal;
+    const taxableTotal = salaryTotal + otherTaxableTotal + rentalTotal + ltcg + stcg + freelanceTotal;
 
     // 5-FY trend
     const fyList = Array.from({ length: 5 }, (_, i) => fyShift(fy, -i));
@@ -100,12 +110,16 @@ export async function GET() {
       const cg = gains
         .filter((g) => dateToFy(g.saleDate) === targetFy)
         .reduce((s, g) => s + (g.taxableGain ?? 0), 0);
+      const free = invs
+        .filter((i) => i.status === 'FINAL' && dateToFy(i.invoiceDate) === targetFy)
+        .reduce((s, i) => s + (i.taxableAmount ?? 0), 0);
       return {
         fy: targetFy,
         salaryPaisa: sal,
+        freelancePaisa: free,
         otherPaisa: oth,
         cgPaisa: cg,
-        totalPaisa: sal + oth + cg,
+        totalPaisa: sal + free + oth + cg,
       };
     });
 
@@ -113,6 +127,7 @@ export async function GET() {
       currentFy: fy,
       stream: {
         salary: { count: salaryThisFy.length, totalPaisa: salaryTotal },
+        freelance: { count: invsThisFy.length, totalPaisa: freelanceTotal },
         otherTaxable: { count: otherTaxableRows.length, totalPaisa: otherTaxableTotal },
         otherExempt: { count: otherExemptRows.length, totalPaisa: otherExemptTotal },
         rental: { count: tenantedProps.length, totalPaisa: rentalTotal },
