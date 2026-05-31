@@ -1,36 +1,33 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { signIn } from 'next-auth/react';
 
+/**
+ * Email magic-link sign-in.
+ *
+ * The submit POSTs through next-auth/react -> /api/auth/signin/nodemailer.
+ * Auth.js generates a verification token, stores it in verification_token,
+ * and calls our sendVerificationRequest stub (see src/auth.ts) which logs
+ * the URL to the dev console + tmp/magic-links.log instead of emailing.
+ *
+ * After submit we land on /login/check-email (the verifyRequest page).
+ */
 export default function LoginPage() {
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-
-      if (res.ok) {
-        router.push('/');
-        router.refresh();
-      } else {
-        const data = await res.json();
-        setError(data.error || 'Invalid password');
-      }
+      // Auth.js takes over navigation — it redirects to verifyRequest on
+      // success or to /login?error=... on failure.
+      await signIn('nodemailer', { email, callbackUrl: '/' });
     } catch {
-      setError('Something went wrong');
-    } finally {
+      setError('Could not send sign-in link');
       setLoading(false);
     }
   }
@@ -43,27 +40,28 @@ export default function LoginPage() {
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-amber-100 mb-4">
               <svg className="w-7 h-7 text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
             </div>
-            <h1 className="text-xl font-semibold text-gray-900">Finance Dashboard</h1>
-            <p className="text-sm text-gray-500 mt-1">Enter your password to continue</p>
+            <h1 className="text-xl font-semibold text-gray-900">Sign in</h1>
+            <p className="text-sm text-gray-500 mt-1">We&rsquo;ll send a one-time link to your email.</p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
-                Password
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
+                Email
               </label>
               <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
                 autoFocus
                 required
+                autoComplete="email"
                 className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors"
               />
             </div>
@@ -79,13 +77,13 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full py-2.5 px-4 rounded-lg bg-amber-700 hover:bg-amber-800 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? 'Sending link…' : 'Email me a sign-in link'}
             </button>
           </form>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4">
-          Personal Finance Dashboard
+          Personal Finance Dashboard · India
         </p>
       </div>
     </div>

@@ -75,3 +75,6 @@ personal-finance.db.pre-restore-*
 .env
 .env.local
 uploads/
+
+# stub-mode artifacts (magic-links, Telegram payloads, etc.)
+tmp/

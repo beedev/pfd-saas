@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { signOut } from 'next-auth/react';
+import { LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -165,10 +167,16 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-gray-800 p-4">
-        <p className="text-xs text-gray-500">
-          Personal Finance v0.3.0
-        </p>
+      <div className="border-t border-gray-800 p-4 space-y-3">
+        <button
+          type="button"
+          onClick={() => signOut({ callbackUrl: '/login' })}
+          className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+        >
+          <LogOut className="mr-3 h-5 w-5 text-gray-400" />
+          Sign out
+        </button>
+        <p className="text-xs text-gray-500">pfd-saas · v0.1</p>
       </div>
     </div>
   );
