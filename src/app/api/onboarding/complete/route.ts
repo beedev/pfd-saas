@@ -29,6 +29,32 @@ import { eq } from 'drizzle-orm';
 import { auth } from '@/auth';
 import { db, businessProfile, userPreferences } from '@/db';
 
+/**
+ * Walk the `cause` chain of a thrown value looking for a Postgres-shaped
+ * error (has `.code` as a string). Drizzle wraps the underlying
+ * PostgresError as `cause` when a transaction fails, so the outer
+ * Error doesn't carry `.code` directly. Five-level depth limit is
+ * defensive against accidental cycles.
+ */
+function findPgError(err: unknown): { code?: string; detail?: string } {
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    if (typeof cur === 'object' && cur !== null) {
+      const c = cur as { code?: unknown; detail?: unknown; cause?: unknown };
+      if (typeof c.code === 'string') {
+        return {
+          code: c.code,
+          detail: typeof c.detail === 'string' ? c.detail : '',
+        };
+      }
+      cur = c.cause;
+    } else {
+      break;
+    }
+  }
+  return {};
+}
+
 interface OnboardingBody {
   displayName?: string;
   financialYearStartMonth?: number;
@@ -124,13 +150,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error('Onboarding insert failed:', err);
-    // Postgres unique-violation = SQLSTATE 23505. Return a friendly 409
-    // with column-specific guidance instead of leaking the raw query
-    // string back to the form.
-    const code = (err as { code?: unknown })?.code;
-    const detail = String((err as { detail?: unknown })?.detail ?? '');
+    // Postgres unique-violation = SQLSTATE 23505. Drizzle wraps the
+    // underlying PostgresError as `cause`, so we have to walk the
+    // chain — `.code` is undefined on the outer error.
+    const { code, detail } = findPgError(err);
     if (code === '23505') {
-      if (detail.toLowerCase().includes('gstin')) {
+      if ((detail ?? '').toLowerCase().includes('gstin')) {
         return NextResponse.json(
           {
             error:
