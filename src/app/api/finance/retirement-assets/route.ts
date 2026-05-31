@@ -23,6 +23,7 @@ import {
   providentFund,
   insurancePolicies,
   realEstate,
+  smallSavingsAccounts,
   type RetirementAssetSelection,
 } from '@/db';
 import { auth } from '@/auth';
@@ -63,6 +64,7 @@ interface AssetClassRow {
   assetClass:
     | 'NPS'
     | 'PF'
+    | 'SMALL_SAVINGS'
     | 'ANNUITY_POLICIES'
     | 'INSURANCE_POLICIES'
     | 'REAL_ESTATE';
@@ -84,11 +86,12 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const [nps, pf, ins, props, selections] = await Promise.all([
+    const [nps, pf, ins, props, smallSavings, selections] = await Promise.all([
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
       db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
       db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
+      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
       db.select().from(retirementAssetSelection).where(eq(retirementAssetSelection.userId, session.user.id)),
     ]);
 
@@ -117,6 +120,28 @@ export async function GET() {
         included: sel ? !!sel.included : true,
       };
     });
+
+    // ─── SMALL_SAVINGS ──────────────────────────────────────────────────
+    // PPF/VPF/SSY default-on (long-horizon tax-free corpora that mature
+    // around retirement age). NSC/KVP/SCSS off by default — shorter
+    // horizons or non-retirement use cases.
+    const ssItems: RetirementItem[] = smallSavings
+      .filter((a) => a.status === 'ACTIVE' || a.status === 'EXTENDED')
+      .map((a) => {
+        const sel = findRow(selections, 'SMALL_SAVINGS', a.id);
+        return {
+          id: a.id,
+          label: `${a.schemeType} · ${a.holderName}`,
+          sublabel: a.accountNumber ?? undefined,
+          valuePaisa: a.currentBalancePaisa,
+          maturityDate: a.maturityDate ?? null,
+          included: sel
+            ? !!sel.included
+            : a.schemeType === 'PPF' ||
+              a.schemeType === 'VPF' ||
+              a.schemeType === 'SSY',
+        };
+      });
 
     // ─── ANNUITY_POLICIES ───────────────────────────────────────────────
     const annuityItems: RetirementItem[] = ins
@@ -202,6 +227,12 @@ export async function GET() {
         label: 'Provident Fund',
         basis: 'Full balance withdrawn at retirement; grows at PF rate (default 8.25%) till then.',
         items: pfItems,
+      },
+      {
+        assetClass: 'SMALL_SAVINGS',
+        label: 'Small Savings',
+        basis: 'PPF/VPF/SSY — long-horizon tax-free corpus that matures around retirement age. NSC/KVP/SCSS shorter-horizon — off by default.',
+        items: ssItems,
       },
       {
         assetClass: 'ANNUITY_POLICIES',

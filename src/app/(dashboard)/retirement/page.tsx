@@ -16,8 +16,26 @@
  */
 
 import { useEffect, useState, useCallback, ReactNode, useMemo } from 'react';
-import { Card, CardHeader, CardContent, StatsDisplay, Input } from '@dxp/ui';
-import { Loader2, Sunset, Coins, ChevronDown, ChevronUp } from 'lucide-react';
+import Link from 'next/link';
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  CardContent,
+  DataTable,
+  Input,
+  StatsDisplay,
+} from '@dxp/ui';
+import {
+  ArrowRight,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Coins,
+  Loader2,
+  Sunset,
+} from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -55,6 +73,7 @@ interface RetirementItem {
 type AssetClassKey =
   | 'NPS'
   | 'PF'
+  | 'SMALL_SAVINGS'
   | 'ANNUITY_POLICIES'
   | 'INSURANCE_POLICIES'
   | 'REAL_ESTATE';
@@ -64,6 +83,57 @@ interface AssetClassRow {
   label: string;
   basis: string;
   items: RetirementItem[];
+}
+
+/* ─── types mirrored from /api/cashflow-events ────────────────────────── */
+
+type CashflowSourceKind =
+  | 'INSURANCE_MATURITY' | 'ANNUITY' | 'PENSION' | 'NPS_LUMPSUM' | 'NPS_ANNUITY'
+  | 'PPF_MATURITY' | 'SSY_MATURITY' | 'NSC_MATURITY' | 'KVP_MATURITY'
+  | 'RENTAL' | 'SALARY' | 'BUSINESS' | 'INHERITANCE' | 'OTHER';
+type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';
+type CashflowTaxTreatment = 'TAX_FREE' | 'TAXABLE' | 'TDS';
+
+interface CashflowEvent {
+  id: number;
+  name: string;
+  sourceKind: CashflowSourceKind;
+  sourceId: number | null;
+  startDate: string;
+  endDate: string | null;
+  amountPaisa: number;
+  frequency: CashflowFrequency;
+  growthPctPerYear: number;
+  taxTreatment: CashflowTaxTreatment;
+  autoDerived: boolean;
+  notes: string | null;
+}
+
+const KIND_LABELS: Record<CashflowSourceKind, string> = {
+  INSURANCE_MATURITY: 'Insurance maturity',
+  ANNUITY: 'Annuity',
+  PENSION: 'Pension',
+  NPS_LUMPSUM: 'NPS lumpsum',
+  NPS_ANNUITY: 'NPS annuity',
+  PPF_MATURITY: 'PPF maturity',
+  SSY_MATURITY: 'SSY maturity',
+  NSC_MATURITY: 'NSC maturity',
+  KVP_MATURITY: 'KVP maturity',
+  RENTAL: 'Rental',
+  SALARY: 'Salary',
+  BUSINESS: 'Business',
+  INHERITANCE: 'Inheritance',
+  OTHER: 'Other',
+};
+
+/** Source-kind chip color logic. TAX_FREE → success, TAXABLE → default,
+ *  TDS → warning. Mirrors the /planning/cashflows page convention. */
+function taxBadgeVariant(t: CashflowTaxTreatment): 'success' | 'warning' | 'default' {
+  switch (t) {
+    case 'TAX_FREE': return 'success';
+    case 'TDS': return 'warning';
+    case 'TAXABLE': return 'default';
+  }
 }
 
 /* ─── small helpers ───────────────────────────────────────────────────── */
@@ -133,6 +203,10 @@ export default function RetirementPage() {
   // Retirement-asset selection
   const [classes, setClasses] = useState<AssetClassRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Cashflow events — derived from insurance/NPS/PPF/rental/annuity etc.
+  // by /api/cashflow-events/derive. Surfaced here as an "Income arrivals"
+  // strip so the user can see which events will fire during retirement.
+  const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -177,6 +251,20 @@ export default function RetirementPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Fetch all cashflow events once. We filter to the retirement window
+  // client-side (depends on currentAge/targetAge/retirementDuration which
+  // can change after load).
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/cashflow-events').then((r) => r.json());
+        setCashflowEvents(r.events || []);
+      } catch (e) {
+        console.error('Failed to load cashflow events', e);
+      }
+    })();
+  }, []);
 
   // Persist a single assumption field on blur (numbers or booleans).
   const saveAssumption = (body: Record<string, number | boolean>) => {
@@ -718,6 +806,52 @@ export default function RetirementPage() {
     liquidYrsHeld,
     stableYrsHeld,
   ]);
+
+  /* ─── retirement-window cashflow events ───────────────────────────── */
+  // Filter all events to those active during the user's retirement years.
+  // The retirement window is [retirementStartYear, lifeExpectancyYear]
+  // where retirementStartYear = currentCalendarYear + (targetAge - currentAge)
+  // and lifeExpectancyYear = retirementStartYear + retirementDuration.
+  const retirementEvents = useMemo(() => {
+    const yearsToRetire = Math.max(0, targetAge - currentAge);
+    const retirementStartYear = new Date().getFullYear() + yearsToRetire;
+    const lifeExpectancyYear = retirementStartYear + retirementDuration;
+    return cashflowEvents.filter((e) => {
+      const startYear = new Date(e.startDate).getFullYear();
+      if (e.frequency === 'ONE_TIME') {
+        // TODO: revisit once cashflow-event validation enforces start_date
+        // is in the future. For now we include backfilled historical
+        // maturities so long as they sit within the retirement window —
+        // the user may be modelling something they expect to draw down on.
+        return startYear >= retirementStartYear && startYear <= lifeExpectancyYear;
+      }
+      // MONTHLY / YEARLY — active in retirement if either it has no end
+      // date (lifelong) or it ends after retirement starts.
+      if (!e.endDate) return true;
+      const endYear = new Date(e.endDate).getFullYear();
+      return endYear >= retirementStartYear;
+    });
+  }, [cashflowEvents, currentAge, targetAge, retirementDuration]);
+
+  /** Yearly equivalent of a recurring event for the "annual income" tile. */
+  const annualEquivalent = (e: CashflowEvent): number => {
+    switch (e.frequency) {
+      case 'MONTHLY': return e.amountPaisa * 12;
+      case 'YEARLY': return e.amountPaisa;
+      case 'ONE_TIME': return 0;
+    }
+  };
+
+  const retirementEventStats = useMemo(() => {
+    const oneTime = retirementEvents.filter((e) => e.frequency === 'ONE_TIME');
+    const recurring = retirementEvents.filter((e) => e.frequency !== 'ONE_TIME');
+    return {
+      oneTimeCount: oneTime.length,
+      oneTimeTotalPaisa: oneTime.reduce((s, e) => s + e.amountPaisa, 0),
+      recurringCount: recurring.length,
+      recurringAnnualPaisa: recurring.reduce((s, e) => s + annualEquivalent(e), 0),
+    };
+  }, [retirementEvents]);
 
   // On-track indicator
   const savingsCapacity = monthlyExpense * 0.5;
@@ -1269,6 +1403,141 @@ export default function RetirementPage() {
                 {retirementDuration - projection.yearsLasted === 1 ? '' : 's'} of the {retirementDuration}-year plan.
               </>
             )}
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Income arrivals during retirement — surfaces the cashflow_events
+          timeline filtered to retirement years. This is a read-only
+          inventory; the cascade math already inflates / discounts these
+          via NPS / annuity / rental / ladder calculations above. Edits
+          happen on /planning/cashflows. */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+                <Calendar className="h-5 w-5 text-[var(--dxp-brand)]" />
+                Income arrivals during retirement
+              </h3>
+              <p className="text-xs text-[var(--dxp-text-secondary)]">
+                These cashflow events will fire during your retirement years —
+                pulled from your insurance/NPS/PPF/rental/annuity data via the
+                cashflow_events timeline.
+              </p>
+            </div>
+            <Link href="/planning/cashflows">
+              <Button variant="secondary" size="sm">
+                Manage events
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <StatsDisplay
+            currency="INR"
+            locale="en-IN"
+            columns={4}
+            stats={[
+              { label: 'One-time arrivals', value: retirementEventStats.oneTimeCount, format: 'number' },
+              { label: 'Total one-time value', value: retirementEventStats.oneTimeTotalPaisa / 100, format: 'currency' },
+              { label: 'Recurring streams', value: retirementEventStats.recurringCount, format: 'number' },
+              { label: 'Total annual recurring income', value: retirementEventStats.recurringAnnualPaisa / 100, format: 'currency' },
+            ]}
+          />
+          <div className="mt-4">
+            <DataTable<CashflowEvent>
+              data={retirementEvents}
+              emptyMessage="No cashflow events scheduled for your retirement window."
+              columns={[
+                {
+                  key: 'sourceKind',
+                  header: 'Source',
+                  render: (_v, e) => (
+                    <Badge variant={taxBadgeVariant(e.taxTreatment)}>
+                      {KIND_LABELS[e.sourceKind]}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: 'name',
+                  header: 'Event',
+                  render: (_v, e) => (
+                    <span className="font-semibold text-[var(--dxp-text)]">{e.name}</span>
+                  ),
+                },
+                {
+                  key: 'startDate',
+                  header: 'Start',
+                  render: (_v, e) => (
+                    <span className="text-xs text-[var(--dxp-text-secondary)]">
+                      {fmtMonthYear(e.startDate)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'endDate',
+                  header: 'End',
+                  render: (_v, e) => (
+                    <span className="text-xs text-[var(--dxp-text-muted)]">
+                      {e.endDate
+                        ? fmtMonthYear(e.endDate)
+                        : e.frequency === 'ONE_TIME'
+                        ? '—'
+                        : 'lifelong'}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'amountPaisa',
+                  header: 'Amount',
+                  render: (_v, e) => (
+                    <span className="font-mono font-semibold text-[var(--dxp-text)]">
+                      {formatINR(e.amountPaisa)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'frequency',
+                  header: 'Frequency',
+                  render: (_v, e) => (
+                    <Badge variant={e.frequency === 'ONE_TIME' ? 'warning' : 'info'}>
+                      {e.frequency}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: 'taxTreatment',
+                  header: 'Tax',
+                  render: (_v, e) => (
+                    <Badge variant={taxBadgeVariant(e.taxTreatment)}>
+                      {e.taxTreatment}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: 'growthPctPerYear',
+                  header: 'Growth',
+                  render: (_v, e) => (
+                    <span className="font-mono text-xs text-[var(--dxp-text-secondary)]">
+                      {e.growthPctPerYear ? `${e.growthPctPerYear.toFixed(1)}%` : '—'}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </div>
+          <p className="mt-3 text-[11px] text-[var(--dxp-text-muted)]">
+            These events feed the corpus depletion chart above as inflows in
+            the years they fire. To change one, edit it in{' '}
+            <Link
+              href="/planning/cashflows"
+              className="text-[var(--dxp-brand)] underline hover:no-underline"
+            >
+              Cashflow Events
+            </Link>
+            .
           </p>
         </CardContent>
       </Card>
