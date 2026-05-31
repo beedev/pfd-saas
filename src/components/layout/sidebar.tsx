@@ -87,7 +87,7 @@ const navigation: NavSection[] = [
       { name: 'Capital Gains', href: '/tax/ltcg-stcg', icon: Calculator },
       { name: 'Documents', href: '/tax/documents', icon: FolderOpen },
       { name: 'Filing Pack', href: '/tax/filing-pack', icon: Package },
-      { name: 'ITR-3 Filing', href: '/tax/itr3', icon: FileText },
+      { name: 'ITR Filing', href: '/tax/itr3', icon: FileText },
     ],
   },
   {
