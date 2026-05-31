@@ -16,13 +16,30 @@ countries later.
 
 ## Status
 
-**Sprint 1 complete.** Multi-tenant Postgres skeleton with magic-link
-auth and the owner's real data imported and verified. Two-user isolation
-confirmed end-to-end. See `ORCHESTRATOR_CONTEXT.md` (gitignored, local
-workflow doc) for the multi-sprint roadmap. Subsequent sprints (Sprint 2
-productize → Sprint 3 India modules → Sprint 4 tax hardening → Sprint 5
-SaaS infra → Sprint 6 launch) are scoped phase-by-phase as we enter
-them.
+**Sprint 2 complete.** Building on Sprint 1's multi-tenant foundation:
+- Onboarding wizard with GST/no-GST branching
+- Mobile-responsive (sidebar drawer + DataTable card layout on `<md`)
+- PWA shell — installable, offline fallback page, manifest, service worker
+- Per-tenant cron: `/api/cron/tick` dispatches `daily_digest`,
+  `alerts_check`, `sip_auto_execute` per user from a `scheduled_jobs`
+  ledger
+- Synthetic demo seed (`scripts/seed-demo.mjs`) populates 20 sections
+  for a fresh user
+- Real magic-link email via SMTP (Gmail / Resend / Postmark — auto-falls
+  back to console-log stub when `EMAIL_SERVER` is unset)
+- Real Telegram alerts (when `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`
+  set; otherwise stubbed to `tmp/telegram-out.log`)
+- Tenant-scoped unique indices everywhere (the multi-tenancy invariant
+  reaches every constraint, not just every query)
+
+Two-user data isolation verified end-to-end. See `ORCHESTRATOR_CONTEXT.md`
+(gitignored) for the multi-sprint roadmap. Sprint 3 (India modules) is
+next; Sprint 4-6 scoped phase-by-phase as we enter them.
+
+Deferred from Sprint 2:
+- Docker / docker-compose self-host scaffold (real SMTP via Gmail
+  obsoleted the Mailpit dev-SMTP need; full Docker comes in Sprint 5
+  with deployment infrastructure).
 
 ## Key invariants (don't break these)
 

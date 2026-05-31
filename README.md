@@ -4,9 +4,10 @@ A generic personal finance planner for India. SaaS edition of
 [beedev/pfd](https://github.com/beedev/pfd) — multi-tenant, Postgres-backed,
 magic-link auth.
 
-**Status:** Sprint 1 complete — multi-tenant skeleton with the owner's
-real data imported and two-user isolation verified end-to-end. Pre-launch;
-no public deploy yet.
+**Status:** Sprint 2 complete — multi-tenant skeleton + onboarding +
+PWA + per-tenant cron + real Gmail/SMTP magic-link delivery. Demo
+seed script lets anyone clone and bring up a fully-populated dashboard
+in minutes. Pre-launch; no public deploy yet.
 
 ---
 
@@ -222,10 +223,10 @@ Sprint sequence:
 
 - **Sprint 1** ✅ Foundation — Postgres + multi-tenancy + Auth
 - **Sprint 1.5** ✅ Data import + smoke test (one-time, for the owner)
-- **Sprint 2** ⏳ Productize — onboarding, mobile-responsive, PWA, per-tenant cron, demo data, docker-compose
+- **Sprint 2** ✅ Productize — onboarding, mobile-responsive, PWA, per-tenant cron, demo data, real SMTP. Docker self-host scaffold deferred to Sprint 5.
 - **Sprint 3** ⏳ India modules — Health Insurance, Income tracker, Vehicle Insurance, Subscriptions, Small Savings Schemes
 - **Sprint 4** ⏳ Tax hardening — regime toggle, slab abstraction, Form 26AS, ITR-1/2 export
-- **Sprint 5** ⏳ SaaS infra — real SMTP, Razorpay billing, pricing tiers, marketing + docs sites
+- **Sprint 5** ⏳ SaaS infra — Razorpay billing, pricing tiers, Docker self-host, marketing + docs sites
 - **Sprint 6** ⏳ Launch — deploy, domain, legal, observability, backups, beta, public
 
 ## License
