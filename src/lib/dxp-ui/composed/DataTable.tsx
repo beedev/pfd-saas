@@ -18,6 +18,14 @@ export interface DataTableProps<T extends object> {
   pagination?: { page: number; pageSize: number; total: number; onChange: (page: number) => void };
 }
 
+/**
+ * DataTable renders a table on md+ and a stacked card layout on <md.
+ * Same sort, same pagination, same empty/loading states. The first
+ * column is used as the card title; subsequent columns become
+ * label/value rows inside the card. Sorting controls are hidden on
+ * mobile (low value on small screens; tap the column header in a
+ * future iteration if needed).
+ */
 export function DataTable<T extends object>({
   columns, data, onRowClick, emptyMessage = 'No data found', loading, pagination,
 }: DataTableProps<T>) {
@@ -39,9 +47,15 @@ export function DataTable<T extends object>({
 
   const totalPages = pagination ? Math.ceil(pagination.total / pagination.pageSize) : 0;
 
+  const renderCell = (col: Column<T>, row: T): React.ReactNode => {
+    const value = (row as Record<string, unknown>)[col.key];
+    return col.render ? col.render(value, row) : String(value ?? '');
+  };
+
   return (
-    <div className="overflow-hidden rounded-[var(--dxp-radius)] border border-[var(--dxp-border)]">
-      <table className="min-w-full divide-y divide-[var(--dxp-border)]">
+    <div className="overflow-hidden rounded-[var(--dxp-radius)] border border-[var(--dxp-border)] bg-[var(--dxp-surface)]">
+      {/* Desktop / tablet — table layout */}
+      <table className="hidden md:table min-w-full divide-y divide-[var(--dxp-border)]">
         <thead className="bg-[var(--dxp-border-light)]">
           <tr>
             {columns.map((col) => (
@@ -52,12 +66,12 @@ export function DataTable<T extends object>({
                 onClick={col.sortable ? () => handleSort(col.key) : undefined}
               >
                 {col.header}
-                {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '\u2191' : '\u2193'}</span>}
+                {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-[var(--dxp-border-light)] bg-[var(--dxp-surface)]">
+        <tbody className="divide-y divide-[var(--dxp-border-light)]">
           {loading ? (
             <tr><td colSpan={columns.length} className="px-4 py-8 text-center text-[var(--dxp-density-text)] text-[var(--dxp-text-muted)]">Loading...</td></tr>
           ) : sorted.length === 0 ? (
@@ -71,7 +85,7 @@ export function DataTable<T extends object>({
               >
                 {columns.map((col) => (
                   <td key={col.key} className="px-[var(--dxp-density-px)] py-[var(--dxp-density-py)] text-[var(--dxp-density-text)] text-[var(--dxp-text)]">
-                    {col.render ? col.render((row as Record<string, unknown>)[col.key], row) : String((row as Record<string, unknown>)[col.key] ?? '')}
+                    {renderCell(col, row)}
                   </td>
                 ))}
               </tr>
@@ -79,10 +93,54 @@ export function DataTable<T extends object>({
           )}
         </tbody>
       </table>
+
+      {/* Mobile — stacked card layout. First column = card title,
+          subsequent columns = label/value rows. */}
+      <div className="md:hidden divide-y divide-[var(--dxp-border-light)]">
+        {loading ? (
+          <div className="px-4 py-8 text-center text-[var(--dxp-text-muted)]">Loading...</div>
+        ) : sorted.length === 0 ? (
+          <div className="px-4 py-8 text-center text-[var(--dxp-text-muted)]">{emptyMessage}</div>
+        ) : (
+          sorted.map((row, i) => (
+            <div
+              key={i}
+              className={`px-4 py-3 ${onRowClick ? 'cursor-pointer active:bg-[var(--dxp-border-light)]' : ''} transition-colors`}
+              onClick={() => onRowClick?.(row)}
+              role={onRowClick ? 'button' : undefined}
+            >
+              {columns.map((col, idx) => {
+                const cellContent = renderCell(col, row);
+                if (idx === 0) {
+                  return (
+                    <div key={col.key} className="text-base font-semibold text-[var(--dxp-text)] mb-2">
+                      {cellContent}
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    key={col.key}
+                    className="flex items-baseline justify-between gap-3 text-sm py-0.5"
+                  >
+                    <span className="text-xs uppercase tracking-wider text-[var(--dxp-text-secondary)] flex-shrink-0">
+                      {col.header}
+                    </span>
+                    <span className="text-[var(--dxp-text)] text-right break-words min-w-0">
+                      {cellContent}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+
       {pagination && totalPages > 1 && (
         <div className="flex items-center justify-between border-t border-[var(--dxp-border)] bg-[var(--dxp-border-light)] px-4 py-3">
-          <span className="text-sm text-[var(--dxp-text-secondary)]">
-            Page {pagination.page} of {totalPages} ({pagination.total} total)
+          <span className="text-xs md:text-sm text-[var(--dxp-text-secondary)]">
+            Page {pagination.page} of {totalPages} <span className="hidden sm:inline">({pagination.total} total)</span>
           </span>
           <div className="flex gap-2">
             <Button variant="secondary" size="sm" disabled={pagination.page <= 1} onClick={() => pagination.onChange(pagination.page - 1)}>Previous</Button>
