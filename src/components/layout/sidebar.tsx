@@ -44,6 +44,15 @@ import {
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
 type NavSection = { section: string; items: NavItem[] };
 
+// Sprint 3.5 Phase 1: Sidebar IA regroup. Three principles:
+//   • Top-level sections match the user's mental model (Investments are
+//     *what you own*, Insurance is *what protects you*, Liabilities are
+//     *what you owe*).
+//   • URLs are stable. The detail pages still live under /investments/*
+//     where they always did — only the sidebar groupings change.
+//     Bookmarks and external links continue to work.
+//   • Retirement moves under Planning (it's a planning horizon, not an
+//     analytics report).
 const navigation: NavSection[] = [
   {
     section: 'Overview',
@@ -56,7 +65,7 @@ const navigation: NavSection[] = [
   {
     section: 'Investments',
     items: [
-      { name: 'Investments', href: '/investments', icon: TrendingUp },
+      { name: 'Overview', href: '/investments', icon: TrendingUp },
       { name: 'Stocks', href: '/investments/stocks', icon: LineChart },
       { name: 'Mutual Funds', href: '/investments/mutual-funds', icon: PiggyBank },
       { name: 'SIPs', href: '/investments/sips', icon: Repeat },
@@ -66,15 +75,26 @@ const navigation: NavSection[] = [
       { name: 'Small Savings', href: '/investments/small-savings', icon: PiggyBank },
       { name: 'Fixed Deposits', href: '/investments/fixed-deposits', icon: Banknote },
       { name: 'Real Estate', href: '/investments/real-estate', icon: Home },
-      { name: 'Insurance (Life)', href: '/investments/insurance', icon: Umbrella },
-      { name: 'Health Insurance', href: '/investments/health-insurance', icon: HeartPulse },
-      { name: 'Vehicles', href: '/investments/vehicles', icon: Car },
-      { name: 'Liabilities', href: '/investments/liabilities', icon: CreditCard },
       { name: 'Chit Funds', href: '/investments/chit-funds', icon: Users },
     ],
   },
   {
-    section: 'Planning & Budget',
+    section: 'Insurance',
+    items: [
+      { name: 'Overview', href: '/insurance', icon: Umbrella },
+      { name: 'Life', href: '/investments/insurance', icon: Umbrella },
+      { name: 'Health', href: '/investments/health-insurance', icon: HeartPulse },
+      { name: 'Vehicles', href: '/investments/vehicles', icon: Car },
+    ],
+  },
+  {
+    section: 'Liabilities',
+    items: [
+      { name: 'Loans & Credit Cards', href: '/investments/liabilities', icon: CreditCard },
+    ],
+  },
+  {
+    section: 'Planning',
     items: [
       { name: 'Income', href: '/income', icon: Banknote },
       { name: 'Subscriptions', href: '/subscriptions', icon: Tag },
@@ -82,6 +102,7 @@ const navigation: NavSection[] = [
       { name: 'Monthly Expenses', href: '/budget/monthly', icon: Wallet },
       { name: 'Goals', href: '/goals', icon: Target },
       { name: 'Projections', href: '/projections', icon: BarChart3 },
+      { name: 'Retirement', href: '/retirement', icon: Sunset },
     ],
   },
   {
@@ -111,7 +132,6 @@ const navigation: NavSection[] = [
     section: 'Analytics',
     items: [
       { name: 'Net Worth History', href: '/networth', icon: TrendingUp },
-      { name: 'Retirement', href: '/retirement', icon: Sunset },
     ],
   },
   {

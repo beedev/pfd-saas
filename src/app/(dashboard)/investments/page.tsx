@@ -11,10 +11,6 @@ import {
   Home,
   ShieldCheck,
   PiggyBank,
-  Umbrella,
-  HeartPulse,
-  Car,
-  CreditCard,
   Users,
   Banknote,
   ArrowRight,
@@ -53,8 +49,6 @@ interface SmallSavingsAccount {
   status: 'ACTIVE' | 'MATURED' | 'CLOSED' | 'EXTENDED';
 }
 interface RealEstateProperty { id: number; currentValuation: number; purchasePrice: number; mortgageAmount: number | null; monthlyRent: number | null }
-interface InsurancePolicy { id: number; policyType: string; sumAssured: number; investmentValue: number | null }
-interface LiabilityRow { id: number; type: string; currentBalance: number; monthlyEmi: number }
 interface ChitFund {
   id: number;
   status: 'ACTIVE' | 'WON' | 'COMPLETED' | 'WITHDRAWN';
@@ -65,6 +59,10 @@ interface ChitFund {
   xirr: number | null;
 }
 
+// Sprint 3.5 Phase 1: scope narrowed to *what you own*. Insurance
+// (life/health/vehicles) moved to /insurance overview; Liabilities to
+// its own top-level section. Both still live at the same /investments/*
+// URLs — only the dashboard surfaces shifted.
 const assetClasses = [
   { key: 'stocks', title: 'Stocks', description: 'Equity holdings via Yahoo Finance', icon: LineChart, href: '/investments/stocks', live: true },
   { key: 'mf', title: 'Mutual Funds', description: 'SIPs and lump-sum investments', icon: PiggyBank, href: '/investments/mutual-funds', live: true },
@@ -73,15 +71,9 @@ const assetClasses = [
   { key: 'pf', title: 'EPF', description: 'Employees Provident Fund', icon: ShieldCheck, href: '/investments/pf', live: true },
   { key: 'small-savings', title: 'Small Savings', description: 'PPF, VPF, NSC, KVP, SSY, SCSS schemes', icon: PiggyBank, href: '/investments/small-savings', live: true },
   { key: 'real-estate', title: 'Real Estate', description: 'Properties and valuations', icon: Home, href: '/investments/real-estate', live: true },
-  { key: 'insurance', title: 'Insurance (Life)', description: 'Life, term, ULIP, endowment policies', icon: Umbrella, href: '/investments/insurance', live: true },
-  { key: 'health-insurance', title: 'Health Insurance', description: 'Health, top-up, critical illness with cards & claims', icon: HeartPulse, href: '/investments/health-insurance', live: true },
-  { key: 'vehicles', title: 'Vehicles', description: 'Cars, bikes with insurance, PUC, service history', icon: Car, href: '/investments/vehicles', live: true },
-  { key: 'liabilities', title: 'Liabilities', description: 'Loans and credit cards', icon: CreditCard, href: '/investments/liabilities', live: true },
   { key: 'chit', title: 'Chit Funds', description: 'Chit subscriptions with XIRR', icon: Users, href: '/investments/chit-funds', live: true },
   { key: 'fd', title: 'Fixed Deposits', description: 'Bank FDs with maturity projection', icon: Banknote, href: '/investments/fixed-deposits', live: true },
 ] as const;
-
-const CASH_VALUE_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP'];
 
 export default function InvestmentsPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
@@ -91,8 +83,6 @@ export default function InvestmentsPage() {
   const [pf, setPf] = useState<PFAccount[]>([]);
   const [smallSavings, setSmallSavings] = useState<SmallSavingsAccount[]>([]);
   const [props, setProps] = useState<RealEstateProperty[]>([]);
-  const [policies, setPolicies] = useState<InsurancePolicy[]>([]);
-  const [debts, setDebts] = useState<LiabilityRow[]>([]);
   const [chits, setChits] = useState<ChitFund[]>([]);
   const [fds, setFds] = useState<Array<{ id: number; principalPaisa: number; maturityAmountPaisa: number | null; maturityDate: string; status: 'ACTIVE' | 'MATURED' | 'BROKEN' | null }>>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,12 +96,10 @@ export default function InvestmentsPage() {
       fetch('/api/investments/pf').then((r) => r.json()),
       fetch('/api/investments/small-savings').then((r) => r.json()),
       fetch('/api/investments/real-estate').then((r) => r.json()),
-      fetch('/api/investments/insurance').then((r) => r.json()),
-      fetch('/api/investments/liabilities').then((r) => r.json()),
       fetch('/api/investments/chit-funds').then((r) => r.json()),
       fetch('/api/investments/fixed-deposits').then((r) => r.json()),
     ])
-      .then(([stocksData, mfData, goldData, npsData, pfData, ssData, reData, insData, liaData, chitData, fdData]) => {
+      .then(([stocksData, mfData, goldData, npsData, pfData, ssData, reData, chitData, fdData]) => {
         setHoldings(stocksData.holdings || []);
         setFunds(mfData.mutualFunds || []);
         setGold(goldData.gold || []);
@@ -119,8 +107,6 @@ export default function InvestmentsPage() {
         setPf(pfData.accounts || []);
         setSmallSavings(ssData.accounts || []);
         setProps(reData.properties || []);
-        setPolicies(insData.policies || []);
-        setDebts(liaData.liabilities || []);
         setChits(chitData.chitFunds || []);
         setFds(fdData.fixedDeposits || []);
       })
@@ -160,13 +146,6 @@ export default function InvestmentsPage() {
   const reValue = props.reduce((s, p) => s + p.currentValuation, 0) / 100;
   const reLoan = props.reduce((s, p) => s + (p.mortgageAmount ?? 0), 0) / 100;
   const reEquity = reValue - reLoan;
-
-  const insCash = policies.reduce((s, p) => s + (p.investmentValue ?? 0), 0) / 100;
-  const insLifeCover = policies
-    .filter((p) => CASH_VALUE_TYPES.includes(p.policyType) || p.policyType === 'TERM_LIFE')
-    .reduce((s, p) => s + p.sumAssured, 0) / 100;
-
-  const totalDebt = debts.reduce((s, d) => s + d.currentBalance, 0) / 100;
 
   // Fixed Deposits
   const fdsActive = fds.filter((f) => f.status === 'ACTIVE');
@@ -289,18 +268,6 @@ export default function InvestmentsPage() {
             ]}
           />
 
-          {/* Insurance */}
-          <SummaryCard
-            title="Insurance"
-            icon={<Umbrella className="h-5 w-5 text-[var(--dxp-brand)]" />}
-            href="/investments/insurance"
-            count={`${policies.length} polic${policies.length === 1 ? 'y' : 'ies'}`}
-            stats={[
-              { label: 'Life cover', value: insLifeCover },
-              { label: 'Surrender value', value: insCash },
-            ]}
-          />
-
           {/* Chit Funds */}
           <Card>
             <CardHeader>
@@ -349,15 +316,6 @@ export default function InvestmentsPage() {
             ]}
           />
 
-          {/* Liabilities */}
-          <SummaryCard
-            title="Liabilities"
-            icon={<CreditCard className="h-5 w-5 text-rose-600" />}
-            href="/investments/liabilities"
-            count={`${debts.length} item${debts.length === 1 ? '' : 's'}`}
-            stats={[{ label: 'Total debt', value: totalDebt }]}
-            negative
-          />
         </>
       )}
 
