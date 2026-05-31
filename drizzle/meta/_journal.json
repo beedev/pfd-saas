@@ -8,6 +8,20 @@
       "when": 1780160055197,
       "tag": "0000_living_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780199369802,
+      "tag": "0001_abnormal_deadpool",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780199697163,
+      "tag": "0002_same_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }
