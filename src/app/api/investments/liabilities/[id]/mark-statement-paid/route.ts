@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db, liabilities, creditCardExpenses } from '@/db';
 import { recomputeCreditCardBudgetForPeriod } from '@/lib/finance/budget-sync';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -18,7 +21,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const cardRows = await db
       .select()
       .from(liabilities)
-      .where(eq(liabilities.id, numericId))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
       .limit(1);
     if (!cardRows.length) {
       return NextResponse.json({ error: 'Liability not found' }, { status: 404 });
@@ -60,6 +63,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         .from(creditCardExpenses)
         .where(
           and(
+            eq(creditCardExpenses.userId, session.user.id),
             eq(creditCardExpenses.liabilityId, numericId),
             eq(creditCardExpenses.period, period),
           ),
@@ -72,6 +76,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         .from(creditCardExpenses)
         .where(
           and(
+            eq(creditCardExpenses.userId, session.user.id),
             eq(creditCardExpenses.liabilityId, numericId),
             isNull(creditCardExpenses.paidAmount),
           ),
@@ -94,7 +99,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         paidAmount: paidPaisa,
         settledOn,
       })
-      .where(eq(creditCardExpenses.id, target.id))
+      .where(and(eq(creditCardExpenses.id, target.id), eq(creditCardExpenses.userId, session.user.id)))
       .returning();
 
     // Reduce the liability's outstanding balance (floor at 0).
@@ -107,7 +112,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         lastPaymentDate: settledOn,
         updatedAt: new Date(),
       })
-      .where(eq(liabilities.id, numericId));
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)));
 
     // Sync budget — replaces forecasted statement total with actual paid amount.
     await recomputeCreditCardBudgetForPeriod(numericId, target.period);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and, isNotNull } from 'drizzle-orm';
 import { db, tdsCredits } from '@/db';
+import { auth } from '@/auth';
 
 /**
  * Export CSV_TDS2.csv — non-salary TDS where deductor has TAN.
@@ -17,6 +18,8 @@ function csvCell(v: string | number): string {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
@@ -25,7 +28,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(tdsCredits)
-      .where(and(eq(tdsCredits.financialYear, fy), isNotNull(tdsCredits.deductorTan)));
+      .where(and(eq(tdsCredits.userId, session.user.id), eq(tdsCredits.financialYear, fy), isNotNull(tdsCredits.deductorTan)));
 
     // ITR-3 TDS2 has many columns; we populate just the essentials and leave
     // the rest blank for the user to fill in Excel.

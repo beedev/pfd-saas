@@ -5,12 +5,15 @@ import {
   recomputeCreditCardBudgetForPeriod,
   dateToPeriod,
 } from '@/lib/finance/budget-sync';
+import { auth } from '@/auth';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -21,7 +24,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const expenses = await db
       .select()
       .from(creditCardExpenses)
-      .where(eq(creditCardExpenses.liabilityId, numericId))
+      .where(and(eq(creditCardExpenses.userId, session.user.id), eq(creditCardExpenses.liabilityId, numericId)))
       .orderBy(desc(creditCardExpenses.period));
 
     return NextResponse.json({ expenses });
@@ -32,6 +35,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -43,7 +48,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(liabilities)
-      .where(eq(liabilities.id, numericId))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
       .limit(1);
     if (!rows.length) {
       return NextResponse.json({ error: 'Liability not found' }, { status: 404 });
@@ -75,6 +80,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .from(creditCardExpenses)
       .where(
         and(
+          eq(creditCardExpenses.userId, session.user.id),
           eq(creditCardExpenses.liabilityId, numericId),
           eq(creditCardExpenses.period, period),
         ),
@@ -96,13 +102,14 @@ export async function POST(request: NextRequest, { params }: Params) {
           paidOn: dueDate, // backward compat
           notes: notesProvided ? (notes ?? null) : existing[0].notes,
         })
-        .where(eq(creditCardExpenses.id, existing[0].id))
+        .where(and(eq(creditCardExpenses.id, existing[0].id), eq(creditCardExpenses.userId, session.user.id)))
         .returning();
       expense = result[0];
     } else {
       const result = await db
         .insert(creditCardExpenses)
         .values({
+          userId: session.user.id,
           liabilityId: numericId,
           period,
           amount: amountPaisa,
@@ -124,7 +131,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         lastPaymentDate: statementDate,
         updatedAt: new Date(),
       })
-      .where(eq(liabilities.id, numericId));
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)));
 
     // Sync to budget — period is the due date month
     await recomputeCreditCardBudgetForPeriod(numericId, period);

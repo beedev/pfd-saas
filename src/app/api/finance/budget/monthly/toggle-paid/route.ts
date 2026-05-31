@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
 import { db, budgetEntries } from '@/db';
+import { auth } from '@/auth';
 
 /**
  * Toggle paid status for a manual budget entry by writing actualAmount.
@@ -15,6 +16,8 @@ import { db, budgetEntries } from '@/db';
 const AUTO_CATEGORIES = new Set(['SIP', 'Chit']);
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
     const { categoryId, period, actualAmountRupees } = body;
@@ -29,7 +32,7 @@ export async function POST(request: NextRequest) {
     const existing = await db
       .select()
       .from(budgetEntries)
-      .where(and(eq(budgetEntries.categoryId, categoryId), eq(budgetEntries.period, period)))
+      .where(and(eq(budgetEntries.userId, session.user.id), eq(budgetEntries.categoryId, categoryId), eq(budgetEntries.period, period)))
       .limit(1);
 
     if (!existing.length) {
@@ -48,7 +51,7 @@ export async function POST(request: NextRequest) {
     const updated = await db
       .update(budgetEntries)
       .set({ actualAmount: newActual, updatedAt: new Date() })
-      .where(eq(budgetEntries.id, row.id))
+      .where(and(eq(budgetEntries.id, row.id), eq(budgetEntries.userId, session.user.id)))
       .returning();
 
     return NextResponse.json({

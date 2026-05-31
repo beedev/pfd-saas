@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and, isNotNull, isNull } from 'drizzle-orm';
 import { db, tdsCredits } from '@/db';
+import { auth } from '@/auth';
 
 /**
  * Export CSV_TDS3.csv — TDS where deductor uses PAN/Aadhaar (e.g. property purchase u/s 194-IA).
@@ -15,6 +16,8 @@ function csvCell(v: string | number): string {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
@@ -24,7 +27,7 @@ export async function GET(request: NextRequest) {
       .select()
       .from(tdsCredits)
       .where(
-        and(eq(tdsCredits.financialYear, fy), isNotNull(tdsCredits.deductorPan), isNull(tdsCredits.deductorTan)),
+        and(eq(tdsCredits.userId, session.user.id), eq(tdsCredits.financialYear, fy), isNotNull(tdsCredits.deductorPan), isNull(tdsCredits.deductorTan)),
       );
 
     const HEADER = [

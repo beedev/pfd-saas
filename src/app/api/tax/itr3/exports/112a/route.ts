@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and } from 'drizzle-orm';
 import { db, capitalGains } from '@/db';
+import { auth } from '@/auth';
 
 /**
  * Export CSV_112A_and_115AD.csv per ITR-3 official utility format.
@@ -58,6 +59,8 @@ function csvCell(v: string | number | null): string {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(capitalGains)
-      .where(and(eq(capitalGains.financialYear, fy), eq(capitalGains.holdingPeriod, 'LTCG')));
+      .where(and(eq(capitalGains.userId, session.user.id), eq(capitalGains.financialYear, fy), eq(capitalGains.holdingPeriod, 'LTCG')));
 
     const lines: string[] = [HEADER.map(csvCell).join(',')];
     for (const r of rows) {

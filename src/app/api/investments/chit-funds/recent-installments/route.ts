@@ -6,12 +6,15 @@
  */
 
 import { NextResponse } from 'next/server';
-import { gte, desc } from 'drizzle-orm';
+import { and, eq, gte, desc } from 'drizzle-orm';
 import { db, chitFundInstallments, chitFunds } from '@/db';
+import { auth } from '@/auth';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     // Current month only: 1st of this month
     const now = new Date();
@@ -20,12 +23,13 @@ export async function GET() {
     const installments = await db
       .select()
       .from(chitFundInstallments)
-      .where(gte(chitFundInstallments.paidOn, cutoffIso))
+      .where(and(eq(chitFundInstallments.userId, session.user.id), gte(chitFundInstallments.paidOn, cutoffIso)))
       .orderBy(desc(chitFundInstallments.paidOn));
 
     const chits = await db
       .select({ id: chitFunds.id, schemeName: chitFunds.schemeName })
-      .from(chitFunds);
+      .from(chitFunds)
+      .where(eq(chitFunds.userId, session.user.id));
     const chitMap = new Map(chits.map((c) => [c.id, c.schemeName]));
 
     const result = installments.map((i) => ({

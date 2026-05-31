@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, incomeTaxPaid } from '@/db';
+import { auth } from '@/auth';
 
 /**
  * Export CSV_IT.csv — advance tax + self-assessment challans.
@@ -47,6 +48,8 @@ function csvCell(v: string | number): string {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
@@ -55,7 +58,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(incomeTaxPaid)
-      .where(eq(incomeTaxPaid.financialYear, fy));
+      .where(and(eq(incomeTaxPaid.userId, session.user.id), eq(incomeTaxPaid.financialYear, fy)));
 
     const eligible = rows.filter((r) => r.paymentType === 'ADVANCE_TAX' || r.paymentType === 'SELF_ASSESSMENT');
 

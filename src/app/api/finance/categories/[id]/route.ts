@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, budgetCategories, budgetEntries } from '@/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
+import { auth } from '@/auth';
 
 // GET - Get a single category
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const categoryId = parseInt(id, 10);
@@ -21,7 +24,7 @@ export async function GET(
     const category = await db
       .select()
       .from(budgetCategories)
-      .where(eq(budgetCategories.id, categoryId));
+      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, session.user.id)));
 
     if (category.length === 0) {
       return NextResponse.json(
@@ -45,6 +48,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const categoryId = parseInt(id, 10);
@@ -67,7 +72,7 @@ export async function PUT(
         ...(sortOrder !== undefined && { sortOrder }),
         ...(isActive !== undefined && { isActive }),
       })
-      .where(eq(budgetCategories.id, categoryId))
+      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, session.user.id)))
       .returning();
 
     if (result.length === 0) {
@@ -92,6 +97,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const { id } = await params;
     const categoryId = parseInt(id, 10);
@@ -106,12 +113,12 @@ export async function DELETE(
     // First delete all budget entries for this category
     await db
       .delete(budgetEntries)
-      .where(eq(budgetEntries.categoryId, categoryId));
+      .where(and(eq(budgetEntries.categoryId, categoryId), eq(budgetEntries.userId, session.user.id)));
 
     // Then delete the category itself
     const result = await db
       .delete(budgetCategories)
-      .where(eq(budgetCategories.id, categoryId))
+      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, session.user.id)))
       .returning();
 
     if (result.length === 0) {
