@@ -13,11 +13,12 @@ return a 503.
 ## Active stubs
 
 ### 1. Magic-link email send
-- **Where:** `src/auth.ts` — `sendVerificationRequest` callback on the EmailProvider.
-- **Stub behaviour:** Logs the magic-link URL to `console.log` with a banner AND appends `{ts, identifier, url}` to `tmp/magic-links.log`. Does NOT send any email.
-- **What the real thing needs:** Sprint 5 Phase 1 — a transactional email provider (Resend or Postmark). `EMAIL_SERVER` and `EMAIL_FROM` env vars filled.
+- **Where:** `src/auth.ts` — `buildEmailProvider()`.
+- **Stub behaviour:** When `EMAIL_SERVER` is empty, logs the magic-link URL to `console.log` with a banner AND appends `{ts, identifier, url}` to `tmp/magic-links.log`. Does NOT send any email. **Auto-disables** when `EMAIL_SERVER` is set — Auth.js delivers via Nodemailer using whatever SMTP connection string is provided (Gmail App Password, Resend, Postmark, etc.).
+- **What the real thing needs:** Sprint 5 Phase 1 — a production-grade transactional email provider (Resend or Postmark). For dev/self-host today, Gmail SMTP works fine for low volume; see README for App Password setup.
 - **Why stub:** Avoid SMTP credentials before product is validated. Lets the owner sign in offline by copy-pasting the URL from the log.
 - **Added:** Sprint 1 Phase 3
+- **Updated:** Sprint 2 Phase 7 — added env-var-driven fallthrough to real SMTP.
 
 ### 2. Telegram notifications (alerts + digest)
 - **Where:** `src/lib/services/telegram.ts` — `sendTelegramMessage()`.

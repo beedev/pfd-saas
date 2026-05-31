@@ -101,17 +101,38 @@ npm run dev -- --port 3000
 Open <http://localhost:3000>. Middleware redirects you to `/login`.
 Enter your email, then…
 
-### 7. Sign in (Sprint 1 — magic-link send is **stubbed**)
+### 7. Sign in
 
-The Auth.js EmailProvider stub does NOT send a real email. Instead, the
+`pfd-saas` uses passwordless email magic links. Two modes:
+
+**a) Stub mode (default).** Leave `EMAIL_SERVER` empty in `.env.local`.
+The Auth.js EmailProvider does NOT send a real email — instead, the
 magic-link URL is printed to:
 
 - the `npm run dev` terminal with a banner (`🔑 MAGIC LINK …`)
 - `tmp/magic-links.log` (newline-delimited JSON)
 
-Paste the URL in the same browser. Auth.js validates the token, creates
-a session row, and lands you on `/`. Real SMTP wires in Sprint 5; see
-`STUBS.md` entry #1.
+Paste the URL in the same browser. Useful for offline dev / when you
+don't want to set up SMTP.
+
+**b) Real SMTP mode.** Set `EMAIL_SERVER` to a real SMTP connection
+string and restart. Tested with **Gmail** (free, fine for low volume):
+
+1. Enable 2-Step Verification on your Google account.
+2. Google Account → Security → 2-Step Verification → **App passwords**.
+3. Generate a new app password for "Mail" — Google gives you a 16-char
+   token (no spaces).
+4. In `.env.local`:
+   ```env
+   EMAIL_SERVER=smtp://your-email%40gmail.com:abcdwxyzabcdwxyz@smtp.gmail.com:587
+   EMAIL_FROM=your-email@gmail.com
+   ```
+   (URL-encode the `@` in the username as `%40`.)
+5. `npm run build && npm run start -- --port 3000`. Sign-in attempts
+   now arrive in your Gmail inbox.
+
+Gmail's limit is 500/day for personal accounts. For scale, swap to
+Resend / Postmark — same `EMAIL_SERVER` shape.
 
 ## Architecture
 

@@ -38,32 +38,55 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     verificationTokensTable: verificationTokens,
   }),
   providers: [
-    Nodemailer({
-      // jsonTransport keeps Nodemailer happy without an SMTP host — it
-      // serializes to a string instead of dialling out. We override
-      // sendVerificationRequest below anyway, so this only satisfies
-      // the provider's startup validation.
-      server: { jsonTransport: true },
-      from: process.env.EMAIL_FROM ?? 'noreply@pfd-saas.local',
-      async sendVerificationRequest({ identifier, url }) {
-        const ts = new Date().toISOString();
-        const banner = '═'.repeat(72);
-        // Loud-fail surface: print to dev server log so the owner can
-        // grab the link without leaving the terminal.
-        console.log(`\n${banner}`);
-        console.log(`🔑  MAGIC LINK (stub — no email sent)`);
-        console.log(`    to:  ${identifier}`);
-        console.log(`    url: ${url}`);
-        console.log(`${banner}\n`);
-        try {
-          fs.mkdirSync(path.dirname(STUB_LOG), { recursive: true });
-          fs.appendFileSync(STUB_LOG, JSON.stringify({ ts, identifier, url }) + '\n');
-        } catch (err) {
-          // Don't block sign-in on a logging failure; the console line
-          // above is the source of truth.
-          console.error('[auth-stub] could not write magic-links.log:', err);
-        }
-      },
-    }),
+    buildEmailProvider(),
   ],
 });
+
+/**
+ * EmailProvider builder. Two modes:
+ *
+ *   - EMAIL_SERVER set  →  real SMTP. Pass the env var straight through
+ *                          to Nodemailer; Auth.js's default
+ *                          sendVerificationRequest formats + sends a
+ *                          real email. Tested with Gmail SMTP (see
+ *                          README for app-password setup).
+ *   - EMAIL_SERVER empty → stub. jsonTransport keeps Nodemailer happy;
+ *                          our override logs the link to stdout and
+ *                          tmp/magic-links.log.
+ *
+ * The mode flips at boot, not per-request — restart the dev/prod server
+ * after toggling the env var.
+ */
+function buildEmailProvider() {
+  const emailServer = process.env.EMAIL_SERVER?.trim();
+  const from = process.env.EMAIL_FROM ?? 'noreply@pfd-saas.local';
+
+  if (emailServer) {
+    // Real SMTP path. Auth.js handles the send with its default
+    // sendVerificationRequest (sensible-looking HTML body + plain-text
+    // fallback). No stub.
+    return Nodemailer({ server: emailServer, from });
+  }
+
+  // Stub path — log instead of send. Override sendVerificationRequest
+  // entirely so Nodemailer's transport machinery never runs.
+  return Nodemailer({
+    server: { jsonTransport: true },
+    from,
+    async sendVerificationRequest({ identifier, url }) {
+      const ts = new Date().toISOString();
+      const banner = '═'.repeat(72);
+      console.log(`\n${banner}`);
+      console.log(`🔑  MAGIC LINK (stub — no email sent)`);
+      console.log(`    to:  ${identifier}`);
+      console.log(`    url: ${url}`);
+      console.log(`${banner}\n`);
+      try {
+        fs.mkdirSync(path.dirname(STUB_LOG), { recursive: true });
+        fs.appendFileSync(STUB_LOG, JSON.stringify({ ts, identifier, url }) + '\n');
+      } catch (err) {
+        console.error('[auth-stub] could not write magic-links.log:', err);
+      }
+    },
+  });
+}
