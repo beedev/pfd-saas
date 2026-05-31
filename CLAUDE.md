@@ -83,3 +83,15 @@ All UI primitives, charts, snapshot machinery, alert framework.
 - Don't add SQLite-only schema features without a Postgres equivalent.
 - Don't bypass auth/userId scoping in any new query.
 - Don't commit `.env*`, `*.db`, `uploads/`, or `.claude/`.
+
+## App Registry (auto-managed — do not edit manually)
+
+- **Frontend port**: 3000
+- **Start backend**: `./start.sh`
+- **Start frontend**: `npm run dev -- --port {port}`
+
+### Rules for Claude Code
+- Frontend dev server MUST use port **3000**
+- Do NOT pick arbitrary port numbers — use the ports listed above
+
+<!-- end-app-registry -->
