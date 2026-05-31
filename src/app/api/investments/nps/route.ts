@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db, npsAccounts, type NPSAccountType } from '@/db';
+import { auth } from '@/auth';
 
 const VALID_TIERS: NPSAccountType[] = ['TIER1', 'TIER2'];
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const rows = await db.select().from(npsAccounts).orderBy(desc(npsAccounts.createdAt));
+    const rows = await db
+      .select()
+      .from(npsAccounts)
+      .where(eq(npsAccounts.userId, session.user.id))
+      .orderBy(desc(npsAccounts.createdAt));
     return NextResponse.json({ accounts: rows });
   } catch (err) {
     console.error('Failed to fetch NPS accounts:', err);
@@ -33,6 +40,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = (await request.json()) as CreateBody;
     if (!body.accountNumber) {
@@ -62,6 +71,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(npsAccounts)
       .values({
+        userId: session.user.id,
         accountNumber: body.accountNumber.trim(),
         accountHolder: body.accountHolder.trim(),
         pan: body.pan.trim().toUpperCase(),
