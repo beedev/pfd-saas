@@ -1209,6 +1209,14 @@ export type CashflowSourceKind =
   | 'SALARY'
   | 'BUSINESS'
   | 'INHERITANCE'
+  /** Ongoing SIP contribution — monthly investment outflow that
+   *  accumulates in the mapped mutual fund. Surfaced on the
+   *  /planning/cashflows timeline so the user can see "I'm putting
+   *  ₹36k/mo into MFs forever" alongside their income inflows. Goal
+   *  projection still counts SIPs via the asset mapping path
+   *  (yearlyContributionForGoal); SIP cashflow events are
+   *  goal_id=NULL to avoid double-counting. */
+  | 'SIP'
   | 'OTHER';
 
 export type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';

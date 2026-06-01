@@ -42,11 +42,13 @@ import type {
   CashflowSourceKind,
   CashflowTaxTreatment,
   InsurancePolicy,
+  MutualFund,
   NPSAccount,
   NewCashflowEvent,
   RealEstate,
   RetirementAssumptions,
   SalaryIncomeRow,
+  SIP,
   SmallSavingsAccount,
 } from '@/db';
 
@@ -60,6 +62,14 @@ export interface DerivationInput {
   realEstate: RealEstate[];
   salaryIncome: SalaryIncomeRow[];
   retirement: RetirementAssumptions | null;
+  /** Active SIPs feeding mutual funds. Each becomes a recurring MONTHLY
+   *  cashflow event for timeline visibility. Goal projection counts
+   *  these via the asset-mapping path (yearlyContributionForGoal), so
+   *  these are emitted with goalId=null to avoid double-count. */
+  sips: SIP[];
+  /** Joined for the SIP event label — "HSBC Value Fund SIP" not just
+   *  "SIP #4". Indexed by mutualFundId for O(1) lookup. */
+  mutualFunds: MutualFund[];
 }
 
 /* ─── helpers ───────────────────────────────────────────────────────── */
@@ -408,6 +418,49 @@ function deriveSalary(
 /* ─── public entry point ────────────────────────────────────────────── */
 
 /**
+ * SIP contributions — emit one MONTHLY event per active SIP. Surfaces
+ * the user's ongoing investment commitments on the unified cashflow
+ * timeline ("I'm putting ₹36k/mo into MFs indefinitely") alongside
+ * income inflows. Lifelong by convention unless the SIP carries an
+ * end_date (rare — most SIPs run until manually stopped).
+ *
+ * Goal projection counts SIPs via the asset-mapping path
+ * (goal-corpus.ts → yearlyContributionForGoal). To prevent
+ * double-counting we emit with goalId=null — the SIP event is timeline-
+ * visibility only, not a contributor to goal demand resolution.
+ */
+function deriveSips(sips: SIP[], mfs: MutualFund[], userId: string): NewCashflowEvent[] {
+  const mfById = new Map(mfs.map((m) => [m.id, m]));
+  return sips
+    .filter((s) => s.status === 'ACTIVE' && s.monthlyAmount > 0)
+    .map((s) => {
+      const mf = mfById.get(s.mutualFundId);
+      const fundLabel = mf?.schemeName ?? `Fund #${s.mutualFundId}`;
+      return {
+        userId,
+        name: `SIP — ${fundLabel}`,
+        sourceKind: 'SIP' satisfies CashflowSourceKind,
+        sourceId: s.id,
+        startDate: s.startDate,
+        endDate: s.endDate ?? null,
+        amountPaisa: s.monthlyAmount,
+        frequency: 'MONTHLY' satisfies CashflowFrequency,
+        // SIPs are a forward commitment in nominal rupees. No growth on
+        // the SIP amount itself (the underlying fund grows; the SIP
+        // outflow is fixed). If the user step-ups their SIP they can
+        // edit the event manually.
+        growthPctPerYear: 0,
+        // SIPs are post-tax outflows from the user's pocket; not
+        // income, not subject to TDS at this layer. Mark TAX_FREE so
+        // future tax-aware projections don't apply a slab to them.
+        taxTreatment: 'TAX_FREE' satisfies CashflowTaxTreatment,
+        autoDerived: true,
+        notes: `₹${(s.monthlyAmount / 100).toLocaleString('en-IN')} monthly SIP — auto-counted via MF asset mapping for goals`,
+      };
+    });
+}
+
+/**
  * Derive cashflow event candidates from a snapshot of the user's
  * portfolio. Pure: no DB, no time-of-day dependence except `today`.
  *
@@ -416,7 +469,7 @@ function deriveSalary(
  * the canonical "what the auto-derive layer thinks is going on".
  */
 export function deriveCashflowEvents(input: DerivationInput): NewCashflowEvent[] {
-  const { userId, today, insurance, npsAccounts, smallSavings, realEstate, salaryIncome, retirement } = input;
+  const { userId, today, insurance, npsAccounts, smallSavings, realEstate, salaryIncome, retirement, sips, mutualFunds } = input;
   return [
     ...deriveInsuranceMaturities(insurance, today, userId),
     ...deriveInsuranceAnnuities(insurance, userId),
@@ -424,5 +477,6 @@ export function deriveCashflowEvents(input: DerivationInput): NewCashflowEvent[]
     ...deriveSmallSavings(smallSavings, today, userId),
     ...deriveRentalIncome(realEstate, today, userId),
     ...deriveSalary(salaryIncome, retirement, today, userId),
+    ...deriveSips(sips, mutualFunds, userId),
   ];
 }

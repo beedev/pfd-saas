@@ -29,7 +29,8 @@ import { CalendarDays, Zap, RotateCw } from 'lucide-react';
 export type CashflowSourceKind =
   | 'INSURANCE_MATURITY' | 'ANNUITY' | 'PENSION' | 'NPS_LUMPSUM' | 'NPS_ANNUITY'
   | 'PPF_MATURITY' | 'SSY_MATURITY' | 'NSC_MATURITY' | 'KVP_MATURITY'
-  | 'RENTAL' | 'SALARY' | 'BUSINESS' | 'INHERITANCE' | 'OTHER';
+  | 'RENTAL' | 'SALARY' | 'BUSINESS' | 'INHERITANCE' | 'OTHER'
+  | 'SIP';
 export type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';
 export type CashflowTaxTreatment = 'TAX_FREE' | 'TAXABLE' | 'TDS';
 
@@ -61,6 +62,7 @@ const KIND_LABELS: Record<CashflowSourceKind, string> = {
   BUSINESS: 'Business income',
   INHERITANCE: 'Inheritance',
   OTHER: 'Other',
+  SIP: 'SIP contribution',
 };
 
 const MONTH_SHORT = [

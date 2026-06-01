@@ -31,10 +31,12 @@ import {
   cashflowEvents,
   db,
   insurancePolicies,
+  mutualFunds,
   npsAccounts,
   realEstate,
   retirementAssumptions,
   salaryIncome,
+  sips,
   smallSavingsAccounts,
 } from '@/db';
 import { auth } from '@/auth';
@@ -50,8 +52,9 @@ export async function POST() {
     const userId = session.user.id;
     const today = new Date().toISOString().slice(0, 10);
 
-    // Fetch all source rows in parallel — six independent queries, all
-    // scoped by user_id.
+    // Fetch all source rows in parallel — eight independent queries, all
+    // scoped by user_id. sips + mutualFunds added for the SIP-as-cashflow
+    // derivation.
     const [
       insurance,
       nps,
@@ -59,6 +62,8 @@ export async function POST() {
       properties,
       salaries,
       retirementRows,
+      sipRows,
+      mfRows,
     ] = await Promise.all([
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
@@ -66,6 +71,8 @@ export async function POST() {
       db.select().from(realEstate).where(eq(realEstate.userId, userId)),
       db.select().from(salaryIncome).where(eq(salaryIncome.userId, userId)),
       db.select().from(retirementAssumptions).where(eq(retirementAssumptions.userId, userId)).limit(1),
+      db.select().from(sips).where(eq(sips.userId, userId)),
+      db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
     ]);
 
     const input: DerivationInput = {
@@ -77,6 +84,8 @@ export async function POST() {
       realEstate: properties,
       salaryIncome: salaries,
       retirement: retirementRows[0] || null,
+      sips: sipRows,
+      mutualFunds: mfRows,
     };
     const candidates = deriveCashflowEvents(input);
 
@@ -163,6 +172,7 @@ export async function POST() {
         realEstate: properties.length,
         salaryIncome: salaries.length,
         retirementAssumptionsLoaded: retirementRows.length > 0,
+        sips: sipRows.filter((s) => s.status === 'ACTIVE').length,
       },
     });
   } catch (err) {
