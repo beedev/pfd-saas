@@ -252,7 +252,7 @@ function RegimeColumn({
           {isRecommended && <Badge variant="success">Recommended</Badge>}
         </div>
         <Button
-          variant="default"
+          variant="secondary"
           size="sm"
           onClick={onSetDefault}
           disabled={savingPreference}
