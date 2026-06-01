@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -2476,6 +2476,40 @@ export const advanceTaxInstallments = pgTable('advance_tax_installments', {
 
 export type AdvanceTaxInstallment = typeof advanceTaxInstallments.$inferSelect;
 export type NewAdvanceTaxInstallment = typeof advanceTaxInstallments.$inferInsert;
+
+// ─── Sprint 4 Phase 4 — ITR form selector ────────────────────────────────
+// Persisted result of the ITR-form wizard. wizard_answers is jsonb so we
+// can evolve the question set without schema churn. selected_form is
+// constrained at the application layer to ITR-1/2/3/4.
+export type ItrForm = 'ITR-1' | 'ITR-2' | 'ITR-3' | 'ITR-4';
+
+export interface ItrWizardAnswers {
+  hasSalary: boolean;
+  numHouseProperties: number;
+  hasCapitalGains: boolean;
+  hasBusinessIncome: boolean;
+  hasPresumptive: boolean;
+  hasForeignIncome: boolean;
+  hasOtherSources: boolean;
+  totalIncomePaisa: number;
+}
+
+export const itrFormSelection = pgTable('itr_form_selection', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  selectedForm: text('selected_form').$type<ItrForm>().notNull(),
+  wizardAnswers: jsonb('wizard_answers').$type<ItrWizardAnswers>().notNull(),
+  reasoning: text('reasoning'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  uniqueIndex('itr_form_selection_user_fy_idx').on(table.userId, table.fy),
+  index('itr_form_selection_user_id_idx').on(table.userId),
+]);
+
+export type ItrFormSelection = typeof itrFormSelection.$inferSelect;
+export type NewItrFormSelection = typeof itrFormSelection.$inferInsert;
 
 // Other sources income (Schedule OS) — interest, dividends, etc.
 export type OtherIncomeSource =

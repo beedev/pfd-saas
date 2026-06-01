@@ -162,6 +162,13 @@
       "when": 1780327365353,
       "tag": "0022_gigantic_queen_noir",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780327602236,
+      "tag": "0023_lethal_blink",
+      "breakpoints": true
     }
   ]
 }

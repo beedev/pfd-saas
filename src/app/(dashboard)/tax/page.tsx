@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Button, Card, CardHeader, CardContent, StatsDisplay, Select, Input, Badge } from '@dxp/ui';
-import { Plus, Loader2, Calculator, FileText, Gift, EyeOff, Eye, Trash2, IndianRupee, ClipboardCheck } from 'lucide-react';
+import { Plus, Loader2, Calculator, FileText, Gift, EyeOff, Eye, Trash2, IndianRupee, ClipboardCheck, FileCheck2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { RegimeComparisonCard } from '@/components/forms/regime-comparison-card';
@@ -179,7 +179,20 @@ export default function TaxDashboardPage() {
             ]}
           />
 
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-4 lg:grid-cols-5">
+            <Link href="/tax/itr-wizard">
+              <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                <CardContent>
+                  <div className="flex items-center gap-3">
+                    <FileCheck2 className="h-8 w-8 text-[var(--dxp-brand)]" />
+                    <div>
+                      <p className="font-bold text-[var(--dxp-text)]">ITR Wizard</p>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">Pick the right form</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
             <Link href="/tax/form-26as">
               <Card className="cursor-pointer hover:shadow-md transition-shadow">
                 <CardContent>
