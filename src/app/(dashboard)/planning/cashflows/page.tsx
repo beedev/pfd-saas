@@ -185,7 +185,7 @@ export default function CashflowEventsPage() {
       if (!r.ok) throw new Error(data.error || 'Failed to derive');
       if (!silent) {
         toast.success(
-          `Synced — ${data.upserted} new, ${data.kept} kept, ${data.deleted} removed`,
+          `Synced — ${data.upserted} new, ${data.refreshed ?? 0} refreshed, ${data.kept} kept, ${data.deleted} removed`,
         );
       }
       await load();

@@ -26,7 +26,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import {
   cashflowEvents,
   db,
@@ -89,21 +89,82 @@ export async function POST() {
     };
     const candidates = deriveCashflowEvents(input);
 
-    // Phase 1 — UPSERT (insert + conflict do-nothing). The unique index
-    // guarantees idempotency. We count inserted vs skipped using the
-    // `returning()` row count.
+    // Phase 1 — UPSERT (insert OR refresh the auto-derived row with
+    // current source values). Previously this was onConflictDoNothing,
+    // which meant any edit the user made to the underlying asset (e.g.,
+    // changing a policy's maturity_date) never propagated — the stale
+    // event survived forever because the (user_id, source_kind,
+    // source_id) row was kept as-is.
+    //
+    // setWhere = auto_derived guards user overrides: when the user PATCHes
+    // an event we flip auto_derived to false, and subsequent derives
+    // leave that row untouched. Only auto-derived rows get refreshed.
     let upserted = 0;
+    let refreshed = 0;
     let kept = 0;
     for (const row of candidates) {
-      const result = await db
+      // Snapshot the pre-write state so we can classify the outcome.
+      // Three states:
+      //   • no existing row     → INSERT (upserted)
+      //   • existing auto_derived → UPDATE (refreshed)
+      //   • existing user-edited → setWhere predicate skips it (kept)
+      const existing = await db
+        .select({
+          id: cashflowEvents.id,
+          autoDerived: cashflowEvents.autoDerived,
+          startDate: cashflowEvents.startDate,
+          amountPaisa: cashflowEvents.amountPaisa,
+        })
+        .from(cashflowEvents)
+        .where(
+          and(
+            eq(cashflowEvents.userId, userId),
+            eq(cashflowEvents.sourceKind, row.sourceKind),
+            row.sourceId == null
+              ? sql`source_id IS NULL`
+              : eq(cashflowEvents.sourceId, row.sourceId),
+          ),
+        )
+        .limit(1);
+
+      await db
         .insert(cashflowEvents)
         .values(row)
-        .onConflictDoNothing({
+        .onConflictDoUpdate({
           target: [cashflowEvents.userId, cashflowEvents.sourceKind, cashflowEvents.sourceId],
-        })
-        .returning({ id: cashflowEvents.id });
-      if (result.length) upserted += 1;
-      else kept += 1;
+          set: {
+            // Refresh every derivable field so edits in the source
+            // table flow through. NOT touched: goalId (user earmark),
+            // notes for user-promoted rows (autoDerived=false won't
+            // reach this branch anyway).
+            name: row.name,
+            startDate: row.startDate,
+            endDate: row.endDate,
+            amountPaisa: row.amountPaisa,
+            frequency: row.frequency,
+            growthPctPerYear: row.growthPctPerYear,
+            taxTreatment: row.taxTreatment,
+            notes: row.notes,
+            updatedAt: new Date(),
+          },
+          setWhere: eq(cashflowEvents.autoDerived, true),
+        });
+
+      if (existing.length === 0) {
+        upserted += 1;
+      } else if (existing[0].autoDerived) {
+        // Detect whether the update actually changed anything observable
+        // to the user. Identical re-runs are extremely common (idempotent
+        // derive once a day) so distinguishing matters for the summary.
+        const changed =
+          existing[0].startDate !== row.startDate ||
+          existing[0].amountPaisa !== row.amountPaisa;
+        if (changed) refreshed += 1;
+        else kept += 1;
+      } else {
+        // User-edited row — setWhere blocked the update; row stays as-is.
+        kept += 1;
+      }
     }
 
     // Phase 2 — delete orphan auto_derived rows. An orphan is an
@@ -161,6 +222,7 @@ export async function POST() {
 
     return NextResponse.json({
       upserted,
+      refreshed,
       kept,
       deleted,
       // Helpful breadcrumb: counts of source rows considered, so the
