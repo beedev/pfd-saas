@@ -29,6 +29,10 @@ interface ComputeResult {
   taxBeforeRebatePaisa: number;
   rebatePaisa: number;
   taxAfterRebatePaisa: number;
+  // Sprint 5.1b — surcharge fields (optional for backward-compat)
+  surchargePaisa?: number;
+  marginalReliefPaisa?: number;
+  effectiveSurchargePaisa?: number;
   cessPaisa: number;
   totalTaxPaisa: number;
   effectiveRatePct: number;
@@ -324,6 +328,23 @@ function RegimeColumn({
           label="Tax after rebate"
           value={formatINR(result.taxAfterRebatePaisa)}
         />
+        {/* Surcharge rows — only shown when income > ₹50L (i.e.
+            surcharge is non-zero). Keeps the typical user's UI clean. */}
+        {(result.surchargePaisa ?? 0) > 0 && (
+          <>
+            <Row
+              label="Surcharge (high-income bracket)"
+              value={`+ ${formatINR(result.surchargePaisa ?? 0)}`}
+            />
+            {(result.marginalReliefPaisa ?? 0) > 0 && (
+              <Row
+                label="− Marginal relief"
+                value={`− ${formatINR(result.marginalReliefPaisa ?? 0)}`}
+                valueClassName="text-emerald-700"
+              />
+            )}
+          </>
+        )}
         <Row
           label="Health & Education Cess (4%)"
           value={`+ ${formatINR(result.cessPaisa)}`}

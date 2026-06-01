@@ -311,6 +311,7 @@ export async function GET(request: NextRequest) {
       oldConfig: configByRegime('OLD'),
       newSlabs: slabsByRegime('NEW'),
       newConfig: configByRegime('NEW'),
+      fy,
     });
 
     // Recompute NEW under its own gross (different HP treatment).
@@ -322,6 +323,8 @@ export async function GET(request: NextRequest) {
       deductionsPaisa: newDeductionsPaisa,
       slabs: slabsByRegime('NEW'),
       config: configByRegime('NEW'),
+      regime: 'NEW',
+      fy,
     });
     const oldTotal = result.old.totalTaxPaisa;
     const newTotal = newResult.totalTaxPaisa;

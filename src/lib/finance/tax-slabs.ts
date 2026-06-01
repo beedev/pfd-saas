@@ -24,12 +24,14 @@
  *   • Rebate floors at 0; never negative
  *   • Slabs are inclusive lower, exclusive upper (per govt convention)
  *
- * Not yet handled (deferred to Sprint 4.5 / later):
- *   • Surcharge brackets for high income (>50L, >1Cr, etc.)
- *   • Marginal relief on surcharge
- *   • Capital gains separately taxed (LTCG/STCG slabs)
+ * Not yet handled (deferred):
+ *   • Capital gains separately taxed (LTCG/STCG slabs) — Sprint 5.1c
  *   • AMT (Alternative Minimum Tax) for old regime
+ *
+ * Sprint 5.1b — Surcharge + marginal relief wired via surcharge.ts.
  */
+
+import { computeSurcharge, bracketThresholdForIncome } from './surcharge';
 
 export interface TaxSlabRow {
   slabOrder: number;
@@ -56,6 +58,11 @@ export interface TaxComputeInput {
   deductionsPaisa: number;
   slabs: TaxSlabRow[];
   config: TaxRegimeConfigRow;
+  /** Sprint 5.1b — regime hint for surcharge bracket selection. When
+   *  omitted, surcharge is not computed (backward-compat). */
+  regime?: 'OLD' | 'NEW';
+  /** Sprint 5.1b — FY string for surcharge bracket selection. */
+  fy?: string;
 }
 
 export interface TaxComputeResult {
@@ -65,11 +72,18 @@ export interface TaxComputeResult {
   taxBeforeRebatePaisa: number;
   /** 87A rebate applied (0 if income exceeds threshold). */
   rebatePaisa: number;
-  /** Tax after rebate, before cess. */
+  /** Tax after rebate, before surcharge or cess. */
   taxAfterRebatePaisa: number;
-  /** 4% (or whatever cess_pct is) on taxAfterRebate. */
+  /** Sprint 5.1b — surcharge before marginal relief. 0 when income
+   *  ≤ ₹50L or when regime/fy not supplied. */
+  surchargePaisa: number;
+  /** Sprint 5.1b — marginal relief applied. */
+  marginalReliefPaisa: number;
+  /** Surcharge − marginal relief. */
+  effectiveSurchargePaisa: number;
+  /** 4% (or whatever cess_pct is) on (taxAfterRebate + effectiveSurcharge). */
   cessPaisa: number;
-  /** Final total tax owed = taxAfterRebate + cess. */
+  /** Final total tax owed = taxAfterRebate + effectiveSurcharge + cess. */
   totalTaxPaisa: number;
   /** Effective tax rate as % of gross — useful for headline display. */
   effectiveRatePct: number;
@@ -83,7 +97,7 @@ export interface TaxComputeResult {
  * of income that falls within its [lower, upper) range at the slab's
  * rate. The top slab has upperPaisa=null (open-ended).
  */
-function computeSlabTax(taxablePaisa: number, slabs: TaxSlabRow[]): number {
+export function computeSlabTax(taxablePaisa: number, slabs: TaxSlabRow[]): number {
   if (taxablePaisa <= 0 || slabs.length === 0) return 0;
 
   const sorted = [...slabs].sort((a, b) => a.slabOrder - b.slabOrder);
@@ -103,7 +117,7 @@ function computeSlabTax(taxablePaisa: number, slabs: TaxSlabRow[]): number {
 }
 
 export function computeTax(input: TaxComputeInput): TaxComputeResult {
-  const { grossIncomePaisa, deductionsPaisa, slabs, config } = input;
+  const { grossIncomePaisa, deductionsPaisa, slabs, config, regime, fy } = input;
 
   // 1. Standard deduction
   const afterStdDed = Math.max(0, grossIncomePaisa - config.standardDeductionPaisa);
@@ -124,11 +138,36 @@ export function computeTax(input: TaxComputeInput): TaxComputeResult {
 
   const taxAfterRebatePaisa = Math.max(0, taxBeforeRebatePaisa - rebatePaisa);
 
-  // 5. Health & Education Cess (4% in current law)
-  const cessPaisa = Math.round((taxAfterRebatePaisa * config.cessPct) / 100);
+  // 5. Sprint 5.1b — Surcharge + marginal relief. Only computed when
+  // caller supplies regime + fy (backward-compat: pre-5.1b callers
+  // get 0 surcharge).
+  let surchargePaisa = 0;
+  let marginalReliefPaisa = 0;
+  let effectiveSurchargePaisa = 0;
+  if (regime && fy) {
+    const thresholdPaisa = bracketThresholdForIncome(taxablePaisa, regime);
+    // Slab tax at the bracket threshold — minus 87A rebate that may
+    // apply there too (it won't at ₹50L+ — far above any 87A
+    // threshold currently in either regime).
+    const taxAtThresholdPaisa = computeSlabTax(thresholdPaisa, slabs);
+    const sc = computeSurcharge({
+      taxableIncomePaisa: taxablePaisa,
+      taxBeforeSurchargePaisa: taxAfterRebatePaisa,
+      taxAtThresholdPaisa,
+      regime,
+      fy,
+    });
+    surchargePaisa = sc.surchargePaisa;
+    marginalReliefPaisa = sc.marginalReliefPaisa;
+    effectiveSurchargePaisa = sc.effectiveSurchargePaisa;
+  }
 
-  // 6. Final tax owed
-  const totalTaxPaisa = taxAfterRebatePaisa + cessPaisa;
+  // 6. Health & Education Cess (4% in current law) — on (tax_after_rebate + effective_surcharge)
+  const cessBase = taxAfterRebatePaisa + effectiveSurchargePaisa;
+  const cessPaisa = Math.round((cessBase * config.cessPct) / 100);
+
+  // 7. Final tax owed
+  const totalTaxPaisa = taxAfterRebatePaisa + effectiveSurchargePaisa + cessPaisa;
 
   // Effective rate against GROSS (not taxable) — answers "what % of
   // my income goes to tax?" — the most useful headline number.
@@ -140,11 +179,15 @@ export function computeTax(input: TaxComputeInput): TaxComputeResult {
     taxBeforeRebatePaisa,
     rebatePaisa,
     taxAfterRebatePaisa,
+    surchargePaisa,
+    marginalReliefPaisa,
+    effectiveSurchargePaisa,
     cessPaisa,
     totalTaxPaisa,
     effectiveRatePct,
   };
 }
+
 
 /**
  * Convenience: compute tax for BOTH regimes side-by-side, given a
@@ -166,6 +209,9 @@ export interface RegimeCompareInput {
   oldConfig: TaxRegimeConfigRow;
   newSlabs: TaxSlabRow[];
   newConfig: TaxRegimeConfigRow;
+  /** Sprint 5.1b — FY for surcharge bracket selection. Required to
+   *  compute surcharge; omit only for unit tests. */
+  fy?: string;
 }
 
 export interface RegimeCompareResult {
@@ -182,12 +228,16 @@ export function compareRegimes(input: RegimeCompareInput): RegimeCompareResult {
     deductionsPaisa: input.oldRegimeDeductionsPaisa,
     slabs: input.oldSlabs,
     config: input.oldConfig,
+    regime: 'OLD',
+    fy: input.fy,
   });
   const newResult = computeTax({
     grossIncomePaisa: input.grossIncomePaisa,
     deductionsPaisa: input.newRegimeDeductionsPaisa,
     slabs: input.newSlabs,
     config: input.newConfig,
+    regime: 'NEW',
+    fy: input.fy,
   });
 
   // Pick the lower-tax regime. Tie-break NEW (govt default + simpler).
