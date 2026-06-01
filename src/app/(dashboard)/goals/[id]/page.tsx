@@ -403,14 +403,36 @@ export default function GoalDetailPage() {
       ? Math.min(100, Math.round((mappedTotal / goal.targetAmount) * 100))
       : 0;
 
-  // Build chart series from projection
-  const chartData =
-    projection?.yearByYear.map((y) => ({
-      year: y.year,
-      corpus: y.closingCorpus / 100,
-      demand: y.demand / 100,
-      shortfall: y.shortfall / 100,
-    })) ?? [];
+  // Build chart series from projection.
+  //
+  // The earlier shape used per-year `demand` (the amount disbursed THAT
+  // year) with monotone interpolation. For a LUMPSUM goal that turned a
+  // single-year spike (0 → 70L → 0) into a misleading smooth bell. Now
+  // we plot:
+  //   • opening corpus per year — the balance at the start of the year
+  //     before that year's growth + demand
+  //   • cumulative demand — what's been disbursed up to and including
+  //     this year. For LUMPSUM this steps from 0 to the full target at
+  //     the disbursement year and stays flat. For SWP it climbs linearly
+  //     (or with growth) over the disbursement years.
+  //   • cumulative shortfall — running unmet demand.
+  // This pairing reads cleanly: corpus depletes when cumulative demand
+  // jumps, the two should ideally cross above zero.
+  const chartData = (() => {
+    if (!projection) return [];
+    let cumDemand = 0;
+    let cumShortfall = 0;
+    return projection.yearByYear.map((y) => {
+      cumDemand += y.demand;
+      cumShortfall += y.shortfall;
+      return {
+        year: y.year,
+        corpus: y.openingCorpus / 100,
+        cumulativeDemand: cumDemand / 100,
+        cumulativeShortfall: cumShortfall / 100,
+      };
+    });
+  })();
 
   return (
     <div className="space-y-6">
@@ -672,9 +694,39 @@ export default function GoalDetailPage() {
         </CardHeader>
         <CardContent>
           {events.length === 0 ? (
-            <p className="text-sm text-[var(--dxp-text-muted)] py-4 text-center">
-              No cashflow events are earmarked to this goal yet.
-            </p>
+            <div className="py-4 space-y-3">
+              <p className="text-sm text-[var(--dxp-text-muted)] text-center">
+                No cashflow events are earmarked to this goal yet.
+              </p>
+              {/* If the projection is already counting recurring inflows
+                  (SIPs and recurring earmarks on mapped assets), call
+                  that out so the user understands where the projection's
+                  totalInflows number comes from. */}
+              {projection && projection.totalInflowsPaisa > 0 && (
+                <div className="rounded-md border border-[var(--dxp-border)] bg-[var(--dxp-surface-alt)]/40 p-3 text-xs text-[var(--dxp-text-secondary)]">
+                  <p>
+                    <strong className="text-[var(--dxp-text)]">
+                      {formatINR(projection.totalInflowsPaisa)}
+                    </strong>{' '}
+                    of recurring inflows is already counted in the projection
+                    below — from SIPs on the assets you&apos;ve mapped above
+                    (~
+                    {formatINR(
+                      Math.round(
+                        projection.totalInflowsPaisa / Math.max(1, projection.horizonYears),
+                      ),
+                    )}{' '}
+                    per year over {projection.horizonYears} year
+                    {projection.horizonYears === 1 ? '' : 's'}).
+                  </p>
+                  <p className="mt-2">
+                    To earmark a <em>specific one-time event</em> (LIC maturity,
+                    NPS lumpsum, etc.), use the <strong>Earmark a cashflow event</strong>{' '}
+                    button above.
+                  </p>
+                </div>
+              )}
+            </div>
           ) : (
             <DataTable<CashflowEvent>
               data={events}
@@ -770,26 +822,29 @@ export default function GoalDetailPage() {
                     />
                     <Legend />
                     <Line
-                      type="monotone"
+                      type="linear"
                       dataKey="corpus"
-                      name="Projected corpus"
+                      name="Opening corpus"
                       stroke="var(--dxp-brand)"
                       strokeWidth={2}
-                      dot={false}
+                      dot={{ r: 4 }}
                     />
+                    {/* Step interpolation makes the disbursement jump
+                        unmistakable: cumulative demand stays flat until
+                        the goal fires, then steps up sharply. */}
                     <Line
-                      type="monotone"
-                      dataKey="demand"
-                      name="Goal demand"
+                      type="stepAfter"
+                      dataKey="cumulativeDemand"
+                      name="Cumulative demand"
                       stroke="#f59e0b"
                       strokeDasharray="5 5"
                       strokeWidth={2}
-                      dot={false}
+                      dot={{ r: 4 }}
                     />
                     <Line
-                      type="monotone"
-                      dataKey="shortfall"
-                      name="Shortfall"
+                      type="linear"
+                      dataKey="cumulativeShortfall"
+                      name="Cumulative shortfall"
                       stroke="#ef4444"
                       strokeWidth={2}
                       dot={false}
