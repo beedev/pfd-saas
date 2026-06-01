@@ -6,6 +6,7 @@ import { Button, Card, CardHeader, CardContent, StatsDisplay, Select, Input, Bad
 import { Plus, Loader2, Calculator, FileText, Gift, EyeOff, Eye, Trash2, IndianRupee } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { RegimeComparisonCard } from '@/components/forms/regime-comparison-card';
 
 interface SectionBucket {
   section: string;
@@ -141,6 +142,14 @@ export default function TaxDashboardPage() {
         </div>
       ) : (
         <>
+          {/* Sprint 4 Phase 1 — regime comparison card. Reads the user's
+              actual income (salary + business/GST + other + rental) and
+              shows OLD vs NEW regime tax side-by-side with the
+              recommendation. Goes above the deduction stats because the
+              "which regime?" decision is upstream of the "how much did I
+              deduct?" tracking that follows. */}
+          <RegimeComparisonCard fy={fy} />
+
           <StatsDisplay
             currency="INR"
             locale="en-IN"

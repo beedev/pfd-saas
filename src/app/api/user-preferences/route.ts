@@ -32,6 +32,7 @@ export async function GET() {
         habitsEnabled: userPreferences.habitsEnabled,
         telegramChatId: userPreferences.telegramChatId,
         telegramUsername: userPreferences.telegramUsername,
+        taxRegimeDefault: userPreferences.taxRegimeDefault,
         createdAt: userPreferences.createdAt,
         updatedAt: userPreferences.updatedAt,
       })
@@ -47,6 +48,7 @@ export async function GET() {
 
 interface PatchBody {
   habitsEnabled?: boolean;
+  taxRegimeDefault?: 'NEW' | 'OLD' | 'EVALUATE';
 }
 
 export async function PATCH(request: NextRequest) {
@@ -57,6 +59,13 @@ export async function PATCH(request: NextRequest) {
     const body = (await request.json()) as PatchBody;
     const update: Partial<typeof userPreferences.$inferInsert> = { updatedAt: new Date() };
     if (typeof body.habitsEnabled === 'boolean') update.habitsEnabled = body.habitsEnabled;
+    if (
+      body.taxRegimeDefault === 'NEW' ||
+      body.taxRegimeDefault === 'OLD' ||
+      body.taxRegimeDefault === 'EVALUATE'
+    ) {
+      update.taxRegimeDefault = body.taxRegimeDefault;
+    }
 
     if (Object.keys(update).length === 1) {
       return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
