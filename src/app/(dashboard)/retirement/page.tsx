@@ -92,7 +92,8 @@ interface AssetClassRow {
 type CashflowSourceKind =
   | 'INSURANCE_MATURITY' | 'ANNUITY' | 'PENSION' | 'NPS_LUMPSUM' | 'NPS_ANNUITY'
   | 'PPF_MATURITY' | 'SSY_MATURITY' | 'NSC_MATURITY' | 'KVP_MATURITY'
-  | 'RENTAL' | 'SALARY' | 'BUSINESS' | 'INHERITANCE' | 'OTHER';
+  | 'RENTAL' | 'SALARY' | 'BUSINESS' | 'INHERITANCE' | 'OTHER'
+  | 'SIP';
 type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';
 type CashflowTaxTreatment = 'TAX_FREE' | 'TAXABLE' | 'TDS';
 
@@ -126,6 +127,7 @@ const KIND_LABELS: Record<CashflowSourceKind, string> = {
   BUSINESS: 'Business',
   INHERITANCE: 'Inheritance',
   OTHER: 'Other',
+  SIP: 'SIP contribution',
 };
 
 /** Source-kind chip color logic. TAX_FREE → success, TAXABLE → default,
@@ -824,6 +826,13 @@ export default function RetirementPage() {
       // Salary stops at retirement by definition — not "income during
       // retirement". Always exclude.
       if (e.sourceKind === 'SALARY') return false;
+      // SIPs are pre-retirement OUTFLOWS into MFs, not income at all.
+      // They typically stop when the salary stops (no source to fund
+      // them). MFs aren't even a retirement asset class — they sit
+      // outside retirement-asset-selection. Always exclude. (The SIP
+      // source kind was added after Phase 4's filter and wasn't in the
+      // original exclusion list — this is the missed update.)
+      if (e.sourceKind === 'SIP') return false;
       // Manual events have no source asset to consult; the user added
       // them deliberately, so always include.
       if (e.sourceId == null) return true;
