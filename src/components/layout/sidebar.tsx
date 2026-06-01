@@ -131,6 +131,7 @@ const navigation: NavSection[] = [
       { name: 'ITR-2', href: '/tax/itr2', icon: FileText },
       { name: 'ITR-3', href: '/tax/itr3', icon: FileText },
       { name: 'ITR-4 Sugam', href: '/tax/itr4', icon: FileText },
+      { name: 'Import from TaxCalc', href: '/tax/import', icon: Upload },
     ],
   },
   {
