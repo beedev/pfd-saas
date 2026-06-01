@@ -11,7 +11,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "predev": "node scripts/db-verify.mjs",
+    "db:verify": "node scripts/db-verify.mjs",
+    "smoke:tax": "node scripts/smoke-test-tax.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

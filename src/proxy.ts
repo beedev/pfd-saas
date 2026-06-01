@@ -56,6 +56,21 @@ export function proxy(req: NextRequest) {
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
+  // Dev-only auth bypass — paired with the synthetic-session handler
+  // in src/auth.ts. ALL THREE conditions required:
+  //   1. NODE_ENV !== 'production'
+  //   2. DEV_AUTH_BYPASS === 'true'  (off by default)
+  //   3. Request carries x-dev-as-user: <user_id>
+  // Anything else falls through to the cookie check. The bypass is
+  // intended for scripts/smoke-test-*.mjs; never enable in prod env.
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.DEV_AUTH_BYPASS === 'true' &&
+    req.headers.get('x-dev-as-user')
+  ) {
+    return NextResponse.next();
+  }
+
   // Length floor: Auth.js session tokens are 32+ chars. Reject anything
   // obviously not-a-token to make casual cookie tampering loud.
   const hasSessionCookie = SESSION_COOKIE_NAMES.some(

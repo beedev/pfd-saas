@@ -29,7 +29,7 @@ import authConfig from './auth.config';
 
 const STUB_LOG = path.join(process.cwd(), 'tmp', 'magic-links.log');
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
+const _nextAuth = NextAuth({
   ...authConfig,
   adapter: DrizzleAdapter(db, {
     usersTable: users,
@@ -41,6 +41,58 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     buildEmailProvider(),
   ],
 });
+
+export const { handlers, signIn, signOut } = _nextAuth;
+const _realAuth = _nextAuth.auth;
+
+/**
+ * Dev-only auth bypass for smoke testing.
+ *
+ * When ALL three conditions hold, returns a synthetic session for the
+ * user id in the header — without hitting NextAuth, without consulting
+ * the sessions table:
+ *
+ *   1. NODE_ENV !== 'production'   — never works in prod, full stop
+ *   2. DEV_AUTH_BYPASS === 'true'  — opt-in via env (off by default)
+ *   3. Request carries `x-dev-as-user: <user_id>`
+ *
+ * Anything missing → falls through to real NextAuth. The header is
+ * stripped at the edge of `auth()` so downstream code can't observe
+ * whether the bypass was used.
+ *
+ * Designed for `scripts/smoke-test-*.mjs` to exercise auth-gated
+ * routes end-to-end. NOT a feature flag — pair with a fresh-rotated
+ * `DEV_AUTH_BYPASS=true` only when you're actively testing, then
+ * unset.
+ */
+// Auth.js v5's exported `auth` is callable both as a route handler
+// wrapper AND as `await auth()`. We only need the no-arg session-read
+// shape — the few wrapper call sites in this codebase still go to the
+// real implementation via the proxy below.
+export const auth = (async (...args: unknown[]) => {
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.DEV_AUTH_BYPASS === 'true' &&
+    args.length === 0
+  ) {
+    // next/headers is server-only; safe to import inline here.
+    const { headers } = await import('next/headers');
+    const h = await headers();
+    const userId = h.get('x-dev-as-user');
+    if (userId) {
+      // The cast goes through `unknown` because NextAuth's exported
+      // `auth` is an overloaded callable (route-wrapper + session-reader)
+      // and its `Awaited<ReturnType<>>` widens to include
+      // NextMiddleware-shaped variants we never use.
+      return {
+        user: { id: userId, email: 'dev-bypass@local', name: 'Dev Bypass' },
+        expires: new Date(Date.now() + 60_000).toISOString(),
+      } as unknown as Awaited<ReturnType<typeof _realAuth>>;
+    }
+  }
+  // @ts-expect-error — Auth.js's overloaded signature; pass-through.
+  return _realAuth(...args);
+}) as typeof _realAuth;
 
 /**
  * EmailProvider builder. Two modes:
