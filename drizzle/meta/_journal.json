@@ -148,6 +148,13 @@
       "when": 1780324201084,
       "tag": "0020_eminent_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780327110553,
+      "tag": "0021_sturdy_warlock",
+      "breakpoints": true
     }
   ]
 }

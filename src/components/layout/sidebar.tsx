@@ -41,6 +41,7 @@ import {
   CalendarCheck,
   Activity,
   Sparkles,
+  ClipboardCheck,
 } from 'lucide-react';
 
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
@@ -121,6 +122,7 @@ const navigation: NavSection[] = [
       { name: 'Deductions', href: '/tax', icon: Receipt },
       { name: '80G Donations', href: '/tax/80g', icon: PiggyBank },
       { name: 'Capital Gains', href: '/tax/ltcg-stcg', icon: Calculator },
+      { name: 'Form 26AS', href: '/tax/form-26as', icon: ClipboardCheck },
       { name: 'Documents', href: '/tax/documents', icon: FolderOpen },
       { name: 'Filing Pack', href: '/tax/filing-pack', icon: Package },
       { name: 'ITR Filing', href: '/tax/itr3', icon: FileText },

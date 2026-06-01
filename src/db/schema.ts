@@ -2381,6 +2381,36 @@ export const salaryIncome = pgTable('salary_income', {
 
 export type SalaryIncomeRow = typeof salaryIncome.$inferSelect;
 
+// ─── Sprint 4 Phase 2 — Form 26AS reconciliation ──────────────────────────
+// User uploads their Form 26AS PDF for an FY. We store the file on disk
+// and best-effort extract the headline "Total Tax Deducted" / "Total
+// Income" numbers via pdfjs-dist regex sweep. The /tax/form-26as page
+// then shows these alongside the user's own `tds_credits` rows so the
+// user can spot mismatches and tick the matching rows as reconciled.
+//
+// Parsing is intentionally fragile-tolerant: govt PDF format shifts
+// every couple of years and table-cell extraction quality is poor.
+// When parse fails, parsed_total_*_paisa stay NULL and the user can
+// still rely on visual comparison + manual matching.
+export const form26asUploads = pgTable('form_26as_uploads', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  filePath: text('file_path').notNull(),
+  uploadedAt: timestamp('uploaded_at', { mode: 'date' }).defaultNow(),
+  parsedTotalTdsPaisa: bigint('parsed_total_tds_paisa', { mode: 'number' }),
+  parsedTotalIncomePaisa: bigint('parsed_total_income_paisa', { mode: 'number' }),
+  parsedAt: timestamp('parsed_at', { mode: 'date' }),
+  parseNotes: text('parse_notes'),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('form_26as_uploads_user_id_idx').on(table.userId),
+  index('form_26as_uploads_fy_idx').on(table.fy),
+  index('form_26as_uploads_user_fy_idx').on(table.userId, table.fy),
+]);
+
+export type Form26asUpload = typeof form26asUploads.$inferSelect;
+export type NewForm26asUpload = typeof form26asUploads.$inferInsert;
+
 // TDS credits — non-salary (consulting/interest/property) — feeds CSV_TDS2 / CSV_TDS3
 export type TdsCategory = 'CONSULTING' | 'INTEREST' | 'RENT' | 'PROPERTY' | 'OTHER';
 
@@ -2395,6 +2425,12 @@ export const tdsCredits = pgTable('tds_credits', {
   incomePaisa: bigint('income_paisa', { mode: 'number' }).notNull(),
   tdsPaisa: bigint('tds_paisa', { mode: 'number' }).notNull(),
   notes: text('notes'),
+  // Sprint 4 Phase 2 — Form 26AS reconciliation flags.
+  isReconciled: boolean('is_reconciled').notNull().default(false),
+  reconciledViaUploadId: integer('reconciled_via_upload_id').references(
+    () => form26asUploads.id,
+    { onDelete: 'set null' },
+  ),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
