@@ -19,8 +19,22 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
+    // Explicit projection — DO NOT leak telegram_connect_token to the
+    // client. Anyone with that token could pair their own Telegram
+    // account to this user.
     const rows = await db
-      .select()
+      .select({
+        userId: userPreferences.userId,
+        displayName: userPreferences.displayName,
+        baseCurrency: userPreferences.baseCurrency,
+        financialYearStartMonth: userPreferences.financialYearStartMonth,
+        onboardedAt: userPreferences.onboardedAt,
+        habitsEnabled: userPreferences.habitsEnabled,
+        telegramChatId: userPreferences.telegramChatId,
+        telegramUsername: userPreferences.telegramUsername,
+        createdAt: userPreferences.createdAt,
+        updatedAt: userPreferences.updatedAt,
+      })
       .from(userPreferences)
       .where(eq(userPreferences.userId, session.user.id))
       .limit(1);

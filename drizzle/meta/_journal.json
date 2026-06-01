@@ -120,6 +120,13 @@
       "when": 1780278906796,
       "tag": "0016_flimsy_goblin_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780284194503,
+      "tag": "0017_bitter_maddog",
+      "breakpoints": true
     }
   ]
 }

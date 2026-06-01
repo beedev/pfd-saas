@@ -36,6 +36,10 @@ const PUBLIC_PREFIXES = [
   '/_next/',
   '/api/auth/',
   '/api/cron/', // cron endpoints gate on Authorization: Bearer <CRON_SECRET>
+  // Telegram bot posts here on /start; auth happens via the
+  // X-Telegram-Bot-Api-Secret-Token header inside the route, not via
+  // session cookie.
+  '/api/integrations/telegram/webhook',
   '/favicon.ico',
 ];
 

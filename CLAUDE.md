@@ -88,8 +88,10 @@ Sprint 2 deliverables (still in force):
   for a fresh user
 - Real magic-link email via SMTP (Gmail / Resend / Postmark — auto-falls
   back to console-log stub when `EMAIL_SERVER` is unset)
-- Real Telegram alerts (when `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`
-  set; otherwise stubbed to `tmp/telegram-out.log`)
+- Per-user Telegram alerts + daily digest. One bot
+  (`TELEGRAM_BOT_TOKEN`); each user pairs their own chat_id via
+  Settings → Telegram (deep-link + webhook). When the bot token is
+  unset, sends are logged to `tmp/telegram-out.log` per user.
 - Tenant-scoped unique indices everywhere (the multi-tenancy invariant
   reaches every constraint, not just every query)
 
@@ -171,6 +173,33 @@ imported data (Sprint 1.5) and walk every page.
   Auth.js display; the actual send is stubbed in Sprint 1)
 - `EMAIL_SERVER` — SMTP connection string, real Sprint 5+, ignored while
   stubbed
+- `CRON_SECRET` — bearer token gating `/api/cron/tick`
+- `TELEGRAM_BOT_TOKEN` — single bot token. One bot serves every user;
+  chat IDs are per-user (stored on `user_preferences.telegram_chat_id`).
+  Optional — when unset, sends become console + `tmp/telegram-out.log`
+  stubs but pretend-succeed so cron jobs don't infinite-retry.
+- `TELEGRAM_BOT_USERNAME` — the bot's `@username` (without the `@`).
+  Used to build the pairing deep link
+  `https://t.me/<bot-username>?start=<token>`. Required for the UI's
+  Connect Telegram flow.
+- `TELEGRAM_WEBHOOK_SECRET` — random secret (e.g. `openssl rand -hex 32`)
+  that Telegram echoes back on every webhook update via the
+  `X-Telegram-Bot-Api-Secret-Token` header. We refuse any inbound update
+  whose header doesn't match. Required if you register the webhook.
+- `TELEGRAM_CHAT_ID` — **no longer read.** Per-user routing supersedes
+  it; safe to remove from `.env.local`.
+
+## Telegram webhook registration (one-time)
+
+After deploying, point Telegram at your webhook:
+
+```bash
+./scripts/telegram-set-webhook.sh https://<your-host>/api/integrations/telegram/webhook
+```
+
+The script reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` from
+env / `.env.local`. Telegram persists the registration — re-run only if
+you change hosts or rotate the secret.
 
 ## Sign-in flow (Sprint 1 — email send is STUBBED)
 

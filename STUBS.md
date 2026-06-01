@@ -20,13 +20,6 @@ return a 503.
 - **Added:** Sprint 1 Phase 3
 - **Updated:** Sprint 2 Phase 7 — added env-var-driven fallthrough to real SMTP.
 
-### 2. Telegram notifications (alerts + digest)
-- **Where:** `src/lib/services/telegram.ts` — `sendTelegramMessage()`.
-- **Stub behaviour:** When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are NOT both set, logs the payload to `console.log` with a banner AND appends `{ts, text}` to `tmp/telegram-out.log`. Returns `true` so callers think delivery succeeded (otherwise alerts re-fire on every tick). If both env vars ARE set, falls through to the real Telegram API — the single-tenant personal-v1 path.
-- **What the real thing needs:** A per-user bot routing model. The bot API is free, but a multi-tenant SaaS can't share one bot/chat across tenants. Sprint 5 or later.
-- **Why stub:** Tenant-specific Telegram routing is unsolved.
-- **Added:** Sprint 1 Phase 4 (planned), updated Sprint 2 Phase 5.
-
 ### 3. Billing / subscriptions
 - **Where:** No code yet; placeholder slot at `src/lib/services/billing.ts`.
 - **Stub behaviour:** Every account treated as the only tier (full access).
@@ -35,6 +28,13 @@ return a 503.
 - **Added:** Future
 
 ## Replaced
+
+### Telegram notifications (per-user) — Sprint 3.5+ follow-up
+- **Was:** `sendTelegramMessage(text)` read `TELEGRAM_CHAT_ID` from the env. One bot, one global chat — single-tenant only.
+- **Now:** Per-user routing. `sendTelegramToUser(userId, text)` looks up the user's `user_preferences.telegram_chat_id`. Users pair their own Telegram via `POST /api/integrations/telegram/start` (generates a UUID token, deep-links to `https://t.me/<bot>?start=<token>`), confirm with `/start` in Telegram (bot posts to `/api/integrations/telegram/webhook`, secured with `X-Telegram-Bot-Api-Secret-Token`). One bot serves every user; chat_id is per-user.
+- **Env:** `TELEGRAM_BOT_TOKEN` (one bot, all users), `TELEGRAM_BOT_USERNAME` (for the deep link), `TELEGRAM_WEBHOOK_SECRET` (for inbound webhook auth). `TELEGRAM_CHAT_ID` is no longer read by the app — safe to remove.
+- **Migration:** `0017_bitter_maddog.sql` added `telegram_chat_id`, `telegram_username`, `telegram_connect_token`, `telegram_connect_token_expires_at` to `user_preferences`. A one-shot SQL backfilled the original owner's existing chat_id so they don't have to re-pair.
+- **Webhook registration:** `scripts/telegram-set-webhook.sh <https-webhook-url>` — one-time per deployment.
 
 ### Cron endpoints (per-tenant) — Sprint 2 Phase 5
 - **Was:** `src/app/api/{alerts/check,daily-digest,investments/sips/auto-execute}/route.ts` returned 503 with a `TODO(sprint-2)` comment.

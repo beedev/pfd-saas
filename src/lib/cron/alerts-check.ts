@@ -35,7 +35,7 @@ import {
   vehicles,
 } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
-import { sendTelegramMessage } from '@/lib/services/telegram';
+import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const GRAMS_PER_OZ = 31.1035;
 const INDIA_GOLD_PREMIUM = 1.07;
@@ -139,8 +139,8 @@ export async function runAlertsCheck(userId: string): Promise<AlertsCheckResult>
         }
       }
 
-      const sent = await sendTelegramMessage(alert.message);
-      if (sent) {
+      const sendResult = await sendTelegramToUser(userId, alert.message);
+      if (sendResult.ok) {
         await db.insert(alertHistory).values({
           userId,
           ruleId: rule.id,
@@ -149,8 +149,16 @@ export async function runAlertsCheck(userId: string): Promise<AlertsCheckResult>
           triggeredValue: alert.triggeredValue,
         });
         result.sent++;
+      } else if (sendResult.reason === 'no-chat-id') {
+        // User hasn't paired Telegram yet — skip silently. Don't write
+        // to alert_history (so the alert fires again once they pair).
+        console.log(
+          `[alerts-check] user ${userId} rule "${rule.name}" triggered but no chat_id; skipping`,
+        );
       } else {
-        result.errors.push(`Failed to send alert for rule "${rule.name}"`);
+        result.errors.push(
+          `Failed to send alert for rule "${rule.name}": ${sendResult.reason}${sendResult.detail ? ` (${sendResult.detail})` : ''}`,
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

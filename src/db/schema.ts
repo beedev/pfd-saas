@@ -99,6 +99,21 @@ export const userPreferences = pgTable('user_preferences', {
   // and the routes still respond 200 (no-op) so existing bookmarks
   // never 500.
   habitsEnabled: boolean('habits_enabled').notNull().default(false),
+  // Sprint 3.5 follow-up — per-user Telegram routing. TELEGRAM_BOT_TOKEN
+  // remains an env var (one bot serves all users); the chat_id where
+  // messages land is per-user. NULL = user hasn't paired yet, so cron
+  // jobs skip them.
+  telegramChatId: text('telegram_chat_id'),
+  /** Display only — `@username` if the user has one set. */
+  telegramUsername: text('telegram_username'),
+  /** One-shot pairing token. The UI calls /api/integrations/telegram/start
+   *  which generates this, hands the user a deep link
+   *  https://t.me/<bot>?start=<token>. When the user presses /start in
+   *  Telegram, the bot webhook receives the token, looks up the user,
+   *  writes telegram_chat_id, and clears this. Tokens expire after
+   *  telegram_connect_token_expires_at. */
+  telegramConnectToken: text('telegram_connect_token'),
+  telegramConnectTokenExpiresAt: timestamp('telegram_connect_token_expires_at', { mode: 'date' }),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });

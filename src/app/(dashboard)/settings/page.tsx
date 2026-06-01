@@ -1,5 +1,6 @@
 import { BusinessProfileForm } from '@/components/forms/business-profile-form';
 import { PersonalModulesForm } from '@/components/forms/personal-modules-form';
+import { TelegramConnectionForm } from '@/components/forms/telegram-connection-form';
 
 export default function SettingsPage() {
   return (
@@ -13,6 +14,7 @@ export default function SettingsPage() {
 
       <BusinessProfileForm />
       <PersonalModulesForm />
+      <TelegramConnectionForm />
     </div>
   );
 }

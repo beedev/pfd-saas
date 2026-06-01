@@ -39,7 +39,7 @@ import {
   sips,
 } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
-import { sendTelegramMessage } from '@/lib/services/telegram';
+import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const MARKET_SYMBOLS = ['^NSEI', '^BSESN', '^NSEBANK', '^INDIAVIX', 'GC=F', 'SI=F', 'USDINR=X'];
 
@@ -501,9 +501,19 @@ export function formatDigestText(d: DailyDigest): string {
   return lines.join('\n');
 }
 
-export async function runDailyDigestJob(userId: string): Promise<{ sent: boolean; preview: string }> {
+export async function runDailyDigestJob(
+  userId: string,
+): Promise<{ sent: boolean; preview: string; skipReason?: string }> {
   const digest = await buildDailyDigest(userId);
   const text = formatDigestText(digest);
-  const sent = await sendTelegramMessage(text);
-  return { sent, preview: text };
+  const result = await sendTelegramToUser(userId, text);
+  if (result.ok) {
+    return { sent: true, preview: text };
+  }
+  // User hasn't paired Telegram yet — that's fine, just skip silently.
+  if (result.reason === 'no-chat-id') {
+    console.log(`[daily-digest] user ${userId} hasn't paired Telegram; skipping`);
+    return { sent: false, preview: text, skipReason: 'no-chat-id' };
+  }
+  return { sent: false, preview: text, skipReason: result.reason };
 }
