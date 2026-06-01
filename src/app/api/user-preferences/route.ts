@@ -3,8 +3,7 @@
  *
  * The wizard endpoint (/api/onboarding/complete) writes the initial row.
  * This endpoint exposes a narrow PATCH for the settings page to flip
- * optional modules — currently just `habitsEnabled` for the
- * transformation tracker — without going back through onboarding.
+ * optional modules and Sprint 5.1a tax setup parameters.
  *
  * Display-name, base currency, FY start, etc. are intentionally NOT
  * editable here — those need their own thought-out edit flows.
@@ -33,6 +32,15 @@ export async function GET() {
         telegramChatId: userPreferences.telegramChatId,
         telegramUsername: userPreferences.telegramUsername,
         taxRegimeDefault: userPreferences.taxRegimeDefault,
+        // Sprint 5.1a tax setup params
+        metroCity: userPreferences.metroCity,
+        isSrCitizen: userPreferences.isSrCitizen,
+        spouseIsSrCitizen: userPreferences.spouseIsSrCitizen,
+        parentsAreSrCitizens: userPreferences.parentsAreSrCitizens,
+        hasPermanentDisability: userPreferences.hasPermanentDisability,
+        disabilitySeverity: userPreferences.disabilitySeverity,
+        isFamilyPensioner: userPreferences.isFamilyPensioner,
+        isGovtEmployeeForNps: userPreferences.isGovtEmployeeForNps,
         createdAt: userPreferences.createdAt,
         updatedAt: userPreferences.updatedAt,
       })
@@ -49,6 +57,14 @@ export async function GET() {
 interface PatchBody {
   habitsEnabled?: boolean;
   taxRegimeDefault?: 'NEW' | 'OLD' | 'EVALUATE';
+  metroCity?: boolean;
+  isSrCitizen?: boolean;
+  spouseIsSrCitizen?: boolean;
+  parentsAreSrCitizens?: boolean;
+  hasPermanentDisability?: boolean;
+  disabilitySeverity?: 'REGULAR' | 'SEVERE' | null;
+  isFamilyPensioner?: boolean;
+  isGovtEmployeeForNps?: boolean;
 }
 
 export async function PATCH(request: NextRequest) {
@@ -66,6 +82,19 @@ export async function PATCH(request: NextRequest) {
     ) {
       update.taxRegimeDefault = body.taxRegimeDefault;
     }
+    // Sprint 5.1a — tax setup booleans + disability severity
+    if (typeof body.metroCity === 'boolean') update.metroCity = body.metroCity;
+    if (typeof body.isSrCitizen === 'boolean') update.isSrCitizen = body.isSrCitizen;
+    if (typeof body.spouseIsSrCitizen === 'boolean') update.spouseIsSrCitizen = body.spouseIsSrCitizen;
+    if (typeof body.parentsAreSrCitizens === 'boolean') update.parentsAreSrCitizens = body.parentsAreSrCitizens;
+    if (typeof body.hasPermanentDisability === 'boolean') update.hasPermanentDisability = body.hasPermanentDisability;
+    if (body.disabilitySeverity === 'REGULAR' || body.disabilitySeverity === 'SEVERE') {
+      update.disabilitySeverity = body.disabilitySeverity;
+    } else if (body.disabilitySeverity === null) {
+      update.disabilitySeverity = null;
+    }
+    if (typeof body.isFamilyPensioner === 'boolean') update.isFamilyPensioner = body.isFamilyPensioner;
+    if (typeof body.isGovtEmployeeForNps === 'boolean') update.isGovtEmployeeForNps = body.isGovtEmployeeForNps;
 
     if (Object.keys(update).length === 1) {
       return NextResponse.json({ error: 'nothing to update' }, { status: 400 });

@@ -31,6 +31,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (typeof body.taxableSalaryRupees === 'number') update.taxableSalaryPaisa = Math.round(body.taxableSalaryRupees * 100);
     if (typeof body.tdsRupees === 'number') update.tdsPaisa = Math.round(body.tdsRupees * 100);
     if (typeof body.notes === 'string') update.notes = body.notes || null;
+    // Sprint 5.1a — salary components
+    if (typeof body.basicRupees === 'number') update.basicPaisa = Math.round(body.basicRupees * 100);
+    if (typeof body.daRupees === 'number') update.daPaisa = Math.round(body.daRupees * 100);
+    if (typeof body.hraReceivedRupees === 'number') update.hraReceivedPaisa = Math.round(body.hraReceivedRupees * 100);
+    if (typeof body.ltaRupees === 'number') update.ltaPaisa = Math.round(body.ltaRupees * 100);
+    if (typeof body.conveyanceRupees === 'number') update.conveyancePaisa = Math.round(body.conveyanceRupees * 100);
+    if (typeof body.childrenEdAllowanceRupees === 'number') update.childrenEdAllowancePaisa = Math.round(body.childrenEdAllowanceRupees * 100);
+    if (typeof body.medicalRupees === 'number') update.medicalPaisa = Math.round(body.medicalRupees * 100);
+    if (typeof body.otherAllowancesRupees === 'number') update.otherAllowancesPaisa = Math.round(body.otherAllowancesRupees * 100);
+    if (typeof body.rentPaidMonthlyRupees === 'number') update.rentPaidMonthlyPaisa = Math.round(body.rentPaidMonthlyRupees * 100);
 
     const result = await db.update(salaryIncome).set(update).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, session.user.id))).returning();
     return NextResponse.json({ entry: result[0] });

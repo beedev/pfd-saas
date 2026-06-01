@@ -26,6 +26,28 @@ function Inner() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Sprint 5.1a — salary components for HRA + 80C math
+  const [showComponents, setShowComponents] = useState(false);
+  const [basic, setBasic] = useState('');
+  const [da, setDa] = useState('');
+  const [hraReceived, setHraReceived] = useState('');
+  const [lta, setLta] = useState('');
+  const [conveyance, setConveyance] = useState('');
+  const [childrenEd, setChildrenEd] = useState('');
+  const [medical, setMedical] = useState('');
+  const [otherAllowances, setOtherAllowances] = useState('');
+  const [rentPaidMonthly, setRentPaidMonthly] = useState('');
+
+  const componentSum =
+    (Number(basic) || 0) +
+    (Number(da) || 0) +
+    (Number(hraReceived) || 0) +
+    (Number(lta) || 0) +
+    (Number(conveyance) || 0) +
+    (Number(childrenEd) || 0) +
+    (Number(medical) || 0) +
+    (Number(otherAllowances) || 0);
+
   // Auto-derive taxable if user fills gross/exemptions/section16 but not taxable
   const autoTaxable = (() => {
     const g = Number(grossSalary) || 0;
@@ -60,6 +82,16 @@ function Inner() {
           taxableSalaryRupees: t,
           tdsRupees: Number(tdsAmount) || 0,
           notes: notes || null,
+          // Sprint 5.1a — salary components (zero defaults are safe)
+          basicRupees: Number(basic) || 0,
+          daRupees: Number(da) || 0,
+          hraReceivedRupees: Number(hraReceived) || 0,
+          ltaRupees: Number(lta) || 0,
+          conveyanceRupees: Number(conveyance) || 0,
+          childrenEdAllowanceRupees: Number(childrenEd) || 0,
+          medicalRupees: Number(medical) || 0,
+          otherAllowancesRupees: Number(otherAllowances) || 0,
+          rentPaidMonthlyRupees: Number(rentPaidMonthly) || 0,
         }),
       });
       if (!r.ok) {
@@ -109,6 +141,45 @@ function Inner() {
         />
         <Field label="TDS deducted (₹)" value={tdsAmount} onChange={setTdsAmount} type="number" />
         <Field label="Notes (optional)" value={notes} onChange={setNotes} />
+
+        {/* Sprint 5.1a — salary components (collapsible) */}
+        <div className="border-t pt-3">
+          <button
+            type="button"
+            onClick={() => setShowComponents(!showComponents)}
+            className="text-xs font-semibold text-blue-600 hover:underline"
+          >
+            {showComponents ? '▾' : '▸'} Salary breakdown (needed for HRA exemption + sec 80 limits)
+          </button>
+          {showComponents && (
+            <div className="mt-3 space-y-3 rounded border border-blue-100 bg-blue-50/30 p-3">
+              <p className="text-[11px] text-gray-600">
+                Enter values from Form 16 Part B. The HRA exemption math needs Basic + DA + HRA + rent paid.
+                Component sum: <strong className="font-mono">₹{componentSum.toLocaleString('en-IN')}</strong>
+                {componentSum > 0 && Number(grossSalary) > 0 && componentSum !== Number(grossSalary) && (
+                  <span className="ml-2 text-amber-700">
+                    (differs from gross ₹{Number(grossSalary).toLocaleString('en-IN')} — check entries)
+                  </span>
+                )}
+              </p>
+              <Field label="Basic salary (₹)" value={basic} onChange={setBasic} type="number" />
+              <Field label="Dearness Allowance / DA (₹)" value={da} onChange={setDa} type="number" />
+              <Field label="HRA received (₹)" value={hraReceived} onChange={setHraReceived} type="number" />
+              <Field label="LTA — Leave Travel Allowance (₹)" value={lta} onChange={setLta} type="number" />
+              <Field label="Conveyance / Transport allowance (₹)" value={conveyance} onChange={setConveyance} type="number" />
+              <Field label="Children Education Allowance (₹)" value={childrenEd} onChange={setChildrenEd} type="number" />
+              <Field label="Medical reimbursement (₹)" value={medical} onChange={setMedical} type="number" />
+              <Field label="Other allowances / perks (₹)" value={otherAllowances} onChange={setOtherAllowances} type="number" />
+              <Field
+                label="Rent paid — monthly (₹)"
+                value={rentPaidMonthly}
+                onChange={setRentPaidMonthly}
+                type="number"
+                hint="Drives sec 10(13A) HRA exemption. Leave 0 if you don't rent."
+              />
+            </div>
+          )}
+        </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Link href={`/tax/itr3/salary?fy=${fy}`}>

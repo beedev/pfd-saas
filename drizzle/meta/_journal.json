@@ -176,6 +176,13 @@
       "when": 1780330150098,
       "tag": "0024_hesitant_phil_sheldon",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780333091766,
+      "tag": "0025_glamorous_albert_cleary",
+      "breakpoints": true
     }
   ]
 }

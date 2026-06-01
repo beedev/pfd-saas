@@ -118,6 +118,29 @@ export const userPreferences = pgTable('user_preferences', {
   // FY 2024-25 (govt switched the default in ITR forms). OLD requires
   // opt-in. EVALUATE = show both regimes side-by-side and don't pick yet.
   taxRegimeDefault: text('tax_regime_default').notNull().default('NEW'),
+  // ─── Sprint 5.1a — Tax setup parameters ─────────────────────────────
+  // The Yeswanth TaxCalc "SETUP PARAMETERS" block. These feed into the
+  // OLD regime exemption math — HRA rate (50% metro / 40% non-metro),
+  // 80D sr-citizen ceilings, 80U / 80DD severity, etc. All default to
+  // sensible-conservative values so old rows behave as before.
+  metroCity: boolean('metro_city').notNull().default(true),
+  isSrCitizen: boolean('is_sr_citizen').notNull().default(false),
+  spouseIsSrCitizen: boolean('spouse_is_sr_citizen').notNull().default(false),
+  parentsAreSrCitizens: boolean('parents_are_sr_citizens').notNull().default(false),
+  hasPermanentDisability: boolean('has_permanent_disability').notNull().default(false),
+  /** REGULAR (40–80%) or SEVERE (>80%). Only meaningful when
+   *  has_permanent_disability=true; raises the 80U ceiling from
+   *  ₹75k to ₹1.25L for the severe band. */
+  disabilitySeverity: text('disability_severity'),
+  /** Family pensioner — gets the sec 57(iia) deduction (lesser of
+   *  ₹15k OLD / ₹25k NEW or 1/3 of family pension) on pension income.
+   *  Drives the pension-row handling in regime-compare. */
+  isFamilyPensioner: boolean('is_family_pensioner').notNull().default(false),
+  /** Govt employee — raises 80CCD(1) employer-contribution cap from
+   *  10% to 14% of salary (and the matching 80CCD(2) NEW-regime
+   *  ceiling). This is a setup-time toggle since the user's employer
+   *  category rarely changes mid-FY. */
+  isGovtEmployeeForNps: boolean('is_govt_employee_for_nps').notNull().default(false),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
@@ -1844,6 +1867,30 @@ export const realEstate = pgTable('real_estate', {
   lastPropertyTaxPaid: text('last_property_tax_paid'),
   documentPath: text('document_path'),
   notes: text('notes'),
+  // ─── Sprint 5.1a — housing loan + self-occupation flags ──────────
+  /** Self-occupied properties cap sec 24(b) interest at ₹2L (post-1999
+   *  loans) or ₹30k (pre-1999). Let-out properties have no cap on
+   *  interest deduction but the loss can offset other heads only up
+   *  to ₹2L (cross-head set-off rule). */
+  isSelfOccupied: boolean('is_self_occupied').notNull().default(false),
+  /** Annual home-loan interest paid in the FY — drives sec 24(b)
+   *  deduction. Distinct from `mortgage_amount` (principal balance). */
+  homeLoanInterestPaidPaisa: bigint('home_loan_interest_paid_paisa', { mode: 'number' }).notNull().default(0),
+  /** Loan disbursal date is needed for the pre/post-Apr-1-1999 split
+   *  on the self-occupied cap (₹30k vs ₹2L). */
+  homeLoanDisbursedDate: text('home_loan_disbursed_date'),
+  /** First home + stamp value ≤ ₹45L + loan disbursed Apr-2019 to
+   *  Mar-2022 unlocks the additional sec 80EEA ₹1.5L deduction on
+   *  interest above the 24(b) cap. */
+  isFirstHome: boolean('is_first_home').notNull().default(false),
+  /** Stamp duty value at purchase — only checked for the 80EEA
+   *  ≤ ₹45L eligibility test. NULL means not captured. */
+  stampValuePaisa: bigint('stamp_value_paisa', { mode: 'number' }),
+  /** Carpet area in sqft. Sec 80EEA requires ≤ 968 sqft (60 sqm) for
+   *  metro cities and ≤ 1290 sqft (120 sqm) elsewhere — the FY 2026-27
+   *  Yeswanth template enforces the 968-sqft cap as the conservative
+   *  default. NULL means not captured. */
+  carpetAreaSqft: real('carpet_area_sqft'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -2130,6 +2177,14 @@ export const taxDeductions = pgTable('tax_deductions', {
   hasUpperLimit: boolean('has_upper_limit').default(false),
   linkedAssetType: text('linked_asset_type'),
   linkedAssetId: integer('linked_asset_id'),
+  // ─── Sprint 5.1a — per-deduction NEW-regime eligibility ────────────
+  /** Most chapter VI-A deductions disappear under NEW regime. The
+   *  notable exception is 80CCD(2) (employer NPS contribution) which
+   *  remains allowed. When `eligibleUnderNew=true`, the deduction
+   *  contributes to the NEW-regime deduction sum in regime-compare;
+   *  otherwise it counts only under OLD. Default false (conservative
+   *  — matches pre-5.1 behaviour where NEW-regime deductions = ₹0). */
+  eligibleUnderNew: boolean('eligible_under_new').notNull().default(false),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -2370,6 +2425,25 @@ export const salaryIncome = pgTable('salary_income', {
   section16Paisa: bigint('section16_paisa', { mode: 'number' }).default(0),
   taxableSalaryPaisa: bigint('taxable_salary_paisa', { mode: 'number' }).notNull(),
   tdsPaisa: bigint('tds_paisa', { mode: 'number' }).default(0),
+  // ─── Sprint 5.1a — salary components ──────────────────────────────
+  // The Yeswanth template models salary as a sum of components so
+  // HRA exemption + 80C limits can be computed correctly. We mirror
+  // that structure: when these are populated, gross_salary_paisa is
+  // the cached sum. When all zero (legacy rows), regime-compare
+  // falls back to using gross_salary_paisa as a single bucket.
+  basicPaisa: bigint('basic_paisa', { mode: 'number' }).notNull().default(0),
+  daPaisa: bigint('da_paisa', { mode: 'number' }).notNull().default(0),
+  hraReceivedPaisa: bigint('hra_received_paisa', { mode: 'number' }).notNull().default(0),
+  ltaPaisa: bigint('lta_paisa', { mode: 'number' }).notNull().default(0),
+  conveyancePaisa: bigint('conveyance_paisa', { mode: 'number' }).notNull().default(0),
+  childrenEdAllowancePaisa: bigint('children_ed_allowance_paisa', { mode: 'number' }).notNull().default(0),
+  medicalPaisa: bigint('medical_paisa', { mode: 'number' }).notNull().default(0),
+  otherAllowancesPaisa: bigint('other_allowances_paisa', { mode: 'number' }).notNull().default(0),
+  /** Annual rent paid (sheet's monthly Rent × months) — separate from
+   *  `real_estate.monthly_rent` because the user may rent their primary
+   *  residence while owning property elsewhere (very common). Drives
+   *  the HRA exemption sec 10(13A) calculation. */
+  rentPaidMonthlyPaisa: bigint('rent_paid_monthly_paisa', { mode: 'number' }).notNull().default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),

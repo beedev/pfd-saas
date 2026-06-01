@@ -86,6 +86,23 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         mortgageAmount,
         mortgageLender: typeof body.mortgageLender === 'string' ? (body.mortgageLender || null) : current.mortgageLender,
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
+        // Sprint 5.1a — housing-loan + 80EEA fields
+        isSelfOccupied: typeof body.isSelfOccupied === 'boolean' ? body.isSelfOccupied : current.isSelfOccupied,
+        homeLoanInterestPaidPaisa:
+          typeof body.homeLoanInterestPaidRupees === 'number'
+            ? Math.round(body.homeLoanInterestPaidRupees * 100)
+            : current.homeLoanInterestPaidPaisa,
+        homeLoanDisbursedDate:
+          typeof body.homeLoanDisbursedDate === 'string'
+            ? (body.homeLoanDisbursedDate || null)
+            : current.homeLoanDisbursedDate,
+        isFirstHome: typeof body.isFirstHome === 'boolean' ? body.isFirstHome : current.isFirstHome,
+        stampValuePaisa:
+          typeof body.stampValueRupees === 'number'
+            ? Math.round(body.stampValueRupees * 100)
+            : current.stampValuePaisa,
+        carpetAreaSqft:
+          typeof body.carpetAreaSqft === 'number' ? body.carpetAreaSqft : current.carpetAreaSqft,
         updatedAt: new Date(),
       })
       .where(and(eq(realEstate.id, numericId), eq(realEstate.userId, session.user.id)))

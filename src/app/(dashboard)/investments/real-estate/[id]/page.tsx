@@ -41,6 +41,13 @@ interface Property {
   mortgageLender: string | null;
   monthlyRent: number | null;
   notes: string | null;
+  // Sprint 5.1a — housing loan + 80EEA fields
+  isSelfOccupied?: boolean;
+  homeLoanInterestPaidPaisa?: number | null;
+  homeLoanDisbursedDate?: string | null;
+  isFirstHome?: boolean;
+  stampValuePaisa?: number | null;
+  carpetAreaSqft?: number | null;
 }
 
 const TYPE_OPTIONS: Array<{ label: string; value: PropertyType }> = [
@@ -79,6 +86,13 @@ interface FormState {
   mortgageAmountRupees: string;
   mortgageLender: string;
   notes: string;
+  // Sprint 5.1a — housing loan + 80EEA
+  isSelfOccupied: boolean;
+  homeLoanInterestPaidRupees: string;
+  homeLoanDisbursedDate: string;
+  isFirstHome: boolean;
+  stampValueRupees: string;
+  carpetAreaSqft: string;
 }
 
 function propertyToForm(p: Property): FormState {
@@ -97,6 +111,12 @@ function propertyToForm(p: Property): FormState {
     mortgageAmountRupees: ((p.mortgageAmount ?? 0) / 100).toString(),
     mortgageLender: p.mortgageLender ?? '',
     notes: p.notes ?? '',
+    isSelfOccupied: p.isSelfOccupied ?? false,
+    homeLoanInterestPaidRupees: ((p.homeLoanInterestPaidPaisa ?? 0) / 100).toString(),
+    homeLoanDisbursedDate: p.homeLoanDisbursedDate ?? '',
+    isFirstHome: p.isFirstHome ?? false,
+    stampValueRupees: p.stampValuePaisa != null ? (p.stampValuePaisa / 100).toString() : '',
+    carpetAreaSqft: p.carpetAreaSqft != null ? p.carpetAreaSqft.toString() : '',
   };
 }
 
@@ -162,6 +182,13 @@ export default function PropertyDetailPage() {
         mortgageAmountRupees: Number(form.mortgageAmountRupees) || 0,
         mortgageLender: form.mortgageLender || null,
         notes: form.notes || null,
+        // Sprint 5.1a — housing loan + 80EEA fields
+        isSelfOccupied: form.isSelfOccupied,
+        homeLoanInterestPaidRupees: Number(form.homeLoanInterestPaidRupees) || 0,
+        homeLoanDisbursedDate: form.homeLoanDisbursedDate || null,
+        isFirstHome: form.isFirstHome,
+        stampValueRupees: form.stampValueRupees === '' ? 0 : Number(form.stampValueRupees),
+        carpetAreaSqft: form.carpetAreaSqft === '' ? 0 : Number(form.carpetAreaSqft),
       };
       const r = await fetch(`/api/investments/real-estate/${params.id}`, {
         method: 'PATCH',
@@ -419,6 +446,72 @@ function EditForm({
           onChange={(e) => setField('mortgageLender', e.target.value)}
         />
       </Field>
+
+      {/* ─── Sprint 5.1a — Housing loan + 80EEA ─────────────────────── */}
+      <div className="sm:col-span-2 mt-2 rounded border border-amber-200 bg-amber-50/30 p-3">
+        <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-amber-900">
+          Housing loan / Self-occupation (tax)
+        </h4>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Self-occupied?">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.isSelfOccupied}
+                onChange={(e) => setField('isSelfOccupied', e.target.checked)}
+                className="h-4 w-4"
+              />
+              <span>Yes — sec 24(b) capped at ₹2L (post-1999 loan) or ₹30k (pre-1999). Let-out = uncapped but ₹2L cross-head offset.</span>
+            </label>
+          </Field>
+          <Field label="Home loan interest paid this FY (₹)">
+            <Input
+              type="number"
+              value={form.homeLoanInterestPaidRupees}
+              onChange={(e) => setField('homeLoanInterestPaidRupees', e.target.value)}
+              placeholder="0"
+            />
+          </Field>
+          <Field label="Loan disbursed date">
+            <Input
+              type="date"
+              value={form.homeLoanDisbursedDate}
+              onChange={(e) => setField('homeLoanDisbursedDate', e.target.value)}
+            />
+          </Field>
+          <Field label="First home?">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.isFirstHome}
+                onChange={(e) => setField('isFirstHome', e.target.checked)}
+                className="h-4 w-4"
+              />
+              <span>Yes — first residential property owned (gate for 80EEA).</span>
+            </label>
+          </Field>
+          <Field label="Stamp duty value at purchase (₹)">
+            <Input
+              type="number"
+              value={form.stampValueRupees}
+              onChange={(e) => setField('stampValueRupees', e.target.value)}
+              placeholder="e.g. 4500000 (must be ≤ ₹45L for 80EEA)"
+            />
+          </Field>
+          <Field label="Carpet area (sqft)">
+            <Input
+              type="number"
+              value={form.carpetAreaSqft}
+              onChange={(e) => setField('carpetAreaSqft', e.target.value)}
+              placeholder="≤ 968 sqft for 80EEA"
+            />
+          </Field>
+        </div>
+        <p className="mt-2 text-[10px] text-amber-800">
+          80EEA additional ₹1.5L benefit needs ALL of: first home + stamp ≤ ₹45L + carpet ≤ 968 sqft + loan disbursed
+          Apr-2019 to Mar-2022. OLD regime only — NEW regime disallows these deductions.
+        </p>
+      </div>
 
       <div className="sm:col-span-2">
         <Field label="Notes">

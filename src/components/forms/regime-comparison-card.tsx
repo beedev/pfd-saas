@@ -38,10 +38,18 @@ interface RegimeCompareResponse {
   fy: string;
   income: {
     salary: number;
+    hraExemption?: number;
     other: number;
     business: number;
-    rental: number;
+    // Sprint 5.1a — rental split into gross + maintenance + 24(b) + 80EEA
+    rentalGross?: number;
+    rentalStdMaintenance?: number;
+    sec24b?: number;
+    sec80eea?: number;
+    oldHpNet?: number;
+    newHpNet?: number;
     gross: number;
+    grossNew?: number;
     capitalGainsTaxable: number;
   };
   deductions: { oldRegime: number; newRegime: number };
@@ -156,8 +164,8 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             {data.income.other > 0 && (
               <Badge variant="default">Other {formatINR(data.income.other)}</Badge>
             )}
-            {data.income.rental > 0 && (
-              <Badge variant="default">Rental {formatINR(data.income.rental)}</Badge>
+            {(data.income.rentalGross ?? 0) > 0 && (
+              <Badge variant="default">Rental {formatINR(data.income.rentalGross ?? 0)}</Badge>
             )}
           </div>
         </div>
@@ -170,6 +178,10 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             isRecommended={recommended === 'NEW'}
             result={data.comparison.new}
             deductionsPaisa={data.deductions.newRegime}
+            // NEW regime: HRA/24b/80EEA = 0 by law
+            hraExemptionPaisa={0}
+            sec24bPaisa={0}
+            sec80eeaPaisa={0}
             onSetDefault={() => setRegimeDefault('NEW')}
             savingPreference={savingPreference}
           />
@@ -178,6 +190,9 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             isRecommended={recommended === 'OLD'}
             result={data.comparison.old}
             deductionsPaisa={data.deductions.oldRegime}
+            hraExemptionPaisa={data.income.hraExemption ?? 0}
+            sec24bPaisa={data.income.sec24b ?? 0}
+            sec80eeaPaisa={data.income.sec80eea ?? 0}
             onSetDefault={() => setRegimeDefault('OLD')}
             savingPreference={savingPreference}
           />
@@ -228,6 +243,9 @@ function RegimeColumn({
   isRecommended,
   result,
   deductionsPaisa,
+  hraExemptionPaisa,
+  sec24bPaisa,
+  sec80eeaPaisa,
   onSetDefault,
   savingPreference,
 }: {
@@ -235,6 +253,9 @@ function RegimeColumn({
   isRecommended: boolean;
   result: ComputeResult;
   deductionsPaisa: number;
+  hraExemptionPaisa: number;
+  sec24bPaisa: number;
+  sec80eeaPaisa: number;
   onSetDefault: () => void;
   savingPreference: boolean;
 }) {
@@ -271,7 +292,25 @@ function RegimeColumn({
 
       {/* Computation breakdown */}
       <dl className="mt-3 space-y-1 text-xs">
-        <Row label="Deductions used" value={formatINR(deductionsPaisa)} muted={deductionsPaisa === 0} />
+        <Row
+          label="HRA exemption (sec 10(13A))"
+          value={hraExemptionPaisa > 0 ? `− ${formatINR(hraExemptionPaisa)}` : '₹0'}
+          muted={hraExemptionPaisa === 0}
+          valueClassName={hraExemptionPaisa > 0 ? 'text-emerald-700' : undefined}
+        />
+        <Row
+          label="Sec 24(b) home loan interest"
+          value={sec24bPaisa > 0 ? `− ${formatINR(sec24bPaisa)}` : '₹0'}
+          muted={sec24bPaisa === 0}
+          valueClassName={sec24bPaisa > 0 ? 'text-emerald-700' : undefined}
+        />
+        <Row
+          label="Sec 80EEA additional interest"
+          value={sec80eeaPaisa > 0 ? `− ${formatINR(sec80eeaPaisa)}` : '₹0'}
+          muted={sec80eeaPaisa === 0}
+          valueClassName={sec80eeaPaisa > 0 ? 'text-emerald-700' : undefined}
+        />
+        <Row label="Chapter VI-A deductions" value={formatINR(deductionsPaisa)} muted={deductionsPaisa === 0} />
         <Row label="Taxable income" value={formatINR(result.taxablePaisa)} />
         <Row label="Slab tax" value={formatINR(result.taxBeforeRebatePaisa)} />
         {result.rebatePaisa > 0 && (

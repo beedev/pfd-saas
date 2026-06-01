@@ -36,6 +36,16 @@ export async function POST(request: NextRequest) {
       taxableSalaryRupees,
       tdsRupees,
       notes,
+      // Sprint 5.1a — salary components (all optional, default to 0).
+      basicRupees,
+      daRupees,
+      hraReceivedRupees,
+      ltaRupees,
+      conveyanceRupees,
+      childrenEdAllowanceRupees,
+      medicalRupees,
+      otherAllowancesRupees,
+      rentPaidMonthlyRupees,
     } = body;
 
     if (!financialYear || !employerName || !employerTan) {
@@ -44,6 +54,8 @@ export async function POST(request: NextRequest) {
     if (typeof grossSalaryRupees !== 'number' || typeof taxableSalaryRupees !== 'number') {
       return NextResponse.json({ error: 'grossSalaryRupees, taxableSalaryRupees must be numbers' }, { status: 400 });
     }
+
+    const toPaisa = (v: unknown) => (typeof v === 'number' ? Math.round(v * 100) : 0);
 
     const result = await db
       .insert(salaryIncome)
@@ -57,6 +69,15 @@ export async function POST(request: NextRequest) {
         section16Paisa: Math.round((section16Rupees ?? 0) * 100),
         taxableSalaryPaisa: Math.round(taxableSalaryRupees * 100),
         tdsPaisa: Math.round((tdsRupees ?? 0) * 100),
+        basicPaisa: toPaisa(basicRupees),
+        daPaisa: toPaisa(daRupees),
+        hraReceivedPaisa: toPaisa(hraReceivedRupees),
+        ltaPaisa: toPaisa(ltaRupees),
+        conveyancePaisa: toPaisa(conveyanceRupees),
+        childrenEdAllowancePaisa: toPaisa(childrenEdAllowanceRupees),
+        medicalPaisa: toPaisa(medicalRupees),
+        otherAllowancesPaisa: toPaisa(otherAllowancesRupees),
+        rentPaidMonthlyPaisa: toPaisa(rentPaidMonthlyRupees),
         notes: notes ?? null,
       })
       .returning();
