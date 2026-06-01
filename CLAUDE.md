@@ -109,11 +109,11 @@ already at ITR-3. Six commits, six phases:
 - **Phase F — Docs.** This entry + README roadmap update + deferred
   list refresh.
 
-Deferred from Sprint 4.1:
-- **Cost-inflation-index lookup** for indexed LTCG-other. Currently
-  flat 20% on whatever `taxable_gain` the user enters; ideally the
-  engine multiplies by the CII table to compute indexed cost basis
-  itself.
+Deferred from Sprint 4.1 (now closed by Sprint 5.1):
+- ~~Cost-inflation-index lookup~~ — closed by Sprint 5.1c (CII table +
+  `cii-indexed-cost.ts`).
+
+Still deferred from Sprint 4.1:
 - **Schedule FA (foreign assets) capture.** ITR-2/3 filers with any
   foreign asset must file FA — currently no UI or table for this.
 - **44AE per-vehicle math.** Currently accepts manual declared
@@ -122,6 +122,71 @@ Deferred from Sprint 4.1:
 - **e-filing XML/JSON schema-conformant export.** Phase C returns
   flat JSON suitable for human cross-checking; the e-filing portal's
   schema (one per form per FY) is a sprint of its own.
+- **Grandfathering for pre-1-Feb-2018 equity LTCG.** Sec 112A allows
+  using the higher of (actual cost) or (FMV on 31-Jan-2018) for
+  equities held before that cut-off. User adjusts `taxableGain`
+  manually for now.
+- **Pre-Jul-2024 CG election toggle.** Capital-gains rows currently
+  auto-apply the pre/post-23-Jul-2024 cutoff based on saleDate. User
+  override (election to use indexed treatment when it's cheaper) is
+  deferred — Sprint 5.1c auto-applies based on cutoff date only.
+
+**Sprint 5.1 (post-Sprint-4.1 follow-on).** Tax-calc fidelity to the
+canonical Yeswanth TaxCalc FY 2026-27 reference. Four focused phases
+closing the OLD-regime exemption gaps:
+
+- **Phase 5.1a — Salary components + HRA + sec 24(b) + 80CCD(2) NEW
+  eligibility + tax setup params** (migration 0025). `salary_income`
+  gains 9 component columns (basic/da/hra/lta/conveyance/children_ed/
+  medical/other_allowances/rent_paid_monthly). `real_estate` gains 6
+  housing-loan columns (is_self_occupied, interest paid, disbursed
+  date, is_first_home, stamp_value, carpet_area). `tax_deductions`
+  gains `eligible_under_new` (backfilled true for 80CCD(2)).
+  `user_preferences` gains 8 tax-setup booleans + disability severity.
+  Pure libs: `hra-exemption.ts`, `section-24b.ts`, `section-80eea.ts`.
+  Regime-compare API rewired: salary now sums components (fallback to
+  gross for legacy rows), OLD regime subtracts HRA + applies house-
+  property head with sec 24(b) cap + 80EEA + ₹2L cross-head offset
+  cap. NEW regime applies 30% std maint on let-out only. New
+  `RegimeColumn` rows for HRA / 24(b) / 80EEA per regime.
+- **Phase 5.1b — Surcharge + marginal relief.** `surcharge.ts`
+  encodes FY 2024-25+ brackets (≤₹50L=0%, ₹50L–₹1Cr=10%, ₹1Cr–₹2Cr=
+  15%, ₹2Cr–₹5Cr=25%, >₹5Cr OLD=37% / NEW=25%). Marginal relief
+  caps surcharge at (tax_at_threshold + income_above_threshold).
+  Wired into `computeTax()` with optional regime+fy params; backward-
+  compat callers (omitting params) get 0 surcharge. Cess now applied
+  on (tax_after_rebate + effective_surcharge). UI shows surcharge
+  rows only when income > ₹50L.
+- **Phase 5.1c — 80D sr-citizen + 80G four-category + post-Jul-24 CG
+  + CII table** (migration 0026). New `cost_inflation_index` table
+  (FY PK, seeded with CBDT values FY 2001-02 through 2025-26).
+  `tax_deductions` gains `eighty_g_category` (50_NO_LIMIT /
+  100_NO_LIMIT / 50_WITH_LIMIT / 100_WITH_LIMIT — CHECK constrained)
+  and `eighty_d_bucket` (SELF_FAMILY / PARENTS). Pure libs:
+  `section-80d.ts` (sr-citizen-aware caps ₹25k/₹50k), `section-80g.ts`
+  (four-category with shared 10%-adjusted-gross cap proportionally
+  split between WITH_LIMIT rows), `cii-indexed-cost.ts` (purchase ×
+  saleCii / purchaseCii formula). `capital-gains-tax.ts` refined to
+  branch on saleDate vs 23-Jul-2024 cutoff: pre = 15% STCG / 10%
+  LTCG over ₹1L / 20% indexed; post = 20% STCG / 12.5% LTCG over
+  ₹1.25L / 12.5% flat no-indexation. `basicExemptionAbsorption()` for
+  per-bucket exemption windows (₹2.5L OLD / ₹4L NEW). Regime-compare
+  uses 80D/80G libs when rows have bucket/category set; legacy face-
+  value preserved.
+- **Phase 5.1d — Yeswanth xlsx importer.** Pure parser
+  `src/lib/yeswanth-parser.ts` uses SheetJS to extract salary
+  components / setup params / housing loan / deductions / TDS /
+  capital gains. POST `/api/imports/yeswanth-taxcalc` uploads xlsx
+  → preview JSON (no writes), stores at `uploads/yeswanth-imports/
+  <userId>/<importId>.xlsx` (gitignored). POST `/api/imports/
+  yeswanth-taxcalc/confirm` re-parses by importId, applies writes
+  per-section based on mapping flags. `/tax/import` UI: two-step
+  upload → review-with-checkboxes → confirm. Capital-gains mapping
+  OFF by default (re-import duplication risk).
+
+Design tenet: **the Yeswanth template is the canonical reference;
+pfd-saas should match its math, not approximate it.** Every Sprint 5.1
+lib references the corresponding template row in its module docstring.
 
 **Sprint 3.5 complete.** Goals/Retirement architecture + IA regroup.
 Four focused phases on top of Sprint 3:
@@ -222,14 +287,12 @@ Deferred from Sprint 3 / 3.5:
   three-bucket cascade (equity / debt / cash) across the whole
   portfolio. Sprint 5+ depending on demand.
 
-Deferred from Sprint 4:
-- **Surcharge brackets** (income >₹50L). Engine handles standard
-  deduction + slabs + 87A + 4% cess but not the 10/15/25/37% surcharge
-  layer on top.
-- **Per-deduction regime eligibility**. NEW regime currently shows ₹0
-  deductions (conservative); OLD shows everything. Refining requires a
-  `regime: 'NEW' | 'OLD' | 'BOTH'` flag on `tax_deductions` rows so
-  80CCD(2) employer NPS contributions count under NEW too.
+Deferred from Sprint 4 (now closed by Sprint 5.1):
+- ~~Surcharge brackets (>₹50L)~~ — closed by Sprint 5.1b.
+- ~~Per-deduction regime eligibility~~ — closed by Sprint 5.1a
+  (`eligible_under_new` flag with 80CCD(2) backfilled).
+
+Still deferred from Sprint 4:
 - **LTCG/STCG separately taxed**. Capital gains are surfaced as a
   separate "taxed separately" chip on the regime card but not yet
   layered into the total liability. Phase 4.5+ work.
