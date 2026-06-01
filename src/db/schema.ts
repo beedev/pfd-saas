@@ -2442,6 +2442,41 @@ export const tdsCredits = pgTable('tds_credits', {
 
 export type TdsCreditsRow = typeof tdsCredits.$inferSelect;
 
+// ─── Sprint 4 Phase 3 — Advance tax planner ──────────────────────────────
+// Track the 4 quarterly advance-tax installments per FY. Due dates are
+// fixed by law: 15 Jun / 15 Sep / 15 Dec / 15 Mar with cumulative
+// thresholds 15% / 45% / 75% / 100% of projected annual liability.
+// Underpayment by >10% at year-end triggers interest under 234B/234C —
+// we surface the warning but defer the exact penalty math (slab-based,
+// hairy) to a later phase.
+//
+// Rows are auto-seeded on first GET for a given (user, fy). The unique
+// index on (user_id, fy, installment_order) prevents duplicates.
+export const advanceTaxInstallments = pgTable('advance_tax_installments', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  installmentOrder: integer('installment_order').notNull(),
+  dueDate: text('due_date').notNull(),
+  duePct: real('due_pct').notNull(),
+  paidAmountPaisa: bigint('paid_amount_paisa', { mode: 'number' }).notNull().default(0),
+  paidDate: text('paid_date'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  uniqueIndex('advance_tax_user_fy_order_idx').on(
+    table.userId,
+    table.fy,
+    table.installmentOrder,
+  ),
+  index('advance_tax_user_id_idx').on(table.userId),
+  index('advance_tax_fy_idx').on(table.fy),
+]);
+
+export type AdvanceTaxInstallment = typeof advanceTaxInstallments.$inferSelect;
+export type NewAdvanceTaxInstallment = typeof advanceTaxInstallments.$inferInsert;
+
 // Other sources income (Schedule OS) — interest, dividends, etc.
 export type OtherIncomeSource =
   | 'BANK_INTEREST'

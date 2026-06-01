@@ -7,6 +7,7 @@ import { Plus, Loader2, Calculator, FileText, Gift, EyeOff, Eye, Trash2, IndianR
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { RegimeComparisonCard } from '@/components/forms/regime-comparison-card';
+import { AdvanceTaxCard } from '@/components/forms/advance-tax-card';
 
 interface SectionBucket {
   section: string;
@@ -149,6 +150,11 @@ export default function TaxDashboardPage() {
               "which regime?" decision is upstream of the "how much did I
               deduct?" tracking that follows. */}
           <RegimeComparisonCard fy={fy} />
+
+          {/* Sprint 4 Phase 3 — quarterly advance-tax planner. Sits
+              directly under regime-compare so the user sees the
+              projected liability and the 4 due-date slots together. */}
+          <AdvanceTaxCard fy={fy} />
 
           <StatsDisplay
             currency="INR"
