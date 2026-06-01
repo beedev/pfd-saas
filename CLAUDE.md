@@ -69,6 +69,60 @@ it project what the user *will keep*. The chain — regime choice →
 advance-tax cadence → ITR form → net-of-tax inflows — mirrors the
 real-world filing year so every screen has an obvious next step.
 
+**Sprint 4.1 (post-Sprint-4 follow-on).** Filled out the ITR-form
+filing experience for ITR-1, ITR-2, and ITR-4 to match the depth
+already at ITR-3. Six commits, six phases:
+
+- **Phase A — Pure libs.** `src/lib/finance/capital-gains-tax.ts`
+  handles the four-way bucket split (STCG sec 111A 15%, STCG-other
+  adds-to-slab, LTCG sec 112A 10% over ₹1L, LTCG-other flat 20%) +
+  4% cess separately so callers don't double-count vs slab cess.
+  `itr1-summary.ts` / `itr2-summary.ts` / `itr4-summary.ts` are pure
+  compute libs that wrap `computeTax()` from tax-slabs.ts. ITR-2
+  layers in capital-gains via the new CG lib and folds STCG-other
+  into slab gross. ITR-4 evaluates each presumptive line against
+  its deemed-profit minimum (6%/8% for 44AD by receipt mode, 50%
+  for 44ADA, 44AE manual). Each summary returns `exceedsCap` for
+  the UI's "switch to the right form" banner.
+- **Phase B — Presumptive schema + CRUD (migration 0024).** New
+  `presumptive_income` table with user-scoped + (user, fy) indices.
+  POST `/api/tax/itr4/presumptive` + `[id]` PATCH/DELETE re-validate
+  the 44AB(e) audit-trigger rule server-side (declared profit ≥
+  section minimum); rejects with 422 otherwise.
+- **Phase C — Summary APIs.** New `GET /api/tax/itr1/summary`,
+  `/itr2/summary`, `/itr4/summary` that pull the right tables for
+  each form and call the corresponding lib. `/api/tax/itr-export/
+  [form]` rewired: ITR-3 stays delegated to `/tax/itr3`, ITR-1/2/4
+  now call the new libs directly (no more "delegate to filing-pack").
+- **Phase D — Walkthrough pages.** `/tax/itr1`, `/tax/itr2`,
+  `/tax/itr4` — read-only summary pages with sections per ITR
+  schedule, exceeds-cap amber banner where applicable, headline
+  StatsDisplay. `/tax/itr4` has an inline presumptive-income table
+  with compliance badge (above min / at min / below min); add + edit
+  routes at `/tax/itr4/presumptive/new` and `/tax/itr4/presumptive/
+  [id]`. Live minimum-profit preview in the form.
+- **Phase E — Wizard + sidebar wiring.** ITR wizard's recommendation
+  card and saved-selection card both get a "Continue to ITR-X
+  walkthrough →" button that routes by form. Sidebar Income Tax
+  section gains explicit ITR-1 / ITR-2 / ITR-3 / ITR-4 entries; the
+  old generic "ITR Filing → /tax/itr3" label retired.
+- **Phase F — Docs.** This entry + README roadmap update + deferred
+  list refresh.
+
+Deferred from Sprint 4.1:
+- **Cost-inflation-index lookup** for indexed LTCG-other. Currently
+  flat 20% on whatever `taxable_gain` the user enters; ideally the
+  engine multiplies by the CII table to compute indexed cost basis
+  itself.
+- **Schedule FA (foreign assets) capture.** ITR-2/3 filers with any
+  foreign asset must file FA — currently no UI or table for this.
+- **44AE per-vehicle math.** Currently accepts manual declared
+  profit; ideally we add a vehicle ledger (heavy ₹1k/tonne/month,
+  light ₹7.5k/month) and derive declared profit.
+- **e-filing XML/JSON schema-conformant export.** Phase C returns
+  flat JSON suitable for human cross-checking; the e-filing portal's
+  schema (one per form per FY) is a sprint of its own.
+
 **Sprint 3.5 complete.** Goals/Retirement architecture + IA regroup.
 Four focused phases on top of Sprint 3:
 
