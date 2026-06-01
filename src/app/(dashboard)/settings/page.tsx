@@ -1,6 +1,7 @@
 import { BusinessProfileForm } from '@/components/forms/business-profile-form';
 import { PersonalModulesForm } from '@/components/forms/personal-modules-form';
 import { TelegramConnectionForm } from '@/components/forms/telegram-connection-form';
+import { AssetClassReturnsForm } from '@/components/forms/asset-class-returns-form';
 
 export default function SettingsPage() {
   return (
@@ -8,13 +9,14 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">
-          Configure your business profile, optional modules, and master data
+          Configure your business profile, projection assumptions, and master data
         </p>
       </div>
 
       <BusinessProfileForm />
       <PersonalModulesForm />
       <TelegramConnectionForm />
+      <AssetClassReturnsForm />
     </div>
   );
 }

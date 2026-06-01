@@ -1134,6 +1134,34 @@ export const savingsAssetInclusion = pgTable('savings_asset_inclusion', {
 export type SavingsAssetInclusion = typeof savingsAssetInclusion.$inferSelect;
 
 /**
+ * Asset-class default growth assumptions.
+ *
+ * The goal-projection engine compounds the corpus at a value-weighted
+ * average of these rates across the mapped mix. Stocks 12, MFs 11,
+ * Gold 9, etc. were previously hardcoded in lib/finance/goal-corpus.ts;
+ * now they live in the DB so the user can tune them via /settings.
+ *
+ * Itemized instruments (Small Savings accounts, FDs, Chit Funds with
+ * computed XIRR) still override these with their own rate — this table
+ * sets the FALLBACK when an instrument doesn't carry its own.
+ *
+ * One row per (user, asset_class). Seeded with reasonable defaults on
+ * first read.
+ */
+export const assetClassReturns = pgTable('asset_class_returns', {
+  id: serial('id').primaryKey(),
+  assetClass: text('asset_class').notNull(),
+  returnPct: real('return_pct').notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('asset_class_returns_user_id_idx').on(table.userId),
+  uniqueIndex('asset_class_returns_unique').on(table.userId, table.assetClass),
+]);
+
+export type AssetClassReturn = typeof assetClassReturns.$inferSelect;
+
+/**
  * Cashflow Events — Sprint 3.5 Phase 2.
  *
  * First-class inflow timeline. Both retirement projection and per-goal

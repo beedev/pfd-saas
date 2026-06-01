@@ -24,6 +24,7 @@ import {
   insurancePolicies,
   npsAccounts,
   providentFund,
+  assetClassReturns,
 } from '@/db';
 
 export interface CorpusContext {
@@ -53,20 +54,26 @@ export interface CorpusContext {
   /** Per-MF-id yearly SIP paisa. */
   sipPerMfId: Map<number, number>;
   mfIdSet: Set<number>;
+  /** User-editable class-level return rate overrides loaded from the
+   *  asset_class_returns table. Keys are asset class names; values are
+   *  the user's chosen percentages. Falls back to
+   *  DEFAULT_RETURN_PCT_BY_CLASS when a class isn't in the table. */
+  classReturnOverrides: Record<string, number>;
 }
 
 /**
  * Default expected annual returns per asset class. These mirror the
  * three-bucket cascade rates the retirement page uses (liquid 6 / stable
- * 8 / growth 11) but at asset-class granularity. The goal's projection
- * uses the value-weighted average of these across the mapped mix instead
- * of a single goal-level expected_return_pct — so a gold-heavy goal
- * compounds at ~9%, a chit-heavy goal at ~6%, and an equity-heavy goal
- * at ~12%.
+ * 8 / growth 11) but at asset-class granularity.
  *
- * Itemized classes (FDs, Small Savings, Chits) override this default
- * with the actual instrument-level rate where available — e.g. a 7.7%
- * NSC overrides the SMALL_SAVINGS class default.
+ * The constant below is the COMPILE-TIME fallback. The persisted source
+ * of truth lives in the `asset_class_returns` table (per-user), editable
+ * via /settings → "Asset growth assumptions". loadCorpusContext() reads
+ * the table and overrides this constant in the returned context.
+ *
+ * Itemized classes (FDs, Small Savings, Chits) further override the
+ * class-level default with the actual instrument-level rate where
+ * available — e.g. a 7.7% NSC overrides the SMALL_SAVINGS class rate.
  */
 export const DEFAULT_RETURN_PCT_BY_CLASS: Record<string, number> = {
   STOCKS: 12,
@@ -81,13 +88,17 @@ export const DEFAULT_RETURN_PCT_BY_CLASS: Record<string, number> = {
   INSURANCE_POLICIES: 5,
 };
 
-export function defaultReturnPct(assetClass: string): number {
+export function defaultReturnPct(
+  assetClass: string,
+  overrides?: Record<string, number>,
+): number {
+  if (overrides && assetClass in overrides) return overrides[assetClass];
   return DEFAULT_RETURN_PCT_BY_CLASS[assetClass] ?? 8;
 }
 
 /** Loads all balances + inclusion rows for the user in parallel. */
 export async function loadCorpusContext(userId: string): Promise<CorpusContext> {
-  const [stocks, mfs, sipRows, nps, pf, gold, fds, ssas, chits, ins, inclusions] =
+  const [stocks, mfs, sipRows, nps, pf, gold, fds, ssas, chits, ins, inclusions, returnOverrides] =
     await Promise.all([
       db.select().from(holdings).where(eq(holdings.userId, userId)),
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
@@ -100,7 +111,15 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
       db.select().from(chitFunds).where(eq(chitFunds.userId, userId)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
       db.select().from(savingsAssetInclusion).where(eq(savingsAssetInclusion.userId, userId)),
+      db.select().from(assetClassReturns).where(eq(assetClassReturns.userId, userId)),
     ]);
+
+  // User's per-class rate overrides from the asset_class_returns table.
+  // Maps {STOCKS: 12, MUTUAL_FUNDS: 11, ...}.
+  const classReturnOverrides: Record<string, number> = {};
+  for (const r of returnOverrides) {
+    classReturnOverrides[r.assetClass] = r.returnPct;
+  }
 
   const sipPerMfId = new Map<number, number>();
   let mfSipYearly = 0;
@@ -128,34 +147,36 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
     npsTotal: nps.reduce((s, n) => s + (n.totalValue || 0), 0),
     pfTotal: pf.reduce((s, p) => s + (p.totalBalance || 0), 0),
     // Itemized rows include each instrument's own assumed return rate
-    // where the underlying table exposes it. Falls back to the class
-    // default when the column is null/zero so the weighted average
-    // doesn't get pulled down by missing data.
+    // where the underlying table exposes it. Falls back to the
+    // user-configured class default (from asset_class_returns), and
+    // further falls back to the compile-time constant if the user
+    // hasn't tuned it. So the precedence is:
+    //   instrument-level rate > user class override > hardcoded default.
     golds: gold.map((g) => ({
       id: g.id,
       value: g.currentValue ?? 0,
-      returnPct: defaultReturnPct('GOLD'),
+      returnPct: defaultReturnPct('GOLD', classReturnOverrides),
     })),
     fds: fds.map((f) => ({
       id: f.id,
       value: f.maturityAmountPaisa ?? f.principalPaisa,
       returnPct: f.interestRate && f.interestRate > 0
         ? f.interestRate
-        : defaultReturnPct('FIXED_DEPOSITS'),
+        : defaultReturnPct('FIXED_DEPOSITS', classReturnOverrides),
     })),
     ssas: ssas.map((a) => ({
       id: a.id,
       value: a.currentBalancePaisa ?? 0,
       returnPct: a.interestRatePercent && a.interestRatePercent > 0
         ? a.interestRatePercent
-        : defaultReturnPct('SMALL_SAVINGS'),
+        : defaultReturnPct('SMALL_SAVINGS', classReturnOverrides),
     })),
     chits: chits.map((c) => ({
       id: c.id,
       value: Math.round(
         c.chitValue * (1 - (c.foremanCommissionPct ?? 5) / 100),
       ),
-      returnPct: c.xirr && c.xirr > 0 ? c.xirr : defaultReturnPct('CHIT_FUNDS'),
+      returnPct: c.xirr && c.xirr > 0 ? c.xirr : defaultReturnPct('CHIT_FUNDS', classReturnOverrides),
     })),
     policies: ins.map((p) => ({
       id: p.id,
@@ -163,11 +184,12 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
         p.maturityBenefit && p.maturityBenefit > 0
           ? p.maturityBenefit
           : p.sumAssured || 0,
-      returnPct: defaultReturnPct('INSURANCE_POLICIES'),
+      returnPct: defaultReturnPct('INSURANCE_POLICIES', classReturnOverrides),
     })),
     mfSipYearly,
     sipPerMfId,
     mfIdSet: new Set(mfs.map((m) => m.id)),
+    classReturnOverrides,
   };
 }
 
@@ -258,7 +280,7 @@ export function weightedReturnForGoal(
     const weight = (r.allocationPct ?? 100) / 100;
 
     let value = 0;
-    let returnPct = defaultReturnPct(r.assetClass);
+    let returnPct = defaultReturnPct(r.assetClass, ctx.classReturnOverrides);
 
     switch (r.assetClass) {
       case 'STOCKS':
