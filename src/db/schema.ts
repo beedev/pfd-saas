@@ -114,6 +114,10 @@ export const userPreferences = pgTable('user_preferences', {
    *  telegram_connect_token_expires_at. */
   telegramConnectToken: text('telegram_connect_token'),
   telegramConnectTokenExpiresAt: timestamp('telegram_connect_token_expires_at', { mode: 'date' }),
+  // Sprint 4 Phase 1 — preferred tax regime. NEW is the default starting
+  // FY 2024-25 (govt switched the default in ITR forms). OLD requires
+  // opt-in. EVALUATE = show both regimes side-by-side and don't pick yet.
+  taxRegimeDefault: text('tax_regime_default').notNull().default('NEW'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
@@ -2022,6 +2026,77 @@ export const investmentTransactions = pgTable('investment_transactions', {
 
 export type InvestmentTransaction = typeof investmentTransactions.$inferSelect;
 export type NewInvestmentTransaction = typeof investmentTransactions.$inferInsert;
+
+/**
+ * Income-tax slab table — Sprint 4 Phase 1.
+ *
+ * Government-published slabs per (FY, regime). Used by the goal +
+ * retirement projections AND the new /tax regime-compare view.
+ *
+ * Shape:
+ *   • fy             FY string, "2025-26"
+ *   • regime         'NEW' | 'OLD'
+ *   • slabOrder      0-indexed, must be contiguous within (fy, regime)
+ *   • lowerPaisa     inclusive lower bound
+ *   • upperPaisa     inclusive upper bound; NULL = open-ended top slab
+ *   • ratePct        marginal rate within the slab
+ *
+ * NO user_id — these are shared govt-published rates. Multi-tenancy
+ * doesn't apply; everyone reads from the same table. Maintaining a
+ * single seeded table avoids per-tenant drift the day rates change.
+ *
+ * Conventions captured separately at the regime level (NOT in slabs):
+ *   • Standard deduction — applied to gross salary before slabs
+ *   • Section 87A rebate — applies after slab tax computation
+ *   • Health & Education Cess — 4% applied after tax + rebate
+ *   • Surcharge brackets — Sprint 4.5 or later (high-income edge cases)
+ */
+export type TaxRegime = 'NEW' | 'OLD';
+
+export const taxSlabs = pgTable('tax_slabs', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  regime: text('regime').$type<TaxRegime>().notNull(),
+  slabOrder: integer('slab_order').notNull(),
+  lowerPaisa: bigint('lower_paisa', { mode: 'number' }).notNull(),
+  /** NULL = open-ended (highest slab). */
+  upperPaisa: bigint('upper_paisa', { mode: 'number' }),
+  ratePct: real('rate_pct').notNull(),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('tax_slabs_fy_regime_idx').on(table.fy, table.regime),
+  uniqueIndex('tax_slabs_fy_regime_order_unique').on(table.fy, table.regime, table.slabOrder),
+]);
+
+export type TaxSlab = typeof taxSlabs.$inferSelect;
+export type NewTaxSlab = typeof taxSlabs.$inferInsert;
+
+/**
+ * Regime-level constants per FY — standard deduction, 87A rebate
+ * threshold + amount, cess rate. Kept separately from slabs because
+ * these don't change at slab boundaries; they apply once per return.
+ *
+ * Seeded alongside taxSlabs for the same FYs. UI reads this table to
+ * show "Standard deduction ₹75k for new regime" etc.
+ */
+export const taxRegimeConfig = pgTable('tax_regime_config', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  regime: text('regime').$type<TaxRegime>().notNull(),
+  /** Subtracted from gross salary before slab application. */
+  standardDeductionPaisa: bigint('standard_deduction_paisa', { mode: 'number' }).notNull(),
+  /** Income at or below this threshold qualifies for 87A rebate. */
+  rebate87aThresholdPaisa: bigint('rebate_87a_threshold_paisa', { mode: 'number' }).notNull(),
+  /** Maximum rebate (capped at this OR the tax owed, whichever is lower). */
+  rebate87aMaxPaisa: bigint('rebate_87a_max_paisa', { mode: 'number' }).notNull(),
+  /** 4% in current law; kept configurable for future changes. */
+  cessPct: real('cess_pct').notNull().default(4),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('tax_regime_config_fy_regime_unique').on(table.fy, table.regime),
+]);
+
+export type TaxRegimeConfig = typeof taxRegimeConfig.$inferSelect;
 
 // 11. Tax Deductions (Section 80)
 export type DeductionSection = 'SECTION_80C' | 'SECTION_80CCC' | 'SECTION_80CCD' | 'SECTION_80D' | 'SECTION_80E' | 'SECTION_80EE' | 'SECTION_80TTA' | 'OTHER';
