@@ -34,7 +34,10 @@ interface LifePolicy {
 }
 interface HealthPolicy {
   id: number;
-  sumInsured: number;
+  // API returns paisa-suffixed field names to match the underlying
+  // bigint column (sum_insured_paisa). Earlier this page read
+  // `sumInsured` which doesn't exist on the wire → NaN in the tile.
+  sumInsuredPaisa: number;
   status: string;
 }
 interface Vehicle {
@@ -77,7 +80,7 @@ export default function InsuranceOverviewPage() {
 
   const healthActive = health.filter((p) => p.status === 'ACTIVE');
   const healthCover =
-    healthActive.reduce((s, p) => s + p.sumInsured, 0) / 100;
+    healthActive.reduce((s, p) => s + (p.sumInsuredPaisa ?? 0), 0) / 100;
 
   return (
     <div className="space-y-6">
