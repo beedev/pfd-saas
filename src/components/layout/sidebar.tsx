@@ -111,7 +111,8 @@ const navigation: NavSection[] = [
   {
     section: 'Personal',
     items: [
-      { name: 'Transformation', href: '/health/transformation', icon: Sparkles },
+      { name: 'Today', href: '/health/transformation', icon: Sparkles },
+      { name: 'History', href: '/health/transformation/history', icon: CalendarCheck },
     ],
   },
   {
