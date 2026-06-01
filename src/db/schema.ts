@@ -2185,6 +2185,18 @@ export const taxDeductions = pgTable('tax_deductions', {
    *  otherwise it counts only under OLD. Default false (conservative
    *  — matches pre-5.1 behaviour where NEW-regime deductions = ₹0). */
   eligibleUnderNew: boolean('eligible_under_new').notNull().default(false),
+  // ─── Sprint 5.1c — 80G categorisation + 80D buckets ─────────────────
+  /** 80G donation category. NULL for non-80G rows.
+   *   - 50_NO_LIMIT  → 50% deduction, no upper bound (e.g. PM CARES)
+   *   - 100_NO_LIMIT → 100% deduction, no upper bound (e.g. PMNRF)
+   *   - 50_WITH_LIMIT → 50% deduction, capped at 10% of adjusted gross
+   *   - 100_WITH_LIMIT → 100% deduction, capped at 10% of adjusted gross
+   *  The two _WITH_LIMIT categories share the 10% adjusted-gross cap. */
+  eightyGCategory: text('eighty_g_category'),
+  /** 80D bucket. NULL for non-80D rows.
+   *   - SELF_FAMILY → premium for self + spouse + children (₹25k / ₹50k sr)
+   *   - PARENTS     → premium for parents (₹25k / ₹50k sr if parents are sr) */
+  eightyDBucket: text('eighty_d_bucket'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -2699,6 +2711,20 @@ export const fyCloseStatus = pgTable('fy_close_status', {
 ]);
 
 export type FyCloseStatusRow = typeof fyCloseStatus.$inferSelect;
+
+// ─── Sprint 5.1c — Cost Inflation Index (CII) table ─────────────────────────
+// Govt-published index values for indexed LTCG computation under the
+// pre-Jul-2024 election. Base FY 2001-02 = 100. NOT user-scoped — this is
+// public reference data, identical for all users. Seeded via migration.
+export const costInflationIndex = pgTable('cost_inflation_index', {
+  fy: text('fy').primaryKey(),
+  /** Index value (real-valued so future fractional revisions can be
+   *  represented; currently all integers). */
+  indexValue: real('index_value').notNull(),
+  notes: text('notes'),
+});
+
+export type CostInflationIndexRow = typeof costInflationIndex.$inferSelect;
 
 // ============================================================================
 // TYPE EXPORTS

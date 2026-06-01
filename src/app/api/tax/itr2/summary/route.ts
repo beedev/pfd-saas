@@ -167,6 +167,7 @@ export async function GET(request: NextRequest) {
       assetType: mapAssetType(r.assetType),
       gainType: r.holdingPeriod as CgGainType,
       taxableGainPaisa: r.taxableGain,
+      saleDate: r.saleDate, // Sprint 5.1c — drives pre/post-Jul-24 cutoff
     }));
 
     const oldDeductionsTotal = deductions.reduce(

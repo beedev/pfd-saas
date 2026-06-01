@@ -43,6 +43,12 @@ interface CreateBody {
   linkedAssetType?: string;
   linkedAssetId?: number;
   notes?: string;
+  // Sprint 5.1c — explicit category/bucket. When omitted on 80G, we
+  // derive from (qualifyingPercent + hasUpperLimit) for backward compat.
+  eightyGCategory?: '50_NO_LIMIT' | '100_NO_LIMIT' | '50_WITH_LIMIT' | '100_WITH_LIMIT';
+  eightyDBucket?: 'SELF_FAMILY' | 'PARENTS';
+  /** Sprint 5.1c — explicit override for NEW-regime eligibility. */
+  eligibleUnderNew?: boolean;
 }
 
 export async function POST(request: NextRequest) {
@@ -58,6 +64,20 @@ export async function POST(request: NextRequest) {
     }
     const amountPaisa = Math.round(body.amountRupees * 100);
     const fy = body.financialYear || getCurrentFinancialYear();
+
+    // Sprint 5.1c — derive eightyGCategory if not provided explicitly.
+    let eightyGCategory: string | null = body.eightyGCategory ?? null;
+    if (!eightyGCategory && body.section === '80G' && body.qualifyingPercent != null) {
+      const pct = body.qualifyingPercent === 100 ? '100' : '50';
+      const limit = body.hasUpperLimit ? 'WITH_LIMIT' : 'NO_LIMIT';
+      eightyGCategory = `${pct}_${limit}`;
+    }
+    const eightyDBucket: string | null = body.eightyDBucket ?? null;
+
+    // 80CCD(2) (employer NPS) auto-eligible under NEW. Override via body.
+    const sectionUpper = body.section.toUpperCase();
+    const auto80ccd2 = sectionUpper.includes('80CCD(2)') || sectionUpper === '80CCD_2';
+    const eligibleUnderNew = body.eligibleUnderNew ?? auto80ccd2;
 
     const result = await db
       .insert(taxDeductions)
@@ -82,6 +102,9 @@ export async function POST(request: NextRequest) {
         linkedAssetType: body.linkedAssetType || null,
         linkedAssetId: body.linkedAssetId ?? null,
         notes: body.notes || null,
+        eightyGCategory,
+        eightyDBucket,
+        eligibleUnderNew,
         createdAt: new Date(),
         updatedAt: new Date(),
       })

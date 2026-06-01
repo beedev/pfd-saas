@@ -58,6 +58,11 @@ import { compareRegimes } from '@/lib/finance/tax-slabs';
 import { computeHraExemption } from '@/lib/finance/hra-exemption';
 import { computeSection24bDeduction } from '@/lib/finance/section-24b';
 import { computeSection80EeaDeduction } from '@/lib/finance/section-80eea';
+import { computeSection80d } from '@/lib/finance/section-80d';
+import {
+  computeSection80g,
+  type EightyGCategory,
+} from '@/lib/finance/section-80g';
 import { auth } from '@/auth';
 
 /** Convert FY string "2026-27" → { start: '2026-04-01', end: '2027-03-31' }. */
@@ -292,13 +297,54 @@ export async function GET(request: NextRequest) {
       salaryPaisa - hraExemptionPaisa + otherPaisa + businessPaisa + oldHpForSlab;
     const newGrossSlab = salaryPaisa + otherPaisa + businessPaisa + newHpForSlab;
 
-    // Chapter VI-A deductions.
-    // OLD: every row counts.
+    // Chapter VI-A deductions — Sprint 5.1c refinement.
+    // OLD: bucketed 80D (sr-citizen caps), 4-category 80G, plus other
+    //      sections at face value.
     // NEW: only rows flagged eligible_under_new (80CCD(2) + future).
-    const oldDeductionsPaisa = deductions.reduce(
-      (s, r) => s + (r.amountPaisa ?? 0),
-      0,
-    );
+    const eightyDRows = deductions
+      .filter((r) => r.section === '80D' && r.eightyDBucket)
+      .map((r) => ({
+        bucket: r.eightyDBucket as 'SELF_FAMILY' | 'PARENTS',
+        amountPaisa: r.amountPaisa ?? 0,
+      }));
+    const eightyDResult = computeSection80d({
+      rows: eightyDRows,
+      isSrCitizen: prefs?.isSrCitizen ?? false,
+      parentsAreSrCitizens: prefs?.parentsAreSrCitizens ?? false,
+    });
+
+    // 80G — use the four-category lib. Rows without category fall
+    // back to face-value (legacy data, pre-5.1c).
+    const eightyGCategorisedRows = deductions
+      .filter((r) => r.section === '80G' && r.eightyGCategory)
+      .map((r) => ({
+        category: r.eightyGCategory as EightyGCategory,
+        amountPaisa: r.amountPaisa ?? 0,
+      }));
+    const eightyGLegacyFaceValue = deductions
+      .filter((r) => r.section === '80G' && !r.eightyGCategory)
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const eightyGResult = computeSection80g({
+      rows: eightyGCategorisedRows,
+      adjustedGrossPaisa: Math.max(0, oldGrossSlab),
+    });
+
+    // Other OLD deductions (not 80D, not 80G) at face value.
+    const otherOldDeductions = deductions
+      .filter((r) => r.section !== '80D' && r.section !== '80G')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    // 80D un-bucketed (legacy) at face value too.
+    const eightyDLegacy = deductions
+      .filter((r) => r.section === '80D' && !r.eightyDBucket)
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+
+    const oldDeductionsPaisa =
+      otherOldDeductions +
+      eightyDResult.totalDeductionPaisa +
+      eightyDLegacy +
+      eightyGResult.totalDeductionPaisa +
+      eightyGLegacyFaceValue;
+
     const newDeductionsPaisa = deductions
       .filter((r) => r.eligibleUnderNew)
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
@@ -352,6 +398,9 @@ export async function GET(request: NextRequest) {
       deductions: {
         oldRegime: oldDeductionsPaisa,
         newRegime: newDeductionsPaisa,
+        // Sprint 5.1c — surfaced for transparency
+        eightyD: eightyDResult,
+        eightyG: eightyGResult,
       },
       comparison: {
         old: result.old,

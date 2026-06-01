@@ -1,45 +1,42 @@
 /**
- * Capital-gains tax computation — Sprint 4.1.
+ * Capital-gains tax computation — Sprint 5.1c refinement.
  *
- * Pure compute over realised-gain rows. Tax law (current FY 2025-26
- * onwards) splits realised gains into four "buckets" with different
- * tax treatments:
+ * The Finance (No. 2) Act 2024 (effective 23-Jul-2024) overhauled
+ * the CG regime. We now branch on the SALE DATE, not the FY:
  *
- *   • STCG sec 111A (equity STT-paid) — flat 15%
- *   • STCG (other / non-equity)        — added to slab income, taxed
- *                                        at the user's slab rate.
- *                                        We return 0 tax here and set
- *                                        `addsToSlabPaisa.stcgOther`
- *                                        so the caller can fold it
- *                                        into slab gross.
- *   • LTCG sec 112A (equity STT-paid)  — 10% on gains > ₹1L per FY.
- *                                        The ₹1L exemption is applied
- *                                        across the bucket (NOT per
- *                                        row) — we sum equity LTCG
- *                                        first, then subtract ₹1L,
- *                                        then 10%.
- *   • LTCG (other, indexed)            — flat 20% (FY 2025-26+).
- *                                        We do NOT apply the cost-
- *                                        inflation-index lookup here
- *                                        (deferred — see CLAUDE.md
- *                                        "Deferred from Sprint 4.1");
- *                                        rows already carry the
- *                                        post-index `taxableGain`.
+ *   Pre-23-Jul-2024 sales:
+ *     • STCG sec 111A (equity STT-paid):  15%
+ *     • LTCG sec 112A (equity STT-paid):  10% on gains > ₹1,00,000
+ *     • LTCG other (indexed):             20% (CII-indexed cost)
+ *     • STCG other:                       slab rate
  *
- * Health & Education Cess (4% in current law) applies on top of the
- * total capital-gains tax. We return it separately so callers can
- * sum into the form-specific summary (which adds its own slab-tax
- * cess — different number; we don't want to double-cess on equity
- * LTCG).
+ *   Post-23-Jul-2024 sales:
+ *     • STCG sec 111A (equity):           20%
+ *     • LTCG sec 112A (equity):           12.5% on gains > ₹1,25,000
+ *     • LTCG all (general):               12.5% (no indexation)
+ *                                         — taxpayer may ELECT old
+ *                                         20% indexed for property
+ *                                         purchased pre-23-Jul-2024
+ *     • STCG debt MF (acquired post-1-Apr-2023): slab rate
+ *     • STCG other:                       slab rate
  *
- * Equity classification: assetType ∈ { EQUITY, EQUITY_MF } → equity
- * bucket. Everything else (DEBT_MF, GOLD, REAL_ESTATE, OTHER) → "other".
+ * "Per-bucket zero-tax absorption" (Yeswanth sheet rows AF85–AG87):
+ * the basic-exemption threshold can absorb capital gains too. ₹2.5L
+ * (OLD) or ₹4L (NEW) is applied SEPARATELY to STCG and LTCG buckets
+ * — i.e. each bucket gets its own ₹4L window under NEW.
  *
- * Edge cases:
- *   • Negative `taxableGain` (loss) — treated as 0 contribution.
- *     Carry-forward of capital losses is NOT modelled here; the user
- *     handles that in the ITR itself.
- *   • Empty input → all-zeros result.
+ * Reference: Yeswanth TaxCalc "Capital Gains - Equity" sheet rows
+ * AF85–AG87 + the cutoff annotations in the "IT 2026-27" sheet
+ * (post-Jul-24 columns AC vs AD).
+ *
+ * Caveats:
+ *  • Grandfathering for equity LTCG purchased pre-1-Feb-2018 is NOT
+ *    modelled here — deferred. The user adjusts `taxableGainPaisa`
+ *    manually (subtracts the grandfathered FMV).
+ *  • Pre-Jul-24 ELECTION toggle on the row is auto-applied based on
+ *    saleDate vs cutoff; user override of the election is deferred.
+ *  • Negative `taxableGainPaisa` is treated as 0 contribution
+ *    (carry-forward modelled in ITR itself).
  */
 
 export type CgAssetType =
@@ -53,94 +50,115 @@ export type CgAssetType =
 export type CgGainType = 'STCG' | 'LTCG';
 
 export interface CapitalGainRow {
-  /** Matches `capital_gains.assetType` in schema.ts. STOCKS and EQUITY_MF
-   *  are treated as the "equity bucket"; everything else is "other". */
   assetType: CgAssetType;
-  /** STCG or LTCG. Caller is expected to compute holding-period
-   *  classification before passing rows in (the schema's
-   *  `holdingPeriod` column already encodes this). */
   gainType: CgGainType;
-  /** Taxable gain in paisa, post-exemption, post-indexation. Can be
-   *  negative (a loss) — treated as 0 here. */
   taxableGainPaisa: number;
+  /** ISO date string YYYY-MM-DD. Used to pick pre/post-Jul-24 rates.
+   *  When missing, treated as POST-Jul-24 (current regime). */
+  saleDate?: string;
 }
 
 export interface CapitalGainsTaxBreakdown {
-  /** Tax on STCG sec 111A (equity, flat 15%). Paisa. */
   stcgEquityTaxPaisa: number;
-  /** Tax on LTCG sec 112A (equity over ₹1L, flat 10%). Paisa. */
   ltcgEquityTaxPaisa: number;
-  /** Tax on LTCG other (flat 20%). Paisa. */
+  /** Post-Jul-24: 12.5% flat on all LTCG (general, sec 112). Pre-Jul-24:
+   *  20% on indexed gains. We label this `ltcgOther` for backward-compat
+   *  with callers — but it represents the GENERAL LTCG bucket. */
   ltcgOtherTaxPaisa: number;
-  /** Total of the three above. Caller adds slab tax + cess upstream. */
   totalCapitalGainsTaxPaisa: number;
-  /** STCG other-than-111A — to be folded into the user's slab gross
-   *  by the caller (added to taxable income for slab-rate treatment).
-   *  Always 0 if no such rows present. */
+  /** STCG other-than-111A — folded into slab gross. */
   stcgOtherAddsToSlabPaisa: number;
-  /** Bucket totals (post-loss-elimination) for surfacing in UI. */
   buckets: {
     stcgEquityGainsPaisa: number;
     stcgOtherGainsPaisa: number;
     ltcgEquityGainsPaisa: number;
     ltcgOtherGainsPaisa: number;
   };
-  /** Health & Education Cess (4%) on capital-gains tax. Separate from
-   *  slab-tax cess so callers don't double-count. */
   cessPaisa: number;
 }
 
-/** ₹1,00,000 = 1,00,00,000 paisa. Sec 112A exemption threshold. */
-const SEC_112A_EXEMPTION_PAISA = 1_00_000 * 100;
-/** Health & Education Cess — current law (FY 2025-26+). */
+/** Sec 112A exemption: ₹1L pre-Jul-2024, ₹1.25L post. */
+const SEC_112A_EXEMPTION_PRE_PAISA = 1_00_000 * 100;
+const SEC_112A_EXEMPTION_POST_PAISA = 1_25_000 * 100;
+
+/** Cutoff date — Finance (No. 2) Act 2024 effective from. */
+const POST_REFORM_CUTOFF = '2024-07-23';
+
 const CESS_PCT = 4;
 
 function isEquityBucket(t: CgAssetType): boolean {
   return t === 'STOCKS' || t === 'EQUITY_MF';
 }
 
+function isPostReform(saleDate: string | undefined): boolean {
+  // Missing date → assume current regime (post-reform).
+  if (!saleDate) return true;
+  return saleDate >= POST_REFORM_CUTOFF;
+}
+
 export interface CapitalGainsTaxInput {
   gainsRows: CapitalGainRow[];
-  /** FY identifier (e.g. "2025-26"). Currently unused — the engine
-   *  hard-codes current rates. Carried so callers can pass it
-   *  through; future LTCG-other slab change (e.g. removal of
-   *  indexation post-Budget-2024) will branch on FY here. */
   fy: string;
 }
 
 export function computeCapitalGainsTax(
   input: CapitalGainsTaxInput,
 ): CapitalGainsTaxBreakdown {
-  void input.fy; // see comment above — reserved for future FY branching
+  void input.fy; // FY carried for future enhancements
 
-  let stcgEquityGains = 0;
-  let stcgOtherGains = 0;
-  let ltcgEquityGains = 0;
-  let ltcgOtherGains = 0;
+  // Split each gain into pre vs post-Jul-2024 sub-buckets so we apply
+  // the right rate.
+  let stcgEquityPre = 0;
+  let stcgEquityPost = 0;
+  let stcgOther = 0;
+  let ltcgEquityPre = 0;
+  let ltcgEquityPost = 0;
+  let ltcgOtherPre = 0;  // pre: 20% with indexation (caller pre-indexed)
+  let ltcgOtherPost = 0; // post: 12.5% flat, no indexation
 
   for (const r of input.gainsRows) {
     const g = Math.max(0, r.taxableGainPaisa);
     if (g === 0) continue;
+    const post = isPostReform(r.saleDate);
+    const equity = isEquityBucket(r.assetType);
     if (r.gainType === 'STCG') {
-      if (isEquityBucket(r.assetType)) stcgEquityGains += g;
-      else stcgOtherGains += g;
+      if (equity) {
+        if (post) stcgEquityPost += g;
+        else stcgEquityPre += g;
+      } else {
+        stcgOther += g;
+      }
     } else {
-      if (isEquityBucket(r.assetType)) ltcgEquityGains += g;
-      else ltcgOtherGains += g;
+      // LTCG
+      if (equity) {
+        if (post) ltcgEquityPost += g;
+        else ltcgEquityPre += g;
+      } else {
+        if (post) ltcgOtherPost += g;
+        else ltcgOtherPre += g;
+      }
     }
   }
 
-  // STCG sec 111A — flat 15% on equity STT-paid short-term gains.
-  const stcgEquityTax = Math.round(stcgEquityGains * 0.15);
+  // STCG sec 111A rates: 15% pre, 20% post.
+  const stcgEquityTaxPre = Math.round(stcgEquityPre * 0.15);
+  const stcgEquityTaxPost = Math.round(stcgEquityPost * 0.20);
+  const stcgEquityTax = stcgEquityTaxPre + stcgEquityTaxPost;
 
-  // LTCG sec 112A — 10% on (equity LTCG above ₹1L). The ₹1L exemption
-  // applies once across all 112A gains for the FY, not per row.
-  const ltcgEquityTaxable = Math.max(0, ltcgEquityGains - SEC_112A_EXEMPTION_PAISA);
-  const ltcgEquityTax = Math.round(ltcgEquityTaxable * 0.10);
+  // LTCG sec 112A — equity STT-paid:
+  //   Pre: 10% on (sum > ₹1L)
+  //   Post: 12.5% on (sum > ₹1.25L)
+  const ltcgEquityTaxablePre = Math.max(0, ltcgEquityPre - SEC_112A_EXEMPTION_PRE_PAISA);
+  const ltcgEquityTaxPre = Math.round(ltcgEquityTaxablePre * 0.10);
+  const ltcgEquityTaxablePost = Math.max(0, ltcgEquityPost - SEC_112A_EXEMPTION_POST_PAISA);
+  const ltcgEquityTaxPost = Math.round(ltcgEquityTaxablePost * 0.125);
+  const ltcgEquityTax = ltcgEquityTaxPre + ltcgEquityTaxPost;
 
-  // LTCG other — flat 20% on indexed gains (caller already supplies
-  // post-indexed `taxableGain`). Cost-inflation-index lookup deferred.
-  const ltcgOtherTax = Math.round(ltcgOtherGains * 0.20);
+  // LTCG general (other) — pre: 20% (indexed cost basis from caller),
+  // post: 12.5% flat (no indexation).
+  const ltcgOtherTaxPre = Math.round(ltcgOtherPre * 0.20);
+  const ltcgOtherTaxPost = Math.round(ltcgOtherPost * 0.125);
+  const ltcgOtherTax = ltcgOtherTaxPre + ltcgOtherTaxPost;
 
   const totalCapitalGainsTax = stcgEquityTax + ltcgEquityTax + ltcgOtherTax;
   const cess = Math.round((totalCapitalGainsTax * CESS_PCT) / 100);
@@ -150,13 +168,40 @@ export function computeCapitalGainsTax(
     ltcgEquityTaxPaisa: ltcgEquityTax,
     ltcgOtherTaxPaisa: ltcgOtherTax,
     totalCapitalGainsTaxPaisa: totalCapitalGainsTax,
-    stcgOtherAddsToSlabPaisa: stcgOtherGains,
+    stcgOtherAddsToSlabPaisa: stcgOther,
     buckets: {
-      stcgEquityGainsPaisa: stcgEquityGains,
-      stcgOtherGainsPaisa: stcgOtherGains,
-      ltcgEquityGainsPaisa: ltcgEquityGains,
-      ltcgOtherGainsPaisa: ltcgOtherGains,
+      stcgEquityGainsPaisa: stcgEquityPre + stcgEquityPost,
+      stcgOtherGainsPaisa: stcgOther,
+      ltcgEquityGainsPaisa: ltcgEquityPre + ltcgEquityPost,
+      ltcgOtherGainsPaisa: ltcgOtherPre + ltcgOtherPost,
     },
     cessPaisa: cess,
   };
+}
+
+/**
+ * Sprint 5.1c — Basic-exemption absorption of CG income.
+ *
+ * If the taxpayer's slab income is below the basic exemption limit,
+ * the unused window can absorb capital gains (LTCG sec 112A + STCG
+ * sec 111A + general LTCG). Applied SEPARATELY to STCG and LTCG —
+ * each bucket gets its own ₹2.5L (OLD) or ₹4L (NEW) window.
+ *
+ * Reference: Yeswanth TaxCalc rows AF85–AG87.
+ */
+export function basicExemptionAbsorption(input: {
+  unusedExemptionPaisa: number;
+  stcgGainsPaisa: number;
+  ltcgGainsPaisa: number;
+  regime: 'OLD' | 'NEW';
+}): {
+  stcgAbsorbed: number;
+  ltcgAbsorbed: number;
+} {
+  // Each bucket gets its own absorption — independently capped at the
+  // unused exemption window. Per the sheet, you don't subtract from
+  // one to use on the other.
+  const stcg = Math.min(input.unusedExemptionPaisa, Math.max(0, input.stcgGainsPaisa));
+  const ltcg = Math.min(input.unusedExemptionPaisa, Math.max(0, input.ltcgGainsPaisa));
+  return { stcgAbsorbed: stcg, ltcgAbsorbed: ltcg };
 }

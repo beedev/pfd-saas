@@ -29,6 +29,8 @@ export default function NewDeductionPage() {
   const [financialYear, setFinancialYear] = useState<string>(getCurrentFinancialYear());
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  // Sprint 5.1c — 80D bucket selector
+  const [eightyDBucket, setEightyDBucket] = useState<'SELF_FAMILY' | 'PARENTS'>('SELF_FAMILY');
 
   const submit = async () => {
     if (!amountRupees) {
@@ -48,6 +50,7 @@ export default function NewDeductionPage() {
           paymentMethod,
           financialYear,
           notes,
+          ...(section === '80D' ? { eightyDBucket } : {}),
         }),
       });
       if (!r.ok) throw new Error((await r.json()).error || 'Failed');
@@ -80,6 +83,18 @@ export default function NewDeductionPage() {
             <Field label="Section">
               <Select options={sectionOpts} value={section} onChange={setSection} />
             </Field>
+            {section === '80D' && (
+              <Field label="80D bucket">
+                <Select
+                  options={[
+                    { value: 'SELF_FAMILY', label: 'Self + family (₹25k / ₹50k sr citizen)' },
+                    { value: 'PARENTS', label: 'Parents (₹25k / ₹50k if parents are sr citizen)' },
+                  ]}
+                  value={eightyDBucket}
+                  onChange={(v) => setEightyDBucket(v as 'SELF_FAMILY' | 'PARENTS')}
+                />
+              </Field>
+            )}
             <Field label="Description">
               <Input
                 value={description}

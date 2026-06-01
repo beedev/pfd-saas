@@ -337,7 +337,7 @@ export default function Itr2Page() {
                   value={formatINR(data.summary.capitalGains.buckets.ltcgOtherGainsPaisa)}
                 />
                 <Field
-                  label="@ 20% flat"
+                  label="LTCG general (sec 112)"
                   value={formatINR(data.summary.capitalGains.ltcgOtherTaxPaisa)}
                 />
               </div>
@@ -449,9 +449,13 @@ export default function Itr2Page() {
           </Card>
 
           <p className="text-xs text-[var(--dxp-text-muted)]">
-            Indexed LTCG uses flat 20% — cost-inflation-index lookup deferred. Schedule FA
-            (foreign assets) not yet captured. 87A rebate is not applied to capital-gains tax
-            (current law).
+            Capital-gains brackets switch on the <strong>23-Jul-2024 cutoff</strong> (Finance
+            Act 2024). Sales before that date use the pre-reform regime
+            (STCG 111A 15%, LTCG 112A 10% over ₹1L, LTCG general 20% indexed via CII table).
+            Sales on/after use the post-reform regime (STCG 111A 20%, LTCG 112A 12.5% over
+            ₹1.25L, LTCG general 12.5% flat with no indexation). Pre-Jul-2024 election toggle on
+            individual rows is deferred — currently auto-applied based on saleDate. Schedule FA
+            (foreign assets) not yet captured. 87A rebate is not applied to capital-gains tax.
           </p>
         </>
       )}
