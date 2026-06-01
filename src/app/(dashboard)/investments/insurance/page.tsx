@@ -219,6 +219,35 @@ export default function InsurancePage() {
       ),
     },
     {
+      key: 'maturityDate',
+      header: 'Maturity',
+      render: (_v, p) => {
+        // TERM_LIFE policies never mature in the payout sense — show a
+        // dash. ENDOWMENT / WHOLE_LIFE / ULIP / MONEY_BACK should
+        // display the date; flag rows where the field is missing so the
+        // gap (which blocks cashflow_events derivation) is visible at
+        // a glance.
+        if (p.policyType === 'TERM_LIFE') {
+          return <span className="text-xs text-[var(--dxp-text-muted)]">—</span>;
+        }
+        if (!p.maturityDate) {
+          return (
+            <span
+              className="text-xs italic text-amber-600"
+              title="Missing — fill in to enable cashflow-event derivation"
+            >
+              not set
+            </span>
+          );
+        }
+        return (
+          <span className="font-mono text-sm text-[var(--dxp-text)]">
+            {p.maturityDate}
+          </span>
+        );
+      },
+    },
+    {
       key: 'id',
       header: '',
       render: (_v, p) => (
