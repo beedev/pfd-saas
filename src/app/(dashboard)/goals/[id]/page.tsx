@@ -131,6 +131,10 @@ interface ProjectionYear {
   demand: number;
   closingCorpus: number;
   shortfall: number;
+  // Sprint 4 Phase 5 — gross + tax split. Older API responses won't have
+  // these fields, so they're optional on the client type.
+  grossInflows?: number;
+  taxOnInflows?: number;
 }
 interface Projection {
   goalId: number;
@@ -141,6 +145,8 @@ interface Projection {
   totalInflowsPaisa: number;
   yearByYear: ProjectionYear[];
   monthlyContributionRequiredPaisa: number | null;
+  assumedMarginalRatePct?: number;
+  totalTaxOnInflowsPaisa?: number;
 }
 
 const GOAL_TYPE_OPTIONS: Array<{ label: string; value: GoalType }> = [
@@ -918,6 +924,25 @@ export default function GoalDetailPage() {
                     No additional monthly contribution needed — current corpus + inflows cover it.
                   </p>
                 )}
+                {/* Sprint 4 Phase 5 — surface the marginal-rate assumption
+                    when TAXABLE earmarked events are in play. Skips the
+                    note entirely when there's no tax adjustment. */}
+                {projection.assumedMarginalRatePct != null &&
+                  projection.assumedMarginalRatePct > 0 &&
+                  (projection.totalTaxOnInflowsPaisa ?? 0) > 0 && (
+                    <p className="mt-2 rounded-md border border-[var(--dxp-border)] bg-[var(--dxp-surface-alt)]/40 p-2 text-xs text-[var(--dxp-text-muted)]">
+                      Inflows shown net-of-tax at{' '}
+                      <strong className="text-[var(--dxp-text)]">
+                        {projection.assumedMarginalRatePct.toFixed(1)}%
+                      </strong>{' '}
+                      marginal rate (TAXABLE events only; TAX_FREE and TDS events pass through
+                      gross). Total tax withheld across horizon:{' '}
+                      <strong className="text-[var(--dxp-text)]">
+                        {formatINRCompact(projection.totalTaxOnInflowsPaisa ?? 0)}
+                      </strong>
+                      .
+                    </p>
+                  )}
               </div>
             </>
           )}

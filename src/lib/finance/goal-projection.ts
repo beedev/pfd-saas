@@ -50,6 +50,22 @@ export interface GoalProjectionInput {
   earmarkedEvents: CashflowEvent[];
   /** ISO date — engine projects from today forward. */
   today: string;
+  /**
+   * Sprint 4 Phase 5 — marginal-tax rate applied to TAXABLE earmarked
+   * events before they hit the corpus. TAX_FREE / TDS events pass
+   * through at face value (PPF/NPS lumpsum/SSY are tax-free; TDS has
+   * already been withheld at source so what arrives IS the net).
+   *
+   * Simplification: this is a single flat rate applied across all
+   * years and to all TAXABLE events for this goal. The "real" answer
+   * would derive a per-year slab-based marginal rate from projected
+   * income, which we deferred to a later phase. Document this in the
+   * UI: "Inflows shown net-of-tax at X% marginal rate...".
+   *
+   * Optional — if omitted or 0, the engine behaves exactly as before
+   * (no tax adjustment).
+   */
+  marginalRatePct?: number;
 }
 
 export interface ProjectionYear {
@@ -59,7 +75,11 @@ export interface ProjectionYear {
   openingCorpus: number;
   /** Return earned during year (paisa). */
   growth: number;
-  /** Contributions + earmarked events landing this year (paisa). */
+  /** Net inflows after tax. Equals `grossInflows − taxOnInflows` and
+   *  is what compounds in the corpus.
+   *  Sprint 4 Phase 5 — this is the post-tax number; pre-Phase-5 code
+   *  treated all inflows as net (no tax adjustment). The default
+   *  `marginalRatePct=0` means net == gross and behaviour is unchanged. */
   inflows: number;
   /** Goal disbursements this year (paisa). */
   demand: number;
@@ -67,6 +87,12 @@ export interface ProjectionYear {
   closingCorpus: number;
   /** max(0, demand − (opening + growth + inflows)) — funding gap. */
   shortfall: number;
+  /** Sprint 4 Phase 5 — inflows BEFORE tax. Surfaced so the chart can
+   *  draw "gross vs net" bars. Equals net + taxOnInflows. */
+  grossInflows: number;
+  /** Sprint 4 Phase 5 — tax withheld from TAXABLE earmarked events
+   *  this year (paisa). Always ≥ 0. */
+  taxOnInflows: number;
 }
 
 export interface GoalProjection {
@@ -88,6 +114,12 @@ export interface GoalProjection {
    * search; engine caps iterations at 30.
    */
   monthlyContributionRequiredPaisa: number | null;
+  /** Sprint 4 Phase 5 — flat marginal rate the engine applied to
+   *  TAXABLE earmarked events. Surfaced so the UI can render a
+   *  "Inflows shown net-of-tax at X% marginal rate" note. */
+  assumedMarginalRatePct: number;
+  /** Sprint 4 Phase 5 — sum of tax withheld across all years (paisa). */
+  totalTaxOnInflowsPaisa: number;
 }
 
 /* ──────────────────────────────────────────────────────────────────── */
@@ -154,14 +186,22 @@ function demandForYear(goal: FinancialGoal, year: number): number {
  * One-time events land in their year. Recurring events contribute
  * 12× (monthly) or 1× (yearly) the amount, compounded forward by
  * growth_pct_per_year from their start_date.
+ *
+ * Sprint 4 Phase 5 — returns gross + tax split. TAXABLE events get
+ * `marginalRatePct` withheld; TAX_FREE and TDS events pass through
+ * at face value (TDS already had tax withheld at source — what
+ * arrives is the net cash).
  */
 function earmarkedInflowsForYear(
   events: CashflowEvent[],
   year: number,
-): number {
-  let total = 0;
+  marginalRatePct: number,
+): { gross: number; tax: number; net: number } {
+  let gross = 0;
+  let tax = 0;
   const yearStart = new Date(`${year}-01-01`);
   const yearEnd = new Date(`${year}-12-31`);
+  const rate = Math.max(0, Math.min(100, marginalRatePct)) / 100;
 
   for (const ev of events) {
     const startDate = isoDate(ev.startDate);
@@ -180,17 +220,29 @@ function earmarkedInflowsForYear(
     );
     const adjustedAmount = ev.amountPaisa * growthFactor;
 
+    let perYearGross = 0;
     if (ev.frequency === 'ONE_TIME') {
       if (startDate.getFullYear() === year) {
-        total += Math.round(adjustedAmount);
+        perYearGross = adjustedAmount;
       }
     } else if (ev.frequency === 'MONTHLY') {
-      total += Math.round(adjustedAmount * 12);
+      perYearGross = adjustedAmount * 12;
     } else if (ev.frequency === 'YEARLY') {
-      total += Math.round(adjustedAmount);
+      perYearGross = adjustedAmount;
     }
+
+    if (perYearGross <= 0) continue;
+
+    // Apply tax based on the event's tax_treatment. TAX_FREE and TDS
+    // pass through; TAXABLE has marginalRate withheld.
+    let perYearTax = 0;
+    if (ev.taxTreatment === 'TAXABLE' && rate > 0) {
+      perYearTax = perYearGross * rate;
+    }
+    gross += Math.round(perYearGross);
+    tax += Math.round(perYearTax);
   }
-  return total;
+  return { gross, tax, net: gross - tax };
 }
 
 /**
@@ -206,18 +258,32 @@ function simulate(
   yearlyContribution: number,
   earmarkedEvents: CashflowEvent[],
   expectedReturnPct: number,
-): { years: ProjectionYear[]; totalShortfall: number; totalDemand: number; totalInflows: number } {
+  marginalRatePct: number,
+): {
+  years: ProjectionYear[];
+  totalShortfall: number;
+  totalDemand: number;
+  totalInflows: number;
+  totalTax: number;
+} {
   const years: ProjectionYear[] = [];
   let corpus = initialCorpus;
   let totalShortfall = 0;
   let totalDemand = 0;
   let totalInflows = 0;
+  let totalTax = 0;
 
   for (let y = startYear; y <= endYear; y++) {
     const opening = corpus;
     const growth = Math.round((opening * expectedReturnPct) / 100);
-    const earmarked = earmarkedInflowsForYear(earmarkedEvents, y);
-    const inflows = yearlyContribution + earmarked;
+    const earmarked = earmarkedInflowsForYear(earmarkedEvents, y, marginalRatePct);
+    // yearlyContribution (recurring SIPs etc.) is already net — it
+    // comes from money the user is allocating out of post-tax cash,
+    // so we don't apply marginal rate to it. Only the earmarked
+    // cashflow events carry tax_treatment.
+    const grossInflows = yearlyContribution + earmarked.gross;
+    const taxOnInflows = earmarked.tax;
+    const inflows = yearlyContribution + earmarked.net;
     const demand = demandForYear(goal, y);
 
     const available = opening + growth + inflows;
@@ -232,15 +298,18 @@ function simulate(
       demand,
       closingCorpus: closing,
       shortfall,
+      grossInflows,
+      taxOnInflows,
     });
 
     totalShortfall += shortfall;
     totalDemand += demand;
     totalInflows += inflows;
+    totalTax += taxOnInflows;
     corpus = closing;
   }
 
-  return { years, totalShortfall, totalDemand, totalInflows };
+  return { years, totalShortfall, totalDemand, totalInflows, totalTax };
 }
 
 /* ──────────────────────────────────────────────────────────────────── */
@@ -254,6 +323,7 @@ export function projectGoal(input: GoalProjectionInput): GoalProjection {
     yearlyContributionPaisa,
     earmarkedEvents,
     today,
+    marginalRatePct = 0,
   } = input;
 
   const todayDate = isoDate(today) ?? new Date();
@@ -273,6 +343,7 @@ export function projectGoal(input: GoalProjectionInput): GoalProjection {
     yearlyContributionPaisa,
     earmarkedEvents,
     expectedReturnPct,
+    marginalRatePct,
   );
 
   const fundedAtTargetDate = sim.totalShortfall === 0;
@@ -304,6 +375,7 @@ export function projectGoal(input: GoalProjectionInput): GoalProjection {
           mid,
           earmarkedEvents,
           expectedReturnPct,
+          marginalRatePct,
         );
         if (probe.totalShortfall === 0) {
           hi = mid;
@@ -335,5 +407,7 @@ export function projectGoal(input: GoalProjectionInput): GoalProjection {
     totalInflowsPaisa: sim.totalInflows,
     yearByYear: sim.years,
     monthlyContributionRequiredPaisa,
+    assumedMarginalRatePct: marginalRatePct,
+    totalTaxOnInflowsPaisa: sim.totalTax,
   };
 }

@@ -228,6 +228,13 @@ export default function RetirementPage() {
   // strip so the user can see which events will fire during retirement.
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
 
+  // Sprint 4 Phase 5 — marginal-tax rate proxy pulled from
+  // /api/tax/regime-compare (effective rate under the recommended
+  // regime for the current FY). Applied in the runway simulation to
+  // TAXABLE income streams (rental, annuity, NPS). Ladder income
+  // (LIC endowments) is TAX_FREE under Section 10(10D).
+  const [marginalRatePct, setMarginalRatePct] = useState<number>(0);
+
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -282,6 +289,36 @@ export default function RetirementPage() {
         setCashflowEvents(r.events || []);
       } catch (e) {
         console.error('Failed to load cashflow events', e);
+      }
+    })();
+  }, []);
+
+  // Sprint 4 Phase 5 — fetch marginal-tax proxy once. Pulls the
+  // effective rate under the recommended regime for the *previous*
+  // FY (the one with actual filed data) — this is closer to what
+  // the user will pay in retirement than current-FY projections
+  // which may be incomplete.
+  useEffect(() => {
+    (async () => {
+      try {
+        const now = new Date();
+        const m = now.getMonth() + 1;
+        const y = now.getFullYear();
+        const startYear = (m >= 4 ? y : y - 1) - 1;
+        const fy = `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+        const r = await fetch(`/api/tax/regime-compare?fy=${encodeURIComponent(fy)}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const recommended = d.comparison?.recommendation;
+        const chosen =
+          recommended === 'NEW' ? d.comparison.new : d.comparison.old;
+        if (chosen?.effectiveRatePct != null) {
+          setMarginalRatePct(chosen.effectiveRatePct);
+        }
+      } catch (e) {
+        // Marginal rate stays 0 → no tax adjustment, table just shows
+        // gross == net which is acceptable behaviour.
+        console.error('Marginal rate fetch failed', e);
       }
     })();
   }, []);
@@ -1565,7 +1602,10 @@ export default function RetirementPage() {
                       <th className="px-2 py-1 text-right font-medium">Annuity</th>
                       <th className="px-2 py-1 text-right font-medium">NPS</th>
                       <th className="px-2 py-1 text-right font-medium">Ladder</th>
-                      <th className="px-2 py-1 text-right font-medium">Income total</th>
+                      <th className="px-2 py-1 text-right font-medium">Gross income</th>
+                      {/* Sprint 4 Phase 5 — tax on income + net after tax */}
+                      <th className="px-2 py-1 text-right font-medium">Tax on income</th>
+                      <th className="px-2 py-1 text-right font-medium">Net income</th>
                       <th className="px-2 py-1 text-right font-medium">Corpus growth</th>
                       <th className="px-2 py-1 text-right font-medium">From corpus</th>
                       <th className="px-2 py-1 text-right font-medium">Year-end balance</th>
@@ -1575,6 +1615,12 @@ export default function RetirementPage() {
                     {projection.runwaySeries.map((r) => {
                       const incomeTotal =
                         r.rentalIncome + r.annuityIncome + r.npsIncome + r.ladderIncome;
+                      // Sprint 4 Phase 5 — TAXABLE streams: rental,
+                      // annuity, NPS pension. TAX_FREE: ladder (Section
+                      // 10(10D)). Apply flat marginal rate as a proxy.
+                      const taxableIncome = r.rentalIncome + r.annuityIncome + r.npsIncome;
+                      const taxOnIncome = Math.round((taxableIncome * marginalRatePct) / 100);
+                      const netIncome = incomeTotal - taxOnIncome;
                       // Flag rows where the corpus dropped below the
                       // year's expense — early-warning amber. And rows
                       // where the corpus has gone negative — rose.
@@ -1603,8 +1649,14 @@ export default function RetirementPage() {
                           <td className="px-2 py-1 text-right font-mono">
                             {r.ladderIncome > 0 ? formatINRShort(r.ladderIncome) : '—'}
                           </td>
-                          <td className="px-2 py-1 text-right font-mono font-semibold">
+                          <td className="px-2 py-1 text-right font-mono">
                             {formatINRShort(incomeTotal)}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono text-rose-700">
+                            {taxOnIncome > 0 ? formatINRShort(taxOnIncome) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono font-semibold">
+                            {formatINRShort(netIncome)}
                           </td>
                           <td className="px-2 py-1 text-right font-mono text-emerald-700">
                             {formatINRShort(r.corpusGrowth)}
@@ -1627,6 +1679,11 @@ export default function RetirementPage() {
                 <p className="mt-2 text-[10px] text-[var(--dxp-text-muted)]">
                   Amber row = corpus balance is less than that year&apos;s expense need (tight).
                   Rose row = corpus is negative (depleted).
+                  {marginalRatePct > 0 && (
+                    <>
+                      {' '}Income taxed at <strong>{marginalRatePct.toFixed(1)}%</strong> proxy marginal rate (your current effective rate under the recommended regime). Rental + Annuity + NPS pension are TAXABLE; Ladder (LIC endowment) is TAX_FREE under Section 10(10D). Simplification: flat rate applied across all years — real marginal varies with each year&apos;s income mix.
+                    </>
+                  )}
                 </p>
               </div>
             )}

@@ -28,6 +28,16 @@ import {
   weightedReturnForGoal,
 } from '@/lib/finance/goal-corpus';
 import { projectGoal } from '@/lib/finance/goal-projection';
+import { projectAnnualTax } from '@/lib/finance/tax-projection';
+
+/** Indian FY string for "today" — April–March cycle. */
+function currentFy(): string {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const y = now.getFullYear();
+  const startYear = m >= 4 ? y : y - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+}
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -95,6 +105,17 @@ export async function GET(_request: NextRequest, { params }: Params) {
       ? { ...goal, expectedReturnPct: returnBreakdown.weightedReturnPct }
       : goal;
 
+    // Sprint 4 Phase 5 — pull the user's effective tax rate for the
+    // current FY as a proxy for marginal rate. SIMPLIFICATION: marginal
+    // rate would ideally be derived per-projection-year from projected
+    // income at that year's slabs; that's a future refinement. Today
+    // we use the effectiveRatePct under the recommended regime — a
+    // conservative under-estimate for high earners (real marginal is
+    // typically higher than effective) but it's directionally right
+    // and stable across the projection horizon.
+    const taxProjection = await projectAnnualTax(session.user.id, currentFy());
+    const marginalRatePct = taxProjection?.effectiveRatePct ?? 0;
+
     const projection = projectGoal({
       goal: projectionGoal,
       initialCorpusPaisa,
@@ -110,6 +131,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       yearlyContributionPaisa,
       earmarkedEvents: earmarked.filter((e) => e.frequency === 'ONE_TIME'),
       today: new Date().toISOString().slice(0, 10),
+      marginalRatePct,
     });
 
     return NextResponse.json({
