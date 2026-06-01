@@ -2511,6 +2511,42 @@ export const itrFormSelection = pgTable('itr_form_selection', {
 export type ItrFormSelection = typeof itrFormSelection.$inferSelect;
 export type NewItrFormSelection = typeof itrFormSelection.$inferInsert;
 
+// ─── Sprint 4.1 — ITR-4 (Sugam) presumptive income lines ─────────────────
+// One row per presumptive-income source per FY. Sections supported:
+//   • 44AD  — small business (deemed 6% digital / 8% cash of gross)
+//   • 44ADA — professionals (deemed 50% of gross)
+//   • 44AE  — goods carriage (manual declared profit, no auto-minimum)
+//
+// `deemedProfitPct` is stored alongside `declaredProfitPaisa` so we can
+// later spot any row where the user declared below the section minimum
+// without re-deriving the rule from receipt_mode. CRUD routes enforce
+// `declaredProfit >= grossReceipts * deemedProfitPct / 100` server-side
+// for 44AD/44ADA; 44AE accepts the declared value as-is.
+export type PresumptiveSection = '44AD' | '44ADA' | '44AE';
+export type ReceiptMode = 'DIGITAL' | 'CASH' | 'MIXED';
+
+export const presumptiveIncome = pgTable('presumptive_income', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  fy: text('fy').notNull(),
+  section: text('section').$type<PresumptiveSection>().notNull(),
+  businessName: text('business_name').notNull(),
+  natureOfBusiness: text('nature_of_business'),
+  grossReceiptsPaisa: bigint('gross_receipts_paisa', { mode: 'number' }).notNull(),
+  receiptMode: text('receipt_mode').$type<ReceiptMode>().default('DIGITAL'),
+  deemedProfitPct: real('deemed_profit_pct').notNull(),
+  declaredProfitPaisa: bigint('declared_profit_paisa', { mode: 'number' }).notNull(),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('presumptive_income_user_id_idx').on(table.userId),
+  index('presumptive_income_user_fy_idx').on(table.userId, table.fy),
+]);
+
+export type PresumptiveIncomeRow = typeof presumptiveIncome.$inferSelect;
+export type NewPresumptiveIncome = typeof presumptiveIncome.$inferInsert;
+
 // Other sources income (Schedule OS) — interest, dividends, etc.
 export type OtherIncomeSource =
   | 'BANK_INTEREST'
