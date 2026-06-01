@@ -1,42 +1,110 @@
 /**
- * ITR-form-specific export — Sprint 4 Phase 4.
+ * ITR-form-specific export — Sprint 4 Phase 4 + Sprint 4.1 rewire.
  *
- * GET /api/tax/itr-export/:form?fy=2026-27
+ * GET /api/tax/itr-export/:form?fy=2025-26
  *   :form ∈ ITR-1 | ITR-2 | ITR-3 | ITR-4
  *
- * For ITR-1: returns a compact JSON summary
- *   { fy, salary: { gross, taxable, tds }, deductions: { 80C, 80D, others },
- *     totalIncome, recommended }
- * suitable for cross-checking against a Sahaj filing.
+ * Per-form behaviour:
+ *   • ITR-1 — bespoke Sahaj JSON summary (same shape as Phase 4)
+ *   • ITR-2 — calls computeItr2Summary directly (Sprint 4.1)
+ *   • ITR-3 — delegates to the existing /tax/itr3 walkthrough URL
+ *     (this route doesn't try to rebuild the filing-pack ZIP)
+ *   • ITR-4 — calls computeItr4Summary directly (Sprint 4.1)
  *
- * For ITR-2 / ITR-3 / ITR-4: delegates to the existing /api/tax/itr3
- * filing-pack — those forms all require Schedule S + TDS + Schedule
- * 112A / Schedule BP detail which the ITR-3 module already generates.
- * We pass back a 200 with a redirect hint so the client can switch
- * routes; this keeps us from copy/pasting the ZIP generator just to
- * stamp a different label on it.
+ * The form-specific summaries carry the same data shape as what the
+ * walkthrough pages already render, so this export route doubles as
+ * a stable JSON "view" of the page for any downstream tool (e.g. a
+ * future e-filing JSON transformer — see CLAUDE.md "Deferred from
+ * Sprint 4.1").
  *
- * Implementation note: the existing /tax/filing-pack endpoint already
- * builds a ZIP for "ITR-3 era" filers. Phase 4 simplification: we
- * reuse it as-is for ITR-2/3/4 and only produce a bespoke summary
- * for ITR-1 (which actually has a different shape — Sahaj fits on
- * a one-pager).
+ * Implementation note: we call the summary libs directly (not over
+ * HTTP) to avoid round-trip-cookie complexity. The data fetches are
+ * essentially identical to the /api/tax/itrX/summary routes —
+ * duplication is intentional and localised.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import {
   db,
   salaryIncome,
   taxDeductions,
   otherSourcesIncome,
   realEstate,
+  capitalGains,
+  presumptiveIncome,
   tdsCredits,
+  taxSlabs,
+  taxRegimeConfig,
+  userPreferences,
+  type TaxRegime,
+  type OtherIncomeSource,
+  type PresumptiveSection,
+  type ReceiptMode,
 } from '@/db';
 import { auth } from '@/auth';
+import { computeItr1Summary } from '@/lib/finance/itr1-summary';
+import { computeItr2Summary } from '@/lib/finance/itr2-summary';
+import { computeItr4Summary } from '@/lib/finance/itr4-summary';
+import type { CapitalGainRow, CgAssetType, CgGainType } from '@/lib/finance/capital-gains-tax';
 
 type ItrForm = 'ITR-1' | 'ITR-2' | 'ITR-3' | 'ITR-4';
 const VALID: ItrForm[] = ['ITR-1', 'ITR-2', 'ITR-3', 'ITR-4'];
+
+const ITR1_OTHER_SOURCES: OtherIncomeSource[] = [
+  'BANK_INTEREST',
+  'FD_INTEREST',
+  'PF_INTEREST',
+  'DIVIDEND',
+];
+
+function mapAssetType(t: string): CgAssetType {
+  switch (t) {
+    case 'STOCKS':
+    case 'EQUITY_MF':
+    case 'DEBT_MF':
+    case 'GOLD':
+    case 'REAL_ESTATE':
+    case 'OTHER':
+      return t as CgAssetType;
+    default:
+      return 'OTHER';
+  }
+}
+
+/** Load the regime-eligible slabs + config for the user's preferred
+ *  regime. Returns null if the FY hasn't been seeded yet. */
+async function loadRegimeContext(userId: string, fy: string) {
+  const [slabs, configs, prefs] = await Promise.all([
+    db.select().from(taxSlabs).where(eq(taxSlabs.fy, fy)),
+    db.select().from(taxRegimeConfig).where(eq(taxRegimeConfig.fy, fy)),
+    db
+      .select()
+      .from(userPreferences)
+      .where(eq(userPreferences.userId, userId))
+      .limit(1),
+  ]);
+  if (slabs.length === 0 || configs.length === 0) return null;
+  const regime: TaxRegime = (prefs[0]?.taxRegimeDefault as TaxRegime) ?? 'NEW';
+  const regimeSlabs = slabs.filter((s) => s.regime === regime);
+  const regimeConfig = configs.find((c) => c.regime === regime);
+  if (!regimeConfig || regimeSlabs.length === 0) return null;
+  return {
+    regime,
+    slabs: regimeSlabs.map((s) => ({
+      slabOrder: s.slabOrder,
+      lowerPaisa: s.lowerPaisa,
+      upperPaisa: s.upperPaisa ?? null,
+      ratePct: s.ratePct,
+    })),
+    config: {
+      standardDeductionPaisa: regimeConfig.standardDeductionPaisa,
+      rebate87aThresholdPaisa: regimeConfig.rebate87aThresholdPaisa,
+      rebate87aMaxPaisa: regimeConfig.rebate87aMaxPaisa,
+      cessPct: regimeConfig.cessPct,
+    },
+  };
+}
 
 export async function GET(
   request: NextRequest,
@@ -60,20 +128,28 @@ export async function GET(
 
     const userId = session.user.id;
 
-    // For ITR-2/3/4 — point the client at the existing ZIP filing-pack.
-    if (form !== 'ITR-1') {
+    // ITR-3 stays delegated — the dedicated multi-page walkthrough at
+    // /tax/itr3 owns this filer's experience. We just hand the client
+    // a redirect hint with the right URL.
+    if (form === 'ITR-3') {
       return NextResponse.json({
         form,
-        delegate: '/api/tax/filing-pack/generate',
+        delegate: `/tax/itr3?fy=${encodeURIComponent(fy)}`,
         message:
-          'Use the existing filing-pack ZIP generator for ITR-2/3/4 — it covers Schedule S, TDS, 112A and Schedule BP needed across these forms.',
+          'ITR-3 (business / professional) is handled by the dedicated walkthrough at /tax/itr3 — salary, TDS, business profession, capital gains, other income sub-routes all live there.',
       });
     }
 
-    // ITR-1 (Sahaj) — bespoke compact summary. The form is one pager
-    // and only needs: salary breakdown, deductions, rental, interest,
-    // total income, TDS.
-    const [salaries, deductions, others, properties, tdsRows] = await Promise.all([
+    const regimeContext = await loadRegimeContext(userId, fy);
+    if (!regimeContext) {
+      return NextResponse.json(
+        { error: `Tax slabs/config for FY ${fy} not seeded yet` },
+        { status: 422 },
+      );
+    }
+
+    // ─── Common fetches ─────────────────────────────────────────────
+    const [salaries, deductions, others, tdsRows] = await Promise.all([
       db
         .select()
         .from(salaryIncome)
@@ -88,7 +164,6 @@ export async function GET(
         .where(
           and(eq(otherSourcesIncome.userId, userId), eq(otherSourcesIncome.financialYear, fy)),
         ),
-      db.select().from(realEstate).where(eq(realEstate.userId, userId)),
       db
         .select()
         .from(tdsCredits)
@@ -96,44 +171,162 @@ export async function GET(
     ]);
 
     const totalGrossSalary = salaries.reduce((s, r) => s + (r.grossSalaryPaisa ?? 0), 0);
-    const totalTaxableSalary = salaries.reduce((s, r) => s + (r.taxableSalaryPaisa ?? 0), 0);
+    const totalExemptions = salaries.reduce((s, r) => s + (r.exemptionsPaisa ?? 0), 0);
     const totalSalaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+    const nonSalaryTds = tdsRows.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
 
-    const byBucket: Record<string, number> = {};
-    for (const d of deductions) {
-      const key = (d.section ?? 'OTHER').replace('SECTION_', '');
-      byBucket[key] = (byBucket[key] ?? 0) + (d.amountPaisa ?? 0);
+    const interest24b = deductions
+      .filter((d) => d.section === '24B')
+      .reduce((s, d) => s + (d.amountPaisa ?? 0), 0);
+
+    const oldDeductionsTotal = deductions.reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const deductionsForRegime =
+      regimeContext.regime === 'OLD' ? oldDeductionsTotal : 0;
+
+    if (form === 'ITR-1') {
+      // Bespoke Sahaj summary — kept compact (one-pager).
+      const [firstProperty] = await db
+        .select()
+        .from(realEstate)
+        .where(eq(realEstate.userId, userId))
+        .orderBy(asc(realEstate.id))
+        .limit(1);
+      const otherInterest = others
+        .filter((r) => !r.isTaxExempt)
+        .filter((r) => ITR1_OTHER_SOURCES.includes(r.source))
+        .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+
+      const propertyInput = firstProperty
+        ? {
+            annualRentPaisa: (firstProperty.monthlyRent ?? 0) * 12,
+            municipalTaxesPaisa: firstProperty.propertyTaxAnnual ?? 0,
+            homeLoanInterestPaisa: interest24b,
+          }
+        : null;
+
+      const summary = computeItr1Summary({
+        salaryGrossPaisa: totalGrossSalary,
+        salaryExemptionsPaisa: totalExemptions,
+        property: propertyInput,
+        otherInterestIncomePaisa: otherInterest,
+        deductionsPaisa: deductionsForRegime,
+        slabs: regimeContext.slabs,
+        config: regimeContext.config,
+        regime: regimeContext.regime,
+      });
+
+      // Per-section bucket totals (preserved from Phase 4 for backward
+      // compat with anything reading sahajSummary.deductionsBySection).
+      const byBucket: Record<string, number> = {};
+      for (const d of deductions) {
+        const key = (d.section ?? 'OTHER').replace('SECTION_', '');
+        byBucket[key] = (byBucket[key] ?? 0) + (d.amountPaisa ?? 0);
+      }
+
+      return NextResponse.json({
+        form: 'ITR-1',
+        fy,
+        regime: regimeContext.regime,
+        sahajSummary: {
+          salary: {
+            employerCount: salaries.length,
+            grossPaisa: totalGrossSalary,
+            taxablePaisa: totalGrossSalary - totalExemptions,
+            tdsPaisa: totalSalaryTds,
+          },
+          houseProperty: firstProperty
+            ? {
+                count: 1,
+                annualRentPaisa: (firstProperty.monthlyRent ?? 0) * 12,
+                netIncomePaisa: summary.housePropertyIncomePaisa,
+              }
+            : { count: 0, annualRentPaisa: 0, netIncomePaisa: 0 },
+          otherSourcesPaisa: otherInterest,
+          deductionsBySection: byBucket,
+          totalDeductionsPaisa: Object.values(byBucket).reduce((s, v) => s + v, 0),
+          nonSalaryTdsPaisa: nonSalaryTds,
+          totalIncomePaisa: summary.grossTotalIncomePaisa,
+          taxableIncomePaisa: summary.taxableIncomePaisa,
+          totalTaxPaisa: summary.totalTaxPaisa,
+          exceedsCap: summary.exceedsCap,
+        },
+      });
     }
 
-    const rentalAnnual = properties.reduce((s, r) => s + (r.monthlyRent ?? 0) * 12, 0);
+    if (form === 'ITR-2') {
+      const [properties, cgRows] = await Promise.all([
+        db.select().from(realEstate).where(eq(realEstate.userId, userId)),
+        db
+          .select()
+          .from(capitalGains)
+          .where(
+            and(eq(capitalGains.userId, userId), eq(capitalGains.financialYear, fy)),
+          ),
+      ]);
+      const houseProperties = properties.map((p, idx) => ({
+        label: p.propertyName,
+        annualRentPaisa: (p.monthlyRent ?? 0) * 12,
+        municipalTaxesPaisa: p.propertyTaxAnnual ?? 0,
+        homeLoanInterestPaisa: idx === 0 ? interest24b : 0,
+      }));
+      const otherIncome = others
+        .filter((r) => !r.isTaxExempt)
+        .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+      const capitalGainsRows: CapitalGainRow[] = cgRows.map((r) => ({
+        assetType: mapAssetType(r.assetType),
+        gainType: r.holdingPeriod as CgGainType,
+        taxableGainPaisa: r.taxableGain,
+      }));
+      const summary = computeItr2Summary({
+        salaryGrossPaisa: totalGrossSalary,
+        salaryExemptionsPaisa: totalExemptions,
+        houseProperties,
+        otherIncomePaisa: otherIncome,
+        capitalGainsRows,
+        deductionsPaisa: deductionsForRegime,
+        slabs: regimeContext.slabs,
+        config: regimeContext.config,
+        regime: regimeContext.regime,
+        fy,
+      });
+      return NextResponse.json({
+        form: 'ITR-2',
+        fy,
+        regime: regimeContext.regime,
+        summary,
+        tdsTotals: { salaryTdsPaisa: totalSalaryTds, nonSalaryTdsPaisa: nonSalaryTds },
+      });
+    }
+
+    // form === 'ITR-4'
+    const presumptiveRows = await db
+      .select()
+      .from(presumptiveIncome)
+      .where(and(eq(presumptiveIncome.userId, userId), eq(presumptiveIncome.fy, fy)));
     const otherIncome = others
       .filter((r) => !r.isTaxExempt)
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
-    const nonSalaryTds = tdsRows.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
-
-    const totalIncomePaisa =
-      totalGrossSalary + rentalAnnual + otherIncome;
-
+    const summary = computeItr4Summary({
+      salaryGrossPaisa: totalGrossSalary,
+      salaryExemptionsPaisa: totalExemptions,
+      presumptiveLines: presumptiveRows.map((r) => ({
+        section: r.section as PresumptiveSection,
+        grossReceiptsPaisa: r.grossReceiptsPaisa,
+        receiptMode: (r.receiptMode ?? 'DIGITAL') as ReceiptMode,
+        declaredProfitPaisa: r.declaredProfitPaisa,
+      })),
+      otherIncomePaisa: otherIncome,
+      deductionsPaisa: deductionsForRegime,
+      slabs: regimeContext.slabs,
+      config: regimeContext.config,
+      regime: regimeContext.regime,
+    });
     return NextResponse.json({
-      form: 'ITR-1',
+      form: 'ITR-4',
       fy,
-      sahajSummary: {
-        salary: {
-          employerCount: salaries.length,
-          grossPaisa: totalGrossSalary,
-          taxablePaisa: totalTaxableSalary,
-          tdsPaisa: totalSalaryTds,
-        },
-        houseProperty: {
-          count: properties.length,
-          annualRentPaisa: rentalAnnual,
-        },
-        otherSourcesPaisa: otherIncome,
-        deductionsBySection: byBucket,
-        totalDeductionsPaisa: Object.values(byBucket).reduce((s, v) => s + v, 0),
-        nonSalaryTdsPaisa: nonSalaryTds,
-        totalIncomePaisa,
-      },
+      regime: regimeContext.regime,
+      summary,
+      tdsTotals: { salaryTdsPaisa: totalSalaryTds, nonSalaryTdsPaisa: nonSalaryTds },
     });
   } catch (err) {
     console.error('[tax/itr-export/:form GET]', err);
