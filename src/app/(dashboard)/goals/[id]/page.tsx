@@ -220,6 +220,14 @@ export default function GoalDetailPage() {
   const [mappedTotal, setMappedTotal] = useState(0);
   const [events, setEvents] = useState<CashflowEvent[]>([]);
   const [projection, setProjection] = useState<Projection | null>(null);
+  // Per-asset-class growth rate breakdown returned by the projection API.
+  // Surfaces the weighted blend ("MFs 11% · Stocks 12% · weighted 11.0%")
+  // so the user sees WHY the projection compounds at the rate it does.
+  const [returnBreakdown, setReturnBreakdown] = useState<{
+    weightedReturnPct: number;
+    bands: Array<{ label: string; valuePaisa: number; returnPct: number }>;
+  } | null>(null);
+  const [returnSource, setReturnSource] = useState<'weighted-mix' | 'goal-default' | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -249,6 +257,8 @@ export default function GoalDetailPage() {
       setAssets(assetsRes.classes || []);
       setMappedTotal(assetsRes.includedTotalPaisa || 0);
       setProjection(projRes?.projection ?? null);
+      setReturnBreakdown(projRes?.returnBreakdown ?? null);
+      setReturnSource(projRes?.returnSource ?? null);
       setAllEvents(allEvtRes.events || []);
     } catch (e) {
       console.error(e);
@@ -300,6 +310,8 @@ export default function GoalDetailPage() {
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       setProjection(projRes?.projection ?? null);
+      setReturnBreakdown(projRes?.returnBreakdown ?? null);
+      setReturnSource(projRes?.returnSource ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -360,6 +372,8 @@ export default function GoalDetailPage() {
       setAssets(assetsRes.classes || []);
       setMappedTotal(assetsRes.includedTotalPaisa || 0);
       setProjection(projRes?.projection ?? null);
+      setReturnBreakdown(projRes?.returnBreakdown ?? null);
+      setReturnSource(projRes?.returnSource ?? null);
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
@@ -866,6 +880,29 @@ export default function GoalDetailPage() {
                   <strong>{formatINRCompact(projection.totalDemandPaisa)}</strong> · Total inflows:{' '}
                   <strong>{formatINRCompact(projection.totalInflowsPaisa)}</strong>
                 </p>
+                {/* Per-class growth breakdown — Gold isn't 8%, Chits aren't 8%.
+                    The projection now compounds the corpus at a value-weighted
+                    average across the mapped mix. */}
+                {returnBreakdown && returnBreakdown.bands.length > 0 && (
+                  <div className="mt-2 rounded-md border border-[var(--dxp-border)] bg-[var(--dxp-surface-alt)]/40 p-2 text-xs">
+                    <p className="text-[var(--dxp-text-secondary)]">
+                      Weighted growth rate:{' '}
+                      <strong className="text-[var(--dxp-text)]">
+                        {returnBreakdown.weightedReturnPct.toFixed(1)}%
+                      </strong>{' '}
+                      <span className="text-[var(--dxp-text-muted)]">
+                        (from your asset mix; {returnSource === 'weighted-mix' ? 'overrides' : 'falls back to'} the goal&apos;s manual {goal.expectedReturnPct}%)
+                      </span>
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[var(--dxp-text-muted)]">
+                      {returnBreakdown.bands.map((b) => (
+                        <span key={b.label} className="font-mono">
+                          {b.label.replace(/_/g, ' ').toLowerCase()}: {formatINRCompact(b.valuePaisa)} @ {b.returnPct.toFixed(1)}%
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {projection.monthlyContributionRequiredPaisa != null &&
                   projection.monthlyContributionRequiredPaisa > 0 && (
                     <p className="text-[var(--dxp-text)]">
@@ -1228,6 +1265,17 @@ function AllocationInput({
     void onCommit(pct);
   };
 
+  // What's left after this row + already-claimed other goals. When the
+  // user has under-allocated (sum < 100), the "Use remainder" button
+  // claims the unclaimed slice for this goal in one click. The previous
+  // UI showed the remainder as a passive footnote — easy to miss.
+  const remainderForThisGoal = Math.max(
+    0,
+    100 - otherAllocations.reduce((s, o) => s + o.allocationPct, 0),
+  );
+  const canTakeRemainder =
+    remainderForThisGoal > 0 && Math.abs(remainderForThisGoal - allocationPct) > 0.01;
+
   return (
     <div className="flex flex-col items-start gap-1">
       <div className="flex items-center gap-1">
@@ -1247,19 +1295,44 @@ function AllocationInput({
           className="w-20"
         />
         <span className="text-xs text-[var(--dxp-text-secondary)]">%</span>
+        {canTakeRemainder && (
+          <button
+            type="button"
+            onClick={() => {
+              setValue(String(remainderForThisGoal));
+              onCommit(remainderForThisGoal);
+            }}
+            className="rounded border border-[var(--dxp-border)] px-2 py-0.5 text-xs text-[var(--dxp-brand)] hover:bg-[var(--dxp-surface-alt)]/60"
+            title={`Set this goal's share to ${remainderForThisGoal}% (everything not claimed elsewhere)`}
+          >
+            Use remainder ({remainderForThisGoal}%)
+          </button>
+        )}
       </div>
       <p className="text-xs text-[var(--dxp-text-secondary)]">
         {formatINRCompact(earmarkedPaisa)} earmarked here
       </p>
-      {otherAllocations.length > 0 && (
-        <p className="text-xs text-[var(--dxp-text-muted)]">
-          Also:{' '}
-          {otherAllocations
-            .map((o) => `${o.allocationPct}% to ${o.goalName}`)
-            .join(', ')}
-          {unallocated > 0 ? ` · ${unallocated}% unallocated` : ''}
-        </p>
-      )}
+      {/* Allocation map line — always shows total asset value, what's
+          claimed elsewhere, and what's free. Was previously hidden when
+          no other goal claimed the asset; now visible even for solo
+          ownership so the user can see "100% / 100% to this goal · 0%
+          unallocated" at a glance. */}
+      <p className="text-xs text-[var(--dxp-text-muted)]">
+        Total {formatINRCompact(valuePaisa)} ·{' '}
+        {otherAllocations.length > 0 && (
+          <>
+            {otherAllocations
+              .map((o) => `${o.allocationPct}% to ${o.goalName}`)
+              .join(', ')}
+            {' · '}
+          </>
+        )}
+        {unallocated > 0 ? (
+          <strong className="text-[var(--dxp-text-secondary)]">{unallocated}% unallocated</strong>
+        ) : (
+          <span>fully allocated</span>
+        )}
+      </p>
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );

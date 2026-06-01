@@ -40,16 +40,49 @@ export interface CorpusContext {
   mfTotal: number;
   npsTotal: number;
   pfTotal: number;
-  golds: Array<{ id: number; value: number }>;
-  fds: Array<{ id: number; value: number }>;
-  ssas: Array<{ id: number; value: number }>;
-  chits: Array<{ id: number; value: number }>;
-  policies: Array<{ id: number; value: number }>;
+  /** Itemized classes carry their assumed growth rate per row so the
+   *  weighted average for the goal reflects each instrument's actual
+   *  yield (FD rate, small-savings scheme rate, chit XIRR, …). */
+  golds: Array<{ id: number; value: number; returnPct: number }>;
+  fds: Array<{ id: number; value: number; returnPct: number }>;
+  ssas: Array<{ id: number; value: number; returnPct: number }>;
+  chits: Array<{ id: number; value: number; returnPct: number }>;
+  policies: Array<{ id: number; value: number; returnPct: number }>;
   /** Total annual SIP outflow across all ACTIVE SIPs (paisa). */
   mfSipYearly: number;
   /** Per-MF-id yearly SIP paisa. */
   sipPerMfId: Map<number, number>;
   mfIdSet: Set<number>;
+}
+
+/**
+ * Default expected annual returns per asset class. These mirror the
+ * three-bucket cascade rates the retirement page uses (liquid 6 / stable
+ * 8 / growth 11) but at asset-class granularity. The goal's projection
+ * uses the value-weighted average of these across the mapped mix instead
+ * of a single goal-level expected_return_pct — so a gold-heavy goal
+ * compounds at ~9%, a chit-heavy goal at ~6%, and an equity-heavy goal
+ * at ~12%.
+ *
+ * Itemized classes (FDs, Small Savings, Chits) override this default
+ * with the actual instrument-level rate where available — e.g. a 7.7%
+ * NSC overrides the SMALL_SAVINGS class default.
+ */
+export const DEFAULT_RETURN_PCT_BY_CLASS: Record<string, number> = {
+  STOCKS: 12,
+  MUTUAL_FUNDS: 11,
+  GOLD: 9,
+  NPS: 9.5,
+  PF: 8.25,
+  SMALL_SAVINGS: 7.5,
+  FIXED_DEPOSITS: 7,
+  CHIT_FUNDS: 6,
+  REAL_ESTATE: 6,
+  INSURANCE_POLICIES: 5,
+};
+
+export function defaultReturnPct(assetClass: string): number {
+  return DEFAULT_RETURN_PCT_BY_CLASS[assetClass] ?? 8;
 }
 
 /** Loads all balances + inclusion rows for the user in parallel. */
@@ -94,17 +127,35 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
     mfTotal: mfs.reduce((s, f) => s + (f.currentValue || 0), 0),
     npsTotal: nps.reduce((s, n) => s + (n.totalValue || 0), 0),
     pfTotal: pf.reduce((s, p) => s + (p.totalBalance || 0), 0),
-    golds: gold.map((g) => ({ id: g.id, value: g.currentValue ?? 0 })),
+    // Itemized rows include each instrument's own assumed return rate
+    // where the underlying table exposes it. Falls back to the class
+    // default when the column is null/zero so the weighted average
+    // doesn't get pulled down by missing data.
+    golds: gold.map((g) => ({
+      id: g.id,
+      value: g.currentValue ?? 0,
+      returnPct: defaultReturnPct('GOLD'),
+    })),
     fds: fds.map((f) => ({
       id: f.id,
       value: f.maturityAmountPaisa ?? f.principalPaisa,
+      returnPct: f.interestRate && f.interestRate > 0
+        ? f.interestRate
+        : defaultReturnPct('FIXED_DEPOSITS'),
     })),
-    ssas: ssas.map((a) => ({ id: a.id, value: a.currentBalancePaisa ?? 0 })),
+    ssas: ssas.map((a) => ({
+      id: a.id,
+      value: a.currentBalancePaisa ?? 0,
+      returnPct: a.interestRatePercent && a.interestRatePercent > 0
+        ? a.interestRatePercent
+        : defaultReturnPct('SMALL_SAVINGS'),
+    })),
     chits: chits.map((c) => ({
       id: c.id,
       value: Math.round(
         c.chitValue * (1 - (c.foremanCommissionPct ?? 5) / 100),
       ),
+      returnPct: c.xirr && c.xirr > 0 ? c.xirr : defaultReturnPct('CHIT_FUNDS'),
     })),
     policies: ins.map((p) => ({
       id: p.id,
@@ -112,6 +163,7 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
         p.maturityBenefit && p.maturityBenefit > 0
           ? p.maturityBenefit
           : p.sumAssured || 0,
+      returnPct: defaultReturnPct('INSURANCE_POLICIES'),
     })),
     mfSipYearly,
     sipPerMfId,
@@ -166,6 +218,116 @@ export function corpusForGoal(ctx: CorpusContext, goalId: number): number {
     }
   }
   return Math.round(total);
+}
+
+/**
+ * Value-weighted expected annual return across all assets mapped to this
+ * goal. The retirement page uses bucket-allocation × bucket-return; here
+ * we do the same at asset-class granularity:
+ *
+ *   weightedReturn = Σ (assetValue × allocationPct × classReturn)
+ *                  / Σ (assetValue × allocationPct)
+ *
+ * Itemized classes (FDs, Small Savings, Chits) use the instrument's own
+ * rate where set (a 7.7% NSC, an 8.5% FD, a chit fund with computed XIRR).
+ * Aggregate classes use the class default.
+ *
+ * Returns the per-class breakdown too so the UI can surface
+ * "Stocks ₹34K @ 12% · MFs ₹52L @ 11% · weighted: 11.0%".
+ */
+export interface WeightedReturnBreakdown {
+  /** Final value-weighted rate (percent, e.g. 11.0). Falls back to a
+   *  sensible default (8) when nothing is mapped yet. */
+  weightedReturnPct: number;
+  /** One row per asset class that contributes mapped value to this goal. */
+  bands: Array<{
+    label: string;
+    valuePaisa: number;
+    returnPct: number;
+  }>;
+}
+
+export function weightedReturnForGoal(
+  ctx: CorpusContext,
+  goalId: number,
+): WeightedReturnBreakdown {
+  const incs = ctx.inclusions.filter((r) => r.goalId === goalId && r.included);
+  const classBands = new Map<string, { value: number; weightedSum: number }>();
+
+  for (const r of incs) {
+    const weight = (r.allocationPct ?? 100) / 100;
+
+    let value = 0;
+    let returnPct = defaultReturnPct(r.assetClass);
+
+    switch (r.assetClass) {
+      case 'STOCKS':
+        if (r.sourceId === null) value = ctx.holdingsTotal;
+        break;
+      case 'MUTUAL_FUNDS':
+        if (r.sourceId === null) value = ctx.mfTotal;
+        break;
+      case 'NPS':
+        if (r.sourceId === null) value = ctx.npsTotal;
+        break;
+      case 'PF':
+        if (r.sourceId === null) value = ctx.pfTotal;
+        break;
+      case 'GOLD': {
+        const item = ctx.golds.find((x) => x.id === r.sourceId);
+        if (item) { value = item.value; returnPct = item.returnPct; }
+        break;
+      }
+      case 'FIXED_DEPOSITS': {
+        const item = ctx.fds.find((x) => x.id === r.sourceId);
+        if (item) { value = item.value; returnPct = item.returnPct; }
+        break;
+      }
+      case 'SMALL_SAVINGS': {
+        const item = ctx.ssas.find((x) => x.id === r.sourceId);
+        if (item) { value = item.value; returnPct = item.returnPct; }
+        break;
+      }
+      case 'CHIT_FUNDS': {
+        const item = ctx.chits.find((x) => x.id === r.sourceId);
+        if (item) { value = item.value; returnPct = item.returnPct; }
+        break;
+      }
+      case 'INSURANCE_POLICIES': {
+        const item = ctx.policies.find((x) => x.id === r.sourceId);
+        if (item) { value = item.value; returnPct = item.returnPct; }
+        break;
+      }
+    }
+
+    if (value <= 0) continue;
+    const weighted = value * weight;
+    const prev = classBands.get(r.assetClass) ?? { value: 0, weightedSum: 0 };
+    classBands.set(r.assetClass, {
+      value: prev.value + weighted,
+      weightedSum: prev.weightedSum + weighted * returnPct,
+    });
+  }
+
+  let totalValue = 0;
+  let totalWeighted = 0;
+  const bands: WeightedReturnBreakdown['bands'] = [];
+  for (const [assetClass, agg] of classBands.entries()) {
+    if (agg.value <= 0) continue;
+    totalValue += agg.value;
+    totalWeighted += agg.weightedSum;
+    bands.push({
+      label: assetClass,
+      valuePaisa: Math.round(agg.value),
+      returnPct: agg.weightedSum / agg.value,
+    });
+  }
+
+  const weightedReturnPct = totalValue > 0 ? totalWeighted / totalValue : 8;
+  // Sort bands by value descending so the biggest contributor displays
+  // first in the UI breakdown.
+  bands.sort((a, b) => b.valuePaisa - a.valuePaisa);
+  return { weightedReturnPct, bands };
 }
 
 /**

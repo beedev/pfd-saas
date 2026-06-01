@@ -25,6 +25,7 @@ import {
   loadCorpusContext,
   corpusForGoal,
   yearlyContributionForGoal,
+  weightedReturnForGoal,
 } from '@/lib/finance/goal-corpus';
 import { projectGoal } from '@/lib/finance/goal-projection';
 
@@ -83,8 +84,19 @@ export async function GET(_request: NextRequest, { params }: Params) {
       })),
     );
 
+    // Per-asset-class growth rates → value-weighted average. Gold isn't
+    // 8%, chits aren't 8%, equity isn't 8% — the goal's flat
+    // expected_return_pct is a poor model when the mix is heterogeneous.
+    // When ANY asset is mapped, override the goal's stored rate with the
+    // weighted blend computed from the mix. When nothing's mapped yet,
+    // fall back to the goal's stored expected_return_pct.
+    const returnBreakdown = weightedReturnForGoal(ctx, numericId);
+    const projectionGoal = returnBreakdown.bands.length > 0
+      ? { ...goal, expectedReturnPct: returnBreakdown.weightedReturnPct }
+      : goal;
+
     const projection = projectGoal({
-      goal,
+      goal: projectionGoal,
       initialCorpusPaisa,
       // The engine treats yearly contribution and earmarked events as
       // separate inputs. The yearlyContribution captures recurring
@@ -108,6 +120,14 @@ export async function GET(_request: NextRequest, { params }: Params) {
         oneTimeEarmarksCount: earmarked.filter((e) => e.frequency === 'ONE_TIME').length,
         recurringEarmarksCount: earmarked.filter((e) => e.frequency !== 'ONE_TIME').length,
       },
+      // Per-class growth breakdown — UI surfaces "Stocks ₹34K @ 12% ·
+      // MFs ₹52L @ 11% · weighted: 11.0%" so the user sees WHY the
+      // projection compounds at the rate it does.
+      returnBreakdown,
+      // Indicates whether the projection used the weighted blend or
+      // fell back to the goal's stored expected_return_pct (when no
+      // assets are mapped yet).
+      returnSource: returnBreakdown.bands.length > 0 ? 'weighted-mix' : 'goal-default',
     });
   } catch (err) {
     console.error('[goals/:id/projection GET]', err);
