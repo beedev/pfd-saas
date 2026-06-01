@@ -48,6 +48,8 @@ import {
   Calendar,
   TrendingUp,
   Link2,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 
 type GoalType =
@@ -948,26 +950,52 @@ function AssetRowCard({
     allocationPct?: number,
   ) => Promise<boolean> | void;
 }) {
+  // Default-open if anything in this class is mapped to this goal; closed
+  // otherwise. Aggregates have a single included flag; itemized rows have
+  // includedSumPaisa > 0 when at least one item is ticked. Local state so
+  // the user can also force-collapse classes they already mapped.
+  const defaultOpen =
+    row.kind === 'aggregate' ? row.included : row.includedSumPaisa > 0;
+  const [open, setOpen] = useState(defaultOpen);
+
   if (row.kind === 'aggregate') {
     return (
-      <div className="rounded-md border border-[var(--dxp-border)] p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-[var(--dxp-text)]">{row.label}</p>
-            <p className="text-xs text-[var(--dxp-text-secondary)]">
-              {formatINRCompact(row.valuePaisa)} · {row.liquidity}
-              {row.basis ? ` · ${row.basis}` : ''}
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
-            {row.included && (
-              <AllocationInput
-                allocationPct={row.allocationPct}
-                otherAllocations={row.otherAllocations}
-                valuePaisa={row.valuePaisa}
-                onCommit={(pct) => onUpdate(null, true, pct)}
-              />
+      <div className="rounded-md border border-[var(--dxp-border)]">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setOpen((v) => !v);
+            }
+          }}
+          className="flex w-full cursor-pointer flex-wrap items-start justify-between gap-3 p-3 hover:bg-[var(--dxp-surface-alt)]/40"
+        >
+          <div className="flex min-w-0 flex-1 items-start gap-2">
+            {open ? (
+              <ChevronDown className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--dxp-text-muted)]" />
+            ) : (
+              <ChevronRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--dxp-text-muted)]" />
             )}
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-[var(--dxp-text)]">{row.label}</p>
+              <p className="text-xs text-[var(--dxp-text-secondary)]">
+                {formatINRCompact(row.valuePaisa)} · {row.liquidity}
+                {row.included ? ` · ${row.allocationPct}% earmarked` : ''}
+                {row.basis ? ` · ${row.basis}` : ''}
+              </p>
+            </div>
+          </div>
+          {/* Always-visible checkbox so the user can include without
+              having to expand the section first. Stop propagation so the
+              click doesn't also toggle the collapse. */}
+          <div
+            className="flex items-center"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <input
               type="checkbox"
               checked={row.included}
@@ -976,6 +1004,19 @@ function AssetRowCard({
             />
           </div>
         </div>
+        {open && row.included && (
+          <div
+            className="border-t border-[var(--dxp-border)] p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <AllocationInput
+              allocationPct={row.allocationPct}
+              otherAllocations={row.otherAllocations}
+              valuePaisa={row.valuePaisa}
+              onCommit={(pct) => onUpdate(null, true, pct)}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -1039,21 +1080,49 @@ function AssetRowCard({
     },
   ];
 
+  const includedCount = row.items.filter((i) => i.included).length;
+
   return (
-    <div className="rounded-md border border-[var(--dxp-border)] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <p className="font-semibold text-[var(--dxp-text)]">{row.label}</p>
-          <p className="text-xs text-[var(--dxp-text-secondary)]">
-            {row.liquidity} · {formatINRCompact(row.includedSumPaisa)} mapped
-            {row.basis ? ` · ${row.basis}` : ''}
-          </p>
+    <div className="rounded-md border border-[var(--dxp-border)]">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        className="flex w-full cursor-pointer items-start justify-between gap-3 p-3 hover:bg-[var(--dxp-surface-alt)]/40"
+      >
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          {open ? (
+            <ChevronDown className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--dxp-text-muted)]" />
+          ) : (
+            <ChevronRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--dxp-text-muted)]" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-[var(--dxp-text)]">{row.label}</p>
+            <p className="text-xs text-[var(--dxp-text-secondary)]">
+              {row.liquidity} · {formatINRCompact(row.includedSumPaisa)} mapped
+              {row.items.length > 0 ? ` · ${includedCount} of ${row.items.length} included` : ''}
+              {row.basis ? ` · ${row.basis}` : ''}
+            </p>
+          </div>
         </div>
       </div>
-      {row.items.length === 0 ? (
-        <p className="text-xs text-[var(--dxp-text-muted)] py-2">No items in this class</p>
-      ) : (
-        <DataTable data={row.items} columns={columns} emptyMessage="No items" />
+      {open && (
+        <div
+          className="border-t border-[var(--dxp-border)] p-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {row.items.length === 0 ? (
+            <p className="text-xs text-[var(--dxp-text-muted)] py-2">No items in this class</p>
+          ) : (
+            <DataTable data={row.items} columns={columns} emptyMessage="No items" />
+          )}
+        </div>
       )}
     </div>
   );
