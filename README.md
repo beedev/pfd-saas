@@ -4,10 +4,14 @@ A generic personal finance planner for India. SaaS edition of
 [beedev/pfd](https://github.com/beedev/pfd) — multi-tenant, Postgres-backed,
 magic-link auth.
 
-**Status:** Sprint 2 complete — multi-tenant skeleton + onboarding +
-PWA + per-tenant cron + real Gmail/SMTP magic-link delivery. Demo
-seed script lets anyone clone and bring up a fully-populated dashboard
-in minutes. Pre-launch; no public deploy yet.
+**Status:** Sprint 4 complete — tax hardening on top of the multi-tenant
+skeleton. The dashboard now covers the full Indian filing chain: NEW vs
+OLD regime comparison with savings delta, Form 26AS reconciliation,
+quarterly advance-tax planner with 234B/234C warnings, ITR form wizard
+(1/2/3/4) with auto-detect from income sources, and tax-aware net-of-tax
+inflow projections on goals + retirement. Demo seed script lets anyone
+clone and bring up a fully-populated dashboard in minutes. Pre-launch;
+no public deploy yet.
 
 ---
 
@@ -233,7 +237,7 @@ Sprint sequence:
 - **Sprint 2** ✅ Productize — onboarding, mobile-responsive, PWA, per-tenant cron, demo data, real SMTP. Docker self-host scaffold deferred to Sprint 5.
 - **Sprint 3** ✅ India modules — Health Insurance (cards/claims/portability), Income tracker, Vehicles (insurance/PUC/service log), Subscriptions, Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS with interest projection)
 - **Sprint 3.5** ✅ Goals/Retirement architecture + IA regroup — sidebar regrouped (Investments / Insurance / Liabilities), `cashflow_events` substrate (auto-derived inflow timeline from insurance / NPS / PPF / SSY / rental / salary), goals get disbursement model + asset mapping + year-by-year projection, retirement page reads cashflow events for income arrivals
-- **Sprint 4** ⏳ Tax hardening — regime toggle, slab abstraction, Form 26AS, ITR-1/2 export
+- **Sprint 4** ✅ Tax hardening — NEW vs OLD regime comparison + slab engine (FY 2025-26 / 2026-27 seeded for both regimes), Form 26AS reconciliation (PDF upload + book-vs-26AS view), quarterly advance-tax planner with 234B/234C warnings, ITR form wizard (1/2/3/4) auto-detecting from income sources, tax-aware net-of-tax inflow simulation flowing through goal + retirement projections via `cashflow_events.tax_treatment`
 - **Sprint 5** ⏳ SaaS infra — Razorpay billing, pricing tiers, Docker self-host, marketing + docs sites
 - **Sprint 6** ⏳ Launch — deploy, domain, legal, observability, backups, beta, public
 

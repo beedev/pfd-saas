@@ -16,6 +16,59 @@ countries later.
 
 ## Status
 
+**Sprint 4 complete.** Tax hardening — six focused phases bringing the
+filing-side of the dashboard to par with the planning side:
+
+- **Regime comparison engine** (Phase 1): `tax_slabs` + `tax_regime_config`
+  govt-data tables (NOT user-scoped — slabs are global), seeded for FY
+  2025-26 and 2026-27 across both NEW (default since FY 2024-25) and OLD
+  regimes. `src/lib/finance/tax-slabs.ts` is the pure compute lib:
+  standard deduction → slab tax → 87A rebate → 4% cess → total.
+  `/api/tax/regime-compare` aggregates salary + GST invoices + non-exempt
+  other-sources + rental into a slab-eligible gross, runs both regimes,
+  returns the recommendation with savings delta. `RegimeComparisonCard`
+  on `/tax` shows side-by-side with "Set as default" buttons that flip
+  `user_preferences.tax_regime_default`. Migration 0020.
+- **Form 26AS reconciliation** (Phase 2): new `form_26as_uploads` table
+  + `tds_credits.is_reconciled` flag. PDF upload to
+  `uploads/form-26as/<user>/<fy>-<ts>.pdf` with a best-effort regex
+  sweep over pdfjs-extracted text (govt template drift makes precise
+  parsing fragile — manual reconciliation flow always works as
+  fallback). Two-column `/tax/form-26as` view: books on the left,
+  26AS uploads on the right, ±₹1k tolerance banner. Migration 0021.
+- **Advance tax planner** (Phase 3): new `advance_tax_installments`
+  table auto-seeded with the 4 quarterly slots (15%/45%/75%/100% on
+  15 Jun/Sep/Dec/Mar). `projectAnnualTax()` shared helper mirrors
+  regime-compare math. `AdvanceTaxCard` shows a 4-up grid on `/tax`
+  with inline "Mark paid" buttons and a 234B/234C amber warning when
+  shortfall >10%. Exact penalty math deferred (slab-based, gnarly).
+  Migration 0022.
+- **ITR form selector + export** (Phase 4): new `itr_form_selection`
+  table (unique per user/fy). `src/lib/finance/itr-selector.ts` is the
+  pure rule engine — ITR-1 (Sahaj) for salary + 1 house + interest with
+  total ≤₹50L, ITR-2 for multiple houses or capital gains, ITR-3 for
+  any business/GST income, ITR-4 (Sugam) for presumptive ≤₹50L.
+  `/tax/itr-wizard` is a single-page questionnaire prefilled from a
+  `/detect` endpoint that reads salary_income, real_estate,
+  capital_gains, and gst invoices. ITR-1 has a bespoke Sahaj summary
+  export; ITR-2/3/4 delegate to the existing filing-pack ZIP.
+  Migration 0023.
+- **Tax-aware inflow simulation** (Phase 5): closes the Sprint 3.5
+  deferred. `cashflow_events.tax_treatment` (TAX_FREE / TAXABLE / TDS)
+  now flows through `goal-projection.ts` — `earmarkedInflowsForYear`
+  honours the treatment per event. Goal API auto-supplies the marginal
+  rate from regime-compare (flat effective-rate proxy for v1; per-year
+  slab-derived rate deferred). Retirement page year-by-year table
+  gains Gross/Tax/Net columns where Rental + Annuity + NPS are
+  TAXABLE and the SWP ladder stays TAX_FREE. Backward-compatible —
+  default 0% = unchanged behaviour.
+
+Design tenet that drove Sprint 4: **filing follows planning**. The
+dashboard already projected what the user *will earn*; Sprint 4 makes
+it project what the user *will keep*. The chain — regime choice →
+advance-tax cadence → ITR form → net-of-tax inflows — mirrors the
+real-world filing year so every screen has an obvious next step.
+
 **Sprint 3.5 complete.** Goals/Retirement architecture + IA regroup.
 Four focused phases on top of Sprint 3:
 
@@ -96,8 +149,9 @@ Sprint 2 deliverables (still in force):
   reaches every constraint, not just every query)
 
 Two-user data isolation verified end-to-end. See `ORCHESTRATOR_CONTEXT.md`
-(gitignored) for the multi-sprint roadmap. Sprint 4 (tax hardening) is
-next; Sprint 5-6 scoped phase-by-phase as we enter them.
+(gitignored) for the multi-sprint roadmap. Sprint 5 (deployment +
+docker-compose self-host scaffold) is next; Sprint 6 scoped when we get
+there.
 
 Deferred from Sprint 2:
 - Docker / docker-compose self-host scaffold (real SMTP via Gmail
@@ -109,13 +163,32 @@ Deferred from Sprint 3 / 3.5:
 - Migration of `timestamp` → `timestamptz` across all 50+ tables. Known
   tech debt — flagged when the per-tenant cron timezone bug surfaced in
   Sprint 2 Phase 5.
-- Tax-aware inflow simulation. `cashflow_events.tax_treatment` is
-  captured (TAX_FREE / TAXABLE / TDS) but Sprint 4 will compute the
-  tax impact on the income side of retirement and goals.
 - Cross-asset rebalance projection. Currently each asset class grows
   at its own assumed return; a more honest model would track the
   three-bucket cascade (equity / debt / cash) across the whole
-  portfolio. Sprint 4 or later.
+  portfolio. Sprint 5+ depending on demand.
+
+Deferred from Sprint 4:
+- **Surcharge brackets** (income >₹50L). Engine handles standard
+  deduction + slabs + 87A + 4% cess but not the 10/15/25/37% surcharge
+  layer on top.
+- **Per-deduction regime eligibility**. NEW regime currently shows ₹0
+  deductions (conservative); OLD shows everything. Refining requires a
+  `regime: 'NEW' | 'OLD' | 'BOTH'` flag on `tax_deductions` rows so
+  80CCD(2) employer NPS contributions count under NEW too.
+- **LTCG/STCG separately taxed**. Capital gains are surfaced as a
+  separate "taxed separately" chip on the regime card but not yet
+  layered into the total liability. Phase 4.5+ work.
+- **234B/234C exact penalty math**. Advance tax planner shows the
+  warning band; the slab-based interest calc is gnarly enough to be its
+  own ticket.
+- **Per-year slab-derived marginal rate**. Phase 5 uses a flat
+  effective-rate proxy for tax-aware projections; ideally the rate is
+  recomputed each projection year from the projected income for that
+  year.
+- **ITR form full e-filing JSON export**. Phase 4 picks the form and
+  exports the existing filing-pack ZIP; the schema-conformant
+  e-filing JSON each form requires is a sprint of its own.
 
 ## Key invariants (don't break these)
 
