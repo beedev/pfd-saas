@@ -184,6 +184,22 @@ export default function RetirementPage() {
   const [ladderStartAge, setLadderStartAge] = useState(60);
   // Three-bucket SWP — disabled by default; turn on to use the cascade model.
   const [bucketEnabled, setBucketEnabled] = useState(false);
+  // Year-by-year table toggle. The chart is good for shape; the table is
+  // what the user reaches for to answer "at age 85 is my corpus enough?".
+  const [runwayTableOpen, setRunwayTableOpen] = useState(false);
+  // Per-card collapse state. The retirement page is long — letting the
+  // user collapse sections they aren't focused on makes scanning easier.
+  // Defaults: heavy interactive sections open; secondary detail closed.
+  const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({
+    assets: true,
+    assumptions: true,
+    buckets: false,
+    projection: true,
+    runway: true,
+    incomeArrivals: true,
+  });
+  const toggleSection = (key: string) =>
+    setSectionOpen((p) => ({ ...p, [key]: !p[key] }));
   const [liquidPct, setLiquidPct] = useState(10);
   const [stablePct, setStablePct] = useState(30);
   const [growthPct, setGrowthPct] = useState(60);
@@ -954,9 +970,16 @@ export default function RetirementPage() {
 
       {/* Retirement assets section */}
       <Card>
-        <CardHeader>
+        <CardHeader
+          role="button"
+          tabIndex={0}
+          onClick={() => toggleSection('assets')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('assets'); } }}
+          className="cursor-pointer"
+        >
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
+              <span className="text-[var(--dxp-text-muted)]">{sectionOpen.assets ? '▼' : '▶'}</span>
               <Coins className="h-5 w-5 text-amber-600" />
               <div>
                 <h3 className="text-base font-bold text-[var(--dxp-text)]">Retirement Assets</h3>
@@ -987,48 +1010,58 @@ export default function RetirementPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {classes.map((cls) => {
-              const grows =
-                cls.assetClass === 'NPS' ? growthFlags.NPS
-                : cls.assetClass === 'ANNUITY_POLICIES' ? growthFlags.ANNUITY_POLICIES
-                : cls.assetClass === 'INSURANCE_POLICIES' ? growthFlags.INSURANCE_POLICIES
-                : cls.assetClass === 'REAL_ESTATE' ? growthFlags.REAL_ESTATE
-                : null;
-              const onToggleGrowth = (next: boolean) => {
-                if (cls.assetClass === 'PF') return; // PF produces no income
-                setGrowthFlags((p) => ({ ...p, [cls.assetClass]: next } as typeof p));
-                const key =
-                  cls.assetClass === 'NPS' ? 'npsIncomeGrows'
-                  : cls.assetClass === 'ANNUITY_POLICIES' ? 'annuityIncomeGrows'
-                  : cls.assetClass === 'INSURANCE_POLICIES' ? 'insuranceLadderIncomeGrows'
-                  : 'rentalIncomeGrows';
-                saveAssumption({ [key]: next });
-              };
-              return (
-                <ClassRow
-                  key={cls.assetClass}
-                  cls={cls}
-                  breakdown={projection.breakdown[cls.assetClass]}
-                  onPatch={patchSelection}
-                  incomeGrows={grows}
-                  onToggleGrowth={grows === null ? undefined : onToggleGrowth}
-                  inflationPct={inflation}
-                />
-              );
-            })}
-          </div>
-        </CardContent>
+        {sectionOpen.assets && (
+          <CardContent>
+            <div className="space-y-2">
+              {classes.map((cls) => {
+                const grows =
+                  cls.assetClass === 'NPS' ? growthFlags.NPS
+                  : cls.assetClass === 'ANNUITY_POLICIES' ? growthFlags.ANNUITY_POLICIES
+                  : cls.assetClass === 'INSURANCE_POLICIES' ? growthFlags.INSURANCE_POLICIES
+                  : cls.assetClass === 'REAL_ESTATE' ? growthFlags.REAL_ESTATE
+                  : null;
+                const onToggleGrowth = (next: boolean) => {
+                  if (cls.assetClass === 'PF') return; // PF produces no income
+                  setGrowthFlags((p) => ({ ...p, [cls.assetClass]: next } as typeof p));
+                  const key =
+                    cls.assetClass === 'NPS' ? 'npsIncomeGrows'
+                    : cls.assetClass === 'ANNUITY_POLICIES' ? 'annuityIncomeGrows'
+                    : cls.assetClass === 'INSURANCE_POLICIES' ? 'insuranceLadderIncomeGrows'
+                    : 'rentalIncomeGrows';
+                  saveAssumption({ [key]: next });
+                };
+                return (
+                  <ClassRow
+                    key={cls.assetClass}
+                    cls={cls}
+                    breakdown={projection.breakdown[cls.assetClass]}
+                    onPatch={patchSelection}
+                    incomeGrows={grows}
+                    onToggleGrowth={grows === null ? undefined : onToggleGrowth}
+                    inflationPct={inflation}
+                  />
+                );
+              })}
+            </div>
+          </CardContent>
+        )}
       </Card>
 
       {/* Assumptions */}
       <Card>
-        <CardHeader>
+        <CardHeader
+          role="button"
+          tabIndex={0}
+          onClick={() => toggleSection('assumptions')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('assumptions'); } }}
+          className="cursor-pointer"
+        >
           <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+            <span className="text-[var(--dxp-text-muted)]">{sectionOpen.assumptions ? '▼' : '▶'}</span>
             <Sunset className="h-5 w-5 text-[var(--dxp-brand)]" /> Assumptions
           </h3>
         </CardHeader>
+        {sectionOpen.assumptions && (
         <CardContent>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Current Age">
@@ -1097,14 +1130,22 @@ export default function RetirementPage() {
             </Field>
           </div>
         </CardContent>
+        )}
       </Card>
 
       {/* Three-bucket SWP allocation */}
       <Card>
-        <CardHeader>
+        <CardHeader
+          role="button"
+          tabIndex={0}
+          onClick={() => toggleSection('buckets')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('buckets'); } }}
+          className="cursor-pointer"
+        >
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-base font-bold text-[var(--dxp-text)]">
+              <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+                <span className="text-[var(--dxp-text-muted)]">{sectionOpen.buckets ? '▼' : '▶'}</span>
                 Three-bucket SWP {bucketEnabled ? '· ON' : '· OFF (single-rate)'}
               </h3>
               <p className="text-xs text-[var(--dxp-text-muted)]">
@@ -1120,7 +1161,9 @@ export default function RetirementPage() {
             </div>
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                // Don't let this propagate to the collapsible header
+                e.stopPropagation();
                 const next = !bucketEnabled;
                 setBucketEnabled(next);
                 saveAssumption({ bucketEnabled: next });
@@ -1135,7 +1178,7 @@ export default function RetirementPage() {
             </button>
           </div>
         </CardHeader>
-        {bucketEnabled && (
+        {sectionOpen.buckets && bucketEnabled && (
           <CardContent>
             {(() => {
               const total = liquidPct + stablePct + growthPct;
@@ -1218,12 +1261,22 @@ export default function RetirementPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <h3 className="text-base font-bold text-[var(--dxp-text)]">Net worth + income projection</h3>
+        <CardHeader
+          role="button"
+          tabIndex={0}
+          onClick={() => toggleSection('projection')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('projection'); } }}
+          className="cursor-pointer"
+        >
+          <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+            <span className="text-[var(--dxp-text-muted)]">{sectionOpen.projection ? '▼' : '▶'}</span>
+            Net worth + income projection
+          </h3>
           <p className="text-xs text-[var(--dxp-text-muted)]">
             From age {currentAge} to {targetAge} — corpus on left axis, annual income on right axis.
           </p>
         </CardHeader>
+        {sectionOpen.projection && (
         <CardContent>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -1272,12 +1325,20 @@ export default function RetirementPage() {
             </ResponsiveContainer>
           </div>
         </CardContent>
+        )}
       </Card>
 
       {/* Corpus runway — "how long will the money last after retirement?" */}
       <Card>
-        <CardHeader>
-          <h3 className="text-base font-bold text-[var(--dxp-text)]">
+        <CardHeader
+          role="button"
+          tabIndex={0}
+          onClick={() => toggleSection('runway')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('runway'); } }}
+          className="cursor-pointer"
+        >
+          <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+            <span className="text-[var(--dxp-text-muted)]">{sectionOpen.runway ? '▼' : '▶'}</span>
             Corpus runway after retirement
           </h3>
           <p className="text-xs text-[var(--dxp-text-muted)]">
@@ -1286,6 +1347,7 @@ export default function RetirementPage() {
             Annuity / rental income offsets each year&apos;s withdrawal.
           </p>
         </CardHeader>
+        {sectionOpen.runway && (
         <CardContent>
           <StatsDisplay
             currency="INR"
@@ -1474,7 +1536,103 @@ export default function RetirementPage() {
               </>
             )}
           </p>
+
+          {/* Year-by-year table — what the chart's shape implies, made
+              readable in numbers. The user asked: "is the money required
+              more than 1 crore at 85 — and can the corpus handle it?"
+              Now it's one row to scan, not an axis to squint at. */}
+          <div className="mt-4 border-t border-[var(--dxp-border)] pt-3">
+            <button
+              type="button"
+              onClick={() => setRunwayTableOpen((v) => !v)}
+              className="flex w-full items-center justify-between text-sm font-semibold text-[var(--dxp-text)] hover:text-[var(--dxp-brand)]"
+            >
+              <span>
+                {runwayTableOpen ? '▼' : '▶'} Year-by-year table ({projection.runwaySeries.length} rows)
+              </span>
+              <span className="text-xs font-normal text-[var(--dxp-text-muted)]">
+                {runwayTableOpen ? 'click to collapse' : 'click to expand'}
+              </span>
+            </button>
+            {runwayTableOpen && (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-[var(--dxp-border)] text-[var(--dxp-text-muted)]">
+                      <th className="px-2 py-1 text-left font-medium">Age</th>
+                      <th className="px-2 py-1 text-right font-medium">Expense need</th>
+                      <th className="px-2 py-1 text-right font-medium">Rental</th>
+                      <th className="px-2 py-1 text-right font-medium">Annuity</th>
+                      <th className="px-2 py-1 text-right font-medium">NPS</th>
+                      <th className="px-2 py-1 text-right font-medium">Ladder</th>
+                      <th className="px-2 py-1 text-right font-medium">Income total</th>
+                      <th className="px-2 py-1 text-right font-medium">Corpus growth</th>
+                      <th className="px-2 py-1 text-right font-medium">From corpus</th>
+                      <th className="px-2 py-1 text-right font-medium">Year-end balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projection.runwaySeries.map((r) => {
+                      const incomeTotal =
+                        r.rentalIncome + r.annuityIncome + r.npsIncome + r.ladderIncome;
+                      // Flag rows where the corpus dropped below the
+                      // year's expense — early-warning amber. And rows
+                      // where the corpus has gone negative — rose.
+                      const overdrawn = r.balance < 0;
+                      const tight = !overdrawn && r.balance < r.annualWithdrawal;
+                      return (
+                        <tr
+                          key={r.ageAtRetire}
+                          className={`border-b border-[var(--dxp-border)]/30 hover:bg-[var(--dxp-surface-alt)]/40 ${
+                            overdrawn ? 'bg-rose-50/40' : tight ? 'bg-amber-50/40' : ''
+                          }`}
+                        >
+                          <td className="px-2 py-1 font-mono">{r.ageAtRetire}</td>
+                          <td className="px-2 py-1 text-right font-mono text-rose-600">
+                            {formatINRShort(r.annualWithdrawal)}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {r.rentalIncome > 0 ? formatINRShort(r.rentalIncome) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {r.annuityIncome > 0 ? formatINRShort(r.annuityIncome) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {r.npsIncome > 0 ? formatINRShort(r.npsIncome) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono">
+                            {r.ladderIncome > 0 ? formatINRShort(r.ladderIncome) : '—'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono font-semibold">
+                            {formatINRShort(incomeTotal)}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono text-emerald-700">
+                            {formatINRShort(r.corpusGrowth)}
+                          </td>
+                          <td className="px-2 py-1 text-right font-mono text-amber-700">
+                            {r.corpusDraw > 0 ? formatINRShort(r.corpusDraw) : '—'}
+                          </td>
+                          <td
+                            className={`px-2 py-1 text-right font-mono font-semibold ${
+                              overdrawn ? 'text-rose-700' : 'text-[var(--dxp-text)]'
+                            }`}
+                          >
+                            {formatINRShort(r.balance)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-[10px] text-[var(--dxp-text-muted)]">
+                  Amber row = corpus balance is less than that year&apos;s expense need (tight).
+                  Rose row = corpus is negative (depleted).
+                </p>
+              </div>
+            )}
+          </div>
         </CardContent>
+        )}
       </Card>
 
       {/* Income arrivals during retirement — surfaces the cashflow_events
@@ -1483,10 +1641,17 @@ export default function RetirementPage() {
           via NPS / annuity / rental / ladder calculations above. Edits
           happen on /planning/cashflows. */}
       <Card>
-        <CardHeader>
+        <CardHeader
+          role="button"
+          tabIndex={0}
+          onClick={() => toggleSection('incomeArrivals')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('incomeArrivals'); } }}
+          className="cursor-pointer"
+        >
           <div className="flex items-start justify-between flex-wrap gap-3">
             <div>
               <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+                <span className="text-[var(--dxp-text-muted)]">{sectionOpen.incomeArrivals ? '▼' : '▶'}</span>
                 <Calendar className="h-5 w-5 text-[var(--dxp-brand)]" />
                 Income arrivals during retirement
               </h3>
@@ -1504,6 +1669,7 @@ export default function RetirementPage() {
             </Link>
           </div>
         </CardHeader>
+        {sectionOpen.incomeArrivals && (
         <CardContent>
           <StatsDisplay
             currency="INR"
@@ -1538,6 +1704,7 @@ export default function RetirementPage() {
             .
           </p>
         </CardContent>
+        )}
       </Card>
     </div>
   );
