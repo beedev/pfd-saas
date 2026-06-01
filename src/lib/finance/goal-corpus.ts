@@ -59,6 +59,11 @@ export interface CorpusContext {
    *  the user's chosen percentages. Falls back to
    *  DEFAULT_RETURN_PCT_BY_CLASS when a class isn't in the table. */
   classReturnOverrides: Record<string, number>;
+  /** Per-class flag: when true, instrument rates (FD interest_rate,
+   *  Small Savings interest_rate_percent, Chit xirr) take precedence
+   *  over the class rate. When false, the class rate applies to ALL
+   *  instruments in the class. Same key shape as classReturnOverrides. */
+  useInstrumentRate: Record<string, boolean>;
 }
 
 /**
@@ -117,8 +122,10 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
   // User's per-class rate overrides from the asset_class_returns table.
   // Maps {STOCKS: 12, MUTUAL_FUNDS: 11, ...}.
   const classReturnOverrides: Record<string, number> = {};
+  const useInstrumentRate: Record<string, boolean> = {};
   for (const r of returnOverrides) {
     classReturnOverrides[r.assetClass] = r.returnPct;
+    useInstrumentRate[r.assetClass] = r.useInstrumentRate;
   }
 
   const sipPerMfId = new Map<number, number>();
@@ -147,27 +154,29 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
     npsTotal: nps.reduce((s, n) => s + (n.totalValue || 0), 0),
     pfTotal: pf.reduce((s, p) => s + (p.totalBalance || 0), 0),
     // Itemized rows include each instrument's own assumed return rate
-    // where the underlying table exposes it. Falls back to the
-    // user-configured class default (from asset_class_returns), and
-    // further falls back to the compile-time constant if the user
-    // hasn't tuned it. So the precedence is:
-    //   instrument-level rate > user class override > hardcoded default.
+    // where the underlying table exposes it AND the class is set to
+    // honor per-instrument rates. The user toggles this per class in
+    // /settings. Precedence (top wins):
+    //   1. Instrument-level rate — only if useInstrumentRate[class] AND
+    //      the instrument actually has a non-zero rate set
+    //   2. User class override   (from asset_class_returns)
+    //   3. Compile-time default  (DEFAULT_RETURN_PCT_BY_CLASS)
     golds: gold.map((g) => ({
       id: g.id,
       value: g.currentValue ?? 0,
-      returnPct: defaultReturnPct('GOLD', classReturnOverrides),
+      returnPct: defaultReturnPct('GOLD', classReturnOverrides), // gold has no per-item rate concept
     })),
     fds: fds.map((f) => ({
       id: f.id,
       value: f.maturityAmountPaisa ?? f.principalPaisa,
-      returnPct: f.interestRate && f.interestRate > 0
+      returnPct: useInstrumentRate['FIXED_DEPOSITS'] && f.interestRate && f.interestRate > 0
         ? f.interestRate
         : defaultReturnPct('FIXED_DEPOSITS', classReturnOverrides),
     })),
     ssas: ssas.map((a) => ({
       id: a.id,
       value: a.currentBalancePaisa ?? 0,
-      returnPct: a.interestRatePercent && a.interestRatePercent > 0
+      returnPct: useInstrumentRate['SMALL_SAVINGS'] && a.interestRatePercent && a.interestRatePercent > 0
         ? a.interestRatePercent
         : defaultReturnPct('SMALL_SAVINGS', classReturnOverrides),
     })),
@@ -176,7 +185,9 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
       value: Math.round(
         c.chitValue * (1 - (c.foremanCommissionPct ?? 5) / 100),
       ),
-      returnPct: c.xirr && c.xirr > 0 ? c.xirr : defaultReturnPct('CHIT_FUNDS', classReturnOverrides),
+      returnPct: useInstrumentRate['CHIT_FUNDS'] && c.xirr && c.xirr > 0
+        ? c.xirr
+        : defaultReturnPct('CHIT_FUNDS', classReturnOverrides),
     })),
     policies: ins.map((p) => ({
       id: p.id,
@@ -190,6 +201,7 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
     sipPerMfId,
     mfIdSet: new Set(mfs.map((m) => m.id)),
     classReturnOverrides,
+    useInstrumentRate,
   };
 }
 

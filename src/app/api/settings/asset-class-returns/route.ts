@@ -69,18 +69,34 @@ export async function PATCH(request: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
     const body = await request.json();
-    const { assetClass, returnPct } = body;
-    if (typeof assetClass !== 'string' || typeof returnPct !== 'number') {
+    const { assetClass, returnPct, useInstrumentRate } = body;
+    if (typeof assetClass !== 'string') {
       return NextResponse.json(
-        { error: 'assetClass (string) and returnPct (number) required' },
+        { error: 'assetClass (string) required' },
         { status: 400 },
       );
     }
-    if (returnPct < 0 || returnPct > 50) {
-      return NextResponse.json(
-        { error: 'returnPct must be between 0 and 50' },
-        { status: 400 },
-      );
+    // Either field can be updated independently.
+    const update: { returnPct?: number; useInstrumentRate?: boolean; updatedAt: Date } = {
+      updatedAt: new Date(),
+    };
+    if (returnPct !== undefined) {
+      if (typeof returnPct !== 'number' || returnPct < 0 || returnPct > 50) {
+        return NextResponse.json(
+          { error: 'returnPct must be a number between 0 and 50' },
+          { status: 400 },
+        );
+      }
+      update.returnPct = returnPct;
+    }
+    if (useInstrumentRate !== undefined) {
+      if (typeof useInstrumentRate !== 'boolean') {
+        return NextResponse.json(
+          { error: 'useInstrumentRate must be a boolean' },
+          { status: 400 },
+        );
+      }
+      update.useInstrumentRate = useInstrumentRate;
     }
     await ensureSeeded(session.user.id);
     // Upsert: try update first, insert if no row exists for this class.
@@ -95,7 +111,7 @@ export async function PATCH(request: NextRequest) {
     if (existing.length) {
       await db
         .update(assetClassReturns)
-        .set({ returnPct, updatedAt: new Date() })
+        .set(update)
         .where(and(
           eq(assetClassReturns.assetClass, assetClass),
           eq(assetClassReturns.userId, session.user.id),
@@ -103,7 +119,8 @@ export async function PATCH(request: NextRequest) {
     } else {
       await db.insert(assetClassReturns).values({
         assetClass,
-        returnPct,
+        returnPct: update.returnPct ?? 8,
+        useInstrumentRate: update.useInstrumentRate ?? false,
         userId: session.user.id,
       });
     }

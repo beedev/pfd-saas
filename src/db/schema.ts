@@ -1152,6 +1152,12 @@ export const assetClassReturns = pgTable('asset_class_returns', {
   id: serial('id').primaryKey(),
   assetClass: text('asset_class').notNull(),
   returnPct: real('return_pct').notNull(),
+  /** When true, instrument rates (FD interest_rate, Small Savings
+   *  interest_rate_percent, Chit xirr) take precedence over the class
+   *  rate. When false, the class rate applies to ALL instruments in the
+   *  class — the conservative default. Only meaningful for FDs, Small
+   *  Savings, and Chit Funds; ignored for the other classes. */
+  useInstrumentRate: boolean('use_instrument_rate').notNull().default(false),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [

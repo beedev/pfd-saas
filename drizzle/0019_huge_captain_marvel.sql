@@ -1,0 +1,1 @@
+ALTER TABLE "asset_class_returns" ADD COLUMN "use_instrument_rate" boolean DEFAULT false NOT NULL;
