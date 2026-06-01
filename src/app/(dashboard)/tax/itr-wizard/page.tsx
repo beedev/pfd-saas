@@ -188,9 +188,11 @@ export default function ItrWizardPage() {
                   )}
                 </div>
               </div>
-              <Link href={`/api/tax/itr-export/${existing.selectedForm}?fy=${encodeURIComponent(fy)}`}>
-                <Button variant="secondary" size="sm">
-                  View export <ArrowRight className="ml-1 h-3 w-3" />
+              <Link
+                href={`/tax/${existing.selectedForm.toLowerCase().replace('-', '')}?fy=${encodeURIComponent(fy)}`}
+              >
+                <Button variant="primary" size="sm">
+                  Open {existing.selectedForm} walkthrough <ArrowRight className="ml-1 h-3 w-3" />
                 </Button>
               </Link>
             </div>
@@ -326,15 +328,22 @@ export default function ItrWizardPage() {
               Saved automatically. You can rerun the wizard any time — the answer for FY {fy} will
               be overwritten.
             </p>
-            <div className="mt-3 flex gap-2">
-              <Link href={`/api/tax/itr-export/${result.form}?fy=${encodeURIComponent(fy)}`}>
-                <Button variant="secondary" size="sm">
-                  View export <ArrowRight className="ml-1 h-3 w-3" />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {/* Sprint 4.1 — CTA to the form-specific walkthrough. The
+                  wizard already saved the selection; this opens the
+                  filer's home page for the chosen form. ITR-3 routes to
+                  the existing multi-page hub; ITR-1/2/4 go to the new
+                  Sprint 4.1 summary pages. */}
+              <Link
+                href={`/tax/${result.form.toLowerCase().replace('-', '')}?fy=${encodeURIComponent(fy)}`}
+              >
+                <Button variant="primary" size="sm">
+                  Continue to {result.form} walkthrough <ArrowRight className="ml-1 h-3 w-3" />
                 </Button>
               </Link>
-              <Link href="/tax/itr3">
+              <Link href={`/api/tax/itr-export/${result.form}?fy=${encodeURIComponent(fy)}`}>
                 <Button variant="secondary" size="sm">
-                  Go to ITR Filing dashboard
+                  View export JSON
                 </Button>
               </Link>
             </div>

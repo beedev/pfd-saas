@@ -127,7 +127,10 @@ const navigation: NavSection[] = [
       { name: 'Documents', href: '/tax/documents', icon: FolderOpen },
       { name: 'Filing Pack', href: '/tax/filing-pack', icon: Package },
       { name: 'ITR Wizard', href: '/tax/itr-wizard', icon: FileCheck2 },
-      { name: 'ITR Filing', href: '/tax/itr3', icon: FileText },
+      { name: 'ITR-1 Sahaj', href: '/tax/itr1', icon: FileText },
+      { name: 'ITR-2', href: '/tax/itr2', icon: FileText },
+      { name: 'ITR-3', href: '/tax/itr3', icon: FileText },
+      { name: 'ITR-4 Sugam', href: '/tax/itr4', icon: FileText },
     ],
   },
   {
