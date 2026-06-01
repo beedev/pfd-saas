@@ -92,12 +92,134 @@ export const userPreferences = pgTable('user_preferences', {
   // created them so existing users don't get redirected; they never saw
   // the wizard themselves).
   onboardedAt: timestamp('onboarded_at', { mode: 'date' }),
+  // Sprint 3.5 follow-up — optional personal-development module
+  // (daily habit/health tracker ported from personal-v1). Off by
+  // default since pfd-saas is finance-first; owner toggles it on
+  // per-user. When false the /health/* sidebar entries are hidden
+  // and the routes still respond 200 (no-op) so existing bookmarks
+  // never 500.
+  habitsEnabled: boolean('habits_enabled').notNull().default(false),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
 
 export type UserPreferences = typeof userPreferences.$inferSelect;
 export type NewUserPreferences = typeof userPreferences.$inferInsert;
+
+/**
+ * Transformation tracker — daily habits / health / journal / weight.
+ *
+ * Ported from personal-v1 (Sprint 3.5 follow-up). The model is a tree:
+ *   plan ─┬─ sections ─── items   (the checklist template)
+ *         └─ days ─── checks       (daily ticks against items)
+ *
+ * Five tables to mirror the v1 SQLite shape exactly, adapted for
+ * postgres + multi-tenancy:
+ *   - All five carry user_id NOT NULL FK CASCADE (same invariant as
+ *     every other domain table — Sprint 1 Phase 4).
+ *   - Per-user uniqueness on (plan, date) and (day, item).
+ *   - Timestamps are postgres `timestamp` (v1 stored unix-epoch
+ *     integers; the import script will translate).
+ *   - `kind` on items is 'check' | 'meal' | 'weight' | 'journal' |
+ *     'text' (v1 expanded over time; we accept the same set).
+ *
+ * Gated behind user_preferences.habits_enabled — when off, the
+ * /health sidebar entries are hidden and these tables are simply
+ * unused.
+ */
+export const transformationPlans = pgTable('transformation_plans', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  startDate: text('start_date').notNull(),       // ISO YYYY-MM-DD
+  dayCount: integer('day_count').notNull().default(100),
+  startWeightKg: real('start_weight_kg'),
+  goalWeightKg: real('goal_weight_kg'),
+  dailyCalorieTarget: integer('daily_calorie_target'),
+  dailyProteinTargetG: integer('daily_protein_target_g'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('transformation_plans_user_id_idx').on(table.userId),
+]);
+
+export const transformationSections = pgTable('transformation_sections', {
+  id: serial('id').primaryKey(),
+  planId: integer('plan_id').notNull().references(() => transformationPlans.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  /** Soft delete — items hidden from UI but checks history stays
+   *  intact so old days don't lose their context. */
+  deletedAt: timestamp('deleted_at', { mode: 'date' }),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('transformation_sections_user_id_idx').on(table.userId),
+  index('transformation_sections_plan_idx').on(table.planId),
+]);
+
+export const transformationItems = pgTable('transformation_items', {
+  id: serial('id').primaryKey(),
+  sectionId: integer('section_id').notNull().references(() => transformationSections.id, { onDelete: 'cascade' }),
+  label: text('label').notNull(),
+  /** 'check'   — boolean tick (default)
+   *  'meal'    — text + auto calorie/protein estimate
+   *  'weight'  — numeric kg entry
+   *  'journal' — free-form text
+   *  'text'    — short text answer */
+  kind: text('kind').notNull().default('check'),
+  /** JSON-encoded enum options for select-style items. NULL for free input. */
+  options: text('options'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  deletedAt: timestamp('deleted_at', { mode: 'date' }),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('transformation_items_user_id_idx').on(table.userId),
+  index('transformation_items_section_idx').on(table.sectionId),
+]);
+
+export const transformationDays = pgTable('transformation_days', {
+  id: serial('id').primaryKey(),
+  planId: integer('plan_id').notNull().references(() => transformationPlans.id, { onDelete: 'cascade' }),
+  date: text('date').notNull(),         // ISO YYYY-MM-DD
+  dayNumber: integer('day_number'),
+  currentWeightKg: real('current_weight_kg'),
+  journal: text('journal'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('transformation_days_user_id_idx').on(table.userId),
+  uniqueIndex('transformation_days_plan_date_unique').on(table.userId, table.planId, table.date),
+]);
+
+export const transformationChecks = pgTable('transformation_checks', {
+  id: serial('id').primaryKey(),
+  dayId: integer('day_id').notNull().references(() => transformationDays.id, { onDelete: 'cascade' }),
+  itemId: integer('item_id').notNull().references(() => transformationItems.id, { onDelete: 'cascade' }),
+  checked: boolean('checked').notNull().default(false),
+  /** Free-text value for kind='meal'/'journal'/'text' items. */
+  textValue: text('text_value'),
+  /** Populated by /api/health/transformation/estimate-nutrition (LLM
+   *  call). Stays null when the LLM endpoint isn't configured. */
+  estimatedCalories: integer('estimated_calories'),
+  estimatedProteinG: real('estimated_protein_g'),
+  estimationInput: text('estimation_input'),
+  estimatedAt: timestamp('estimated_at', { mode: 'date' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('transformation_checks_user_id_idx').on(table.userId),
+  uniqueIndex('transformation_checks_day_item_unique').on(table.userId, table.dayId, table.itemId),
+]);
+
+export type TransformationPlan = typeof transformationPlans.$inferSelect;
+export type NewTransformationPlan = typeof transformationPlans.$inferInsert;
+export type TransformationSection = typeof transformationSections.$inferSelect;
+export type TransformationItem = typeof transformationItems.$inferSelect;
+export type TransformationDay = typeof transformationDays.$inferSelect;
+export type TransformationCheck = typeof transformationChecks.$inferSelect;
 
 /**
  * Per-user cron job ledger. Drives the `/api/cron/tick` dispatcher

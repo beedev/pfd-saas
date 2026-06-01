@@ -33,9 +33,13 @@ export default async function DashboardLayout({
   }
 
   // Onboarding gate — has the user finished the wizard (or been
-  // backfilled)?
+  // backfilled)? Pull habits_enabled in the same query so the sidebar
+  // gate doesn't need a second round-trip.
   const prefs = await db
-    .select({ userId: userPreferences.userId })
+    .select({
+      userId: userPreferences.userId,
+      habitsEnabled: userPreferences.habitsEnabled,
+    })
     .from(userPreferences)
     .where(eq(userPreferences.userId, session.user.id))
     .limit(1);
@@ -43,6 +47,7 @@ export default async function DashboardLayout({
   if (prefs.length === 0) {
     redirect('/onboarding');
   }
+  const habitsEnabled = prefs[0].habitsEnabled === true;
 
   // GST sidebar gate.
   const bp = await db
@@ -54,7 +59,10 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
-      <Sidebar hasBusinessProfile={hasBusinessProfile} />
+      <Sidebar
+        hasBusinessProfile={hasBusinessProfile}
+        habitsEnabled={habitsEnabled}
+      />
       {/* On mobile the sidebar is replaced by a fixed top bar (h-14);
           pt-14 keeps the page content out from under it. md+ has the
           inline sidebar so no top padding needed. */}

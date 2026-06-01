@@ -40,6 +40,7 @@ import {
   Bell,
   CalendarCheck,
   Activity,
+  Sparkles,
 } from 'lucide-react';
 
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
@@ -108,6 +109,12 @@ const navigation: NavSection[] = [
     ],
   },
   {
+    section: 'Personal',
+    items: [
+      { name: 'Transformation', href: '/health/transformation', icon: Sparkles },
+    ],
+  },
+  {
     section: 'Income Tax',
     items: [
       { name: 'Deductions', href: '/tax', icon: Receipt },
@@ -149,6 +156,10 @@ type SidebarProps = {
   /** Whether the current user filed GST during onboarding. When false,
    *  the GST section is hidden — the rest of the app still loads. */
   hasBusinessProfile: boolean;
+  /** Whether the user has opted into the optional personal-development
+   *  modules (Transformation tracker, etc.). Off by default — pfd-saas
+   *  is finance-first. Hide the "Personal" section when false. */
+  habitsEnabled: boolean;
 };
 
 /**
@@ -157,12 +168,14 @@ type SidebarProps = {
  * Tailwind responsive classes — both elements exist in the DOM but
  * only one is visible at any width. Drawer state lives here.
  */
-export function Sidebar({ hasBusinessProfile }: SidebarProps) {
+export function Sidebar({ hasBusinessProfile, habitsEnabled }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const visibleNav = hasBusinessProfile
-    ? navigation
-    : navigation.filter((s) => s.section !== 'GST');
+  const visibleNav = navigation.filter((s) => {
+    if (s.section === 'GST' && !hasBusinessProfile) return false;
+    if (s.section === 'Personal' && !habitsEnabled) return false;
+    return true;
+  });
 
   // Close drawer when navigating to a new page. usePathname triggers a
   // re-render on navigation, so this side-effect runs naturally.
