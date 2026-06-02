@@ -14,6 +14,8 @@ import {
   Loader2,
   Camera,
   Check,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { LineChart as ReLineChart, Line, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
@@ -44,7 +46,7 @@ interface NPSAccount { id: number; totalValue: number }
 interface PFAccount { id: number; totalBalance: number }
 interface RealEstateProperty { id: number; currentValuation: number; mortgageAmount: number | null }
 interface InsurancePolicy { id: number; policyType: string; investmentValue: number | null }
-interface LiabilityRow { id: number; currentBalance: number }
+interface LiabilityRow { id: number; name: string; type: string; currentBalance: number }
 interface ChitFundRow {
   id: number;
   netContribution: number | null;
@@ -89,6 +91,9 @@ export default function NetWorthDashboard() {
   const [sparkline, setSparkline] = useState<Array<{ date: string; value: number }>>([]);
   const [hasTodaySnapshot, setHasTodaySnapshot] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  // Sprint 5.9d — net worth transparency: collapsible asset/liability
+  // breakdown directly under the hero tile.
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -287,7 +292,7 @@ export default function NetWorthDashboard() {
         </Card>
       )}
 
-      {/* Hero: total net worth */}
+      {/* Hero: total net worth + Sprint 5.9d transparency subtitle */}
       <Card className="border-l-4 border-l-[var(--dxp-brand)] bg-[var(--dxp-brand-light)]">
         <CardContent>
           <p className="text-xs font-bold uppercase tracking-widest text-[var(--dxp-brand-dark)] mb-1">
@@ -302,6 +307,25 @@ export default function NetWorthDashboard() {
               <p className="text-4xl font-bold font-mono text-[var(--dxp-brand-dark)]">
                 {formatINR(netWorthPaisa)}
               </p>
+              {/* Sprint 5.9d — assets − liabilities subtitle. Always shown
+                  even when liabilities are zero; clarifies the math. */}
+              <button
+                type="button"
+                onClick={() => setBreakdownOpen((v) => !v)}
+                className="mt-1 flex items-center gap-1 text-sm font-medium text-[var(--dxp-brand-dark)] hover:underline"
+              >
+                <span>
+                  {formatINR(totalAssetsPaisa)} assets
+                  {liabilitiesPaisa > 0 && (
+                    <> · {formatINR(liabilitiesPaisa)} liabilities</>
+                  )}
+                </span>
+                {breakdownOpen ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+              </button>
               <p
                 className={`mt-1 text-sm font-medium flex items-center gap-1 ${
                   netWorthGainPaisa >= 0 ? 'text-emerald-700' : 'text-rose-700'
@@ -314,6 +338,67 @@ export default function NetWorthDashboard() {
                 )}
                 {formatINR(netWorthGainPaisa)} ({formatPercent(netWorthGainPercent)}) unrealised
               </p>
+              {/* Sprint 5.9d — expanded breakdown: top 3-5 assets + all
+                  liabilities. */}
+              {breakdownOpen && (
+                <div className="mt-3 grid grid-cols-1 gap-3 rounded border border-[var(--dxp-brand-dark)]/20 bg-white/60 p-3 text-xs sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1 font-bold uppercase tracking-wider text-[var(--dxp-brand-dark)]">
+                      Top assets
+                    </p>
+                    <ul className="space-y-0.5 text-[var(--dxp-text)]">
+                      {([
+                        ['Real Estate', reValuePaisa],
+                        ['Mutual Funds', mfValuePaisa],
+                        ['Stocks', stocksValuePaisa],
+                        ['PF / EPF', pfValuePaisa],
+                        ['NPS', npsValuePaisa],
+                        ['Gold', goldValuePaisa],
+                        ['Insurance cash value', insCashPaisa],
+                        ['Chit funds', chitValuePaisa],
+                        ['Fixed Deposits', fdValuePaisa],
+                        ['Forex deposits', forexValuePaisa],
+                      ] as Array<[string, number]>)
+                        .filter(([, v]) => v > 0)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([label, value]) => (
+                          <li key={label} className="flex justify-between gap-2">
+                            <span className="text-[var(--dxp-text-secondary)]">{label}</span>
+                            <span className="font-mono">{formatINR(value)}</span>
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="mb-1 font-bold uppercase tracking-wider text-[var(--dxp-brand-dark)]">
+                      Liabilities ({debts.length})
+                    </p>
+                    {debts.length === 0 ? (
+                      <p className="text-[var(--dxp-text-muted)]">No outstanding debts.</p>
+                    ) : (
+                      <ul className="space-y-0.5 text-[var(--dxp-text)]">
+                        {debts.map((d) => (
+                          <li key={d.id} className="flex justify-between gap-2">
+                            <span className="text-[var(--dxp-text-secondary)]">
+                              {d.name || `Loan #${d.id}`}
+                            </span>
+                            <span className="font-mono text-rose-700">
+                              {formatINR(d.currentBalance)}
+                            </span>
+                          </li>
+                        ))}
+                        <li className="mt-1 flex justify-between border-t border-[var(--dxp-border)]/40 pt-1 font-semibold">
+                          <span>Total</span>
+                          <span className="font-mono text-rose-700">
+                            {formatINR(liabilitiesPaisa)}
+                          </span>
+                        </li>
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </CardContent>
