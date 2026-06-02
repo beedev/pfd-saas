@@ -50,6 +50,11 @@ import {
 } from 'recharts';
 
 import { CashflowTimeline } from '@/components/cashflow-timeline';
+import {
+  applyRetirementTaxBrackets,
+  DEFAULT_RETIREMENT_TAX_BRACKETS,
+  type RetirementTaxBracket,
+} from '@/lib/finance/retirement-tax';
 
 /* ─── types mirrored from /api/finance/retirement-assets ──────────────── */
 
@@ -228,12 +233,16 @@ export default function RetirementPage() {
   // strip so the user can see which events will fire during retirement.
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
 
-  // Sprint 4 Phase 5 — marginal-tax rate proxy pulled from
-  // /api/tax/regime-compare (effective rate under the recommended
-  // regime for the current FY). Applied in the runway simulation to
-  // TAXABLE income streams (rental, annuity, NPS). Ladder income
-  // (LIC endowments) is TAX_FREE under Section 10(10D).
-  const [marginalRatePct, setMarginalRatePct] = useState<number>(0);
+  // Sprint 5.8 — replaces the Sprint 4 Phase 5 flat marginal-rate
+  // proxy. We now use user-configurable slab brackets from
+  // user_preferences.retirement_tax_brackets. Applied PER YEAR in the
+  // runway simulation: each year's TAXABLE income (rental + annuity
+  // + NPS pension) gets bracket-aware tax via
+  // applyRetirementTaxBrackets(). Ladder income (LIC endowment) stays
+  // TAX_FREE under Section 10(10D).
+  const [retirementTaxBrackets, setRetirementTaxBrackets] = useState<
+    Array<{ threshold: number; ratePct: number }>
+  >(DEFAULT_RETIREMENT_TAX_BRACKETS);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -293,32 +302,23 @@ export default function RetirementPage() {
     })();
   }, []);
 
-  // Sprint 4 Phase 5 — fetch marginal-tax proxy once. Pulls the
-  // effective rate under the recommended regime for the *previous*
-  // FY (the one with actual filed data) — this is closer to what
-  // the user will pay in retirement than current-FY projections
-  // which may be incomplete.
+  // Sprint 5.8 — fetch user-configured retirement tax brackets.
+  // Falls back to DEFAULT_RETIREMENT_TAX_BRACKETS (0% to ₹10L, 15%
+  // ₹10L-₹30L, 25% above) on miss. Bracket math runs per year so the
+  // displayed Tax column reflects actual slab application, not a flat
+  // rate.
   useEffect(() => {
     (async () => {
       try {
-        const now = new Date();
-        const m = now.getMonth() + 1;
-        const y = now.getFullYear();
-        const startYear = (m >= 4 ? y : y - 1) - 1;
-        const fy = `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-        const r = await fetch(`/api/tax/regime-compare?fy=${encodeURIComponent(fy)}`);
+        const r = await fetch('/api/user-preferences');
         if (!r.ok) return;
         const d = await r.json();
-        const recommended = d.comparison?.recommendation;
-        const chosen =
-          recommended === 'NEW' ? d.comparison.new : d.comparison.old;
-        if (chosen?.effectiveRatePct != null) {
-          setMarginalRatePct(chosen.effectiveRatePct);
+        const bs = d.preferences?.retirementTaxBrackets;
+        if (Array.isArray(bs) && bs.length > 0) {
+          setRetirementTaxBrackets(bs as RetirementTaxBracket[]);
         }
       } catch (e) {
-        // Marginal rate stays 0 → no tax adjustment, table just shows
-        // gross == net which is acceptable behaviour.
-        console.error('Marginal rate fetch failed', e);
+        console.error('Retirement tax brackets fetch failed', e);
       }
     })();
   }, []);
@@ -1615,11 +1615,18 @@ export default function RetirementPage() {
                     {projection.runwaySeries.map((r) => {
                       const incomeTotal =
                         r.rentalIncome + r.annuityIncome + r.npsIncome + r.ladderIncome;
-                      // Sprint 4 Phase 5 — TAXABLE streams: rental,
-                      // annuity, NPS pension. TAX_FREE: ladder (Section
-                      // 10(10D)). Apply flat marginal rate as a proxy.
+                      // Sprint 5.8 — TAXABLE streams: rental, annuity,
+                      // NPS pension. TAX_FREE: ladder (Section
+                      // 10(10D)). Now bracket-aware via the user-
+                      // configured slabs. Input + output are in rupees
+                      // (runway-series is rupees), bracket lib uses
+                      // paisa internally — multiply in, divide out.
                       const taxableIncome = r.rentalIncome + r.annuityIncome + r.npsIncome;
-                      const taxOnIncome = Math.round((taxableIncome * marginalRatePct) / 100);
+                      const bracketResult = applyRetirementTaxBrackets(
+                        Math.round(taxableIncome * 100),
+                        retirementTaxBrackets,
+                      );
+                      const taxOnIncome = Math.round(bracketResult.taxPaisa / 100);
                       const netIncome = incomeTotal - taxOnIncome;
                       // Flag rows where the corpus dropped below the
                       // year's expense — early-warning amber. And rows
@@ -1678,12 +1685,28 @@ export default function RetirementPage() {
                 </table>
                 <p className="mt-2 text-[10px] text-[var(--dxp-text-muted)]">
                   Amber row = corpus balance is less than that year&apos;s expense need (tight).
-                  Rose row = corpus is negative (depleted).
-                  {marginalRatePct > 0 && (
-                    <>
-                      {' '}Income taxed at <strong>{marginalRatePct.toFixed(1)}%</strong> proxy marginal rate (your current effective rate under the recommended regime). Rental + Annuity + NPS pension are TAXABLE; Ladder (LIC endowment) is TAX_FREE under Section 10(10D). Simplification: flat rate applied across all years — real marginal varies with each year&apos;s income mix.
-                    </>
-                  )}
+                  Rose row = corpus is negative (depleted).{' '}
+                  Tax computed using slabs:{' '}
+                  {retirementTaxBrackets.map((b, i) => {
+                    const next = retirementTaxBrackets[i + 1];
+                    const upper = next ? next.threshold : null;
+                    return (
+                      <span key={i}>
+                        {b.ratePct}%{' '}
+                        {i === 0 && upper != null ? `up to ₹${(upper / 100000).toFixed(0)}L` : ''}
+                        {i > 0 && upper != null
+                          ? `₹${(b.threshold / 100000).toFixed(0)}L-₹${(upper / 100000).toFixed(0)}L`
+                          : ''}
+                        {upper == null ? `above ₹${(b.threshold / 100000).toFixed(0)}L` : ''}
+                        {i < retirementTaxBrackets.length - 1 ? ', ' : ''}
+                      </span>
+                    );
+                  })}
+                  . Rental + Annuity + NPS pension are TAXABLE; Ladder (LIC endowment) is
+                  TAX_FREE under Section 10(10D).{' '}
+                  <Link href="/settings" className="text-[var(--dxp-brand)] hover:underline">
+                    Edit in Settings →
+                  </Link>
                 </p>
               </div>
             )}

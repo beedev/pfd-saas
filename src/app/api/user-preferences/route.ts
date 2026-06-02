@@ -41,6 +41,8 @@ export async function GET() {
         disabilitySeverity: userPreferences.disabilitySeverity,
         isFamilyPensioner: userPreferences.isFamilyPensioner,
         isGovtEmployeeForNps: userPreferences.isGovtEmployeeForNps,
+        // Sprint 5.8 — retirement tax brackets
+        retirementTaxBrackets: userPreferences.retirementTaxBrackets,
         createdAt: userPreferences.createdAt,
         updatedAt: userPreferences.updatedAt,
       })
@@ -65,6 +67,8 @@ interface PatchBody {
   disabilitySeverity?: 'REGULAR' | 'SEVERE' | null;
   isFamilyPensioner?: boolean;
   isGovtEmployeeForNps?: boolean;
+  // Sprint 5.8d — retirement bracket editor
+  retirementTaxBrackets?: Array<{ threshold: number; ratePct: number }>;
 }
 
 export async function PATCH(request: NextRequest) {
@@ -95,6 +99,51 @@ export async function PATCH(request: NextRequest) {
     }
     if (typeof body.isFamilyPensioner === 'boolean') update.isFamilyPensioner = body.isFamilyPensioner;
     if (typeof body.isGovtEmployeeForNps === 'boolean') update.isGovtEmployeeForNps = body.isGovtEmployeeForNps;
+    // Sprint 5.8d — retirement tax brackets. Validate shape:
+    //   • array of {threshold:number,ratePct:number}
+    //   • length 1..8
+    //   • thresholds strictly ascending starting at 0
+    //   • rates 0..100
+    if (Array.isArray(body.retirementTaxBrackets)) {
+      const bs = body.retirementTaxBrackets;
+      if (bs.length < 1 || bs.length > 8) {
+        return NextResponse.json(
+          { error: 'retirementTaxBrackets must contain 1..8 entries' },
+          { status: 400 },
+        );
+      }
+      const sorted = [...bs].sort((a, b) => a.threshold - b.threshold);
+      if (sorted[0]?.threshold !== 0) {
+        return NextResponse.json(
+          { error: 'retirementTaxBrackets must start with threshold:0' },
+          { status: 400 },
+        );
+      }
+      for (let i = 0; i < sorted.length; i++) {
+        const b = sorted[i];
+        if (
+          typeof b.threshold !== 'number' ||
+          typeof b.ratePct !== 'number' ||
+          !Number.isFinite(b.threshold) ||
+          !Number.isFinite(b.ratePct) ||
+          b.threshold < 0 ||
+          b.ratePct < 0 ||
+          b.ratePct > 100
+        ) {
+          return NextResponse.json(
+            { error: `retirementTaxBrackets[${i}] is malformed` },
+            { status: 400 },
+          );
+        }
+        if (i > 0 && sorted[i].threshold <= sorted[i - 1].threshold) {
+          return NextResponse.json(
+            { error: 'retirementTaxBrackets thresholds must be strictly ascending' },
+            { status: 400 },
+          );
+        }
+      }
+      update.retirementTaxBrackets = sorted;
+    }
 
     if (Object.keys(update).length === 1) {
       return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
