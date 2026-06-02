@@ -3,6 +3,7 @@ import { PersonalModulesForm } from '@/components/forms/personal-modules-form';
 import { TelegramConnectionForm } from '@/components/forms/telegram-connection-form';
 import { AssetClassReturnsForm } from '@/components/forms/asset-class-returns-form';
 import { TaxSetupForm } from '@/components/forms/tax-setup-form';
+import { RetirementTaxBracketsForm } from '@/components/forms/retirement-tax-brackets-form';
 
 export default function SettingsPage() {
   return (
@@ -19,6 +20,7 @@ export default function SettingsPage() {
       <PersonalModulesForm />
       <TelegramConnectionForm />
       <AssetClassReturnsForm />
+      <RetirementTaxBracketsForm />
     </div>
   );
 }
