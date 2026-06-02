@@ -41,6 +41,7 @@ import type {
   CashflowFrequency,
   CashflowSourceKind,
   CashflowTaxTreatment,
+  EpfAccount,
   InsurancePolicy,
   MutualFund,
   NPSAccount,
@@ -51,6 +52,10 @@ import type {
   SIP,
   SmallSavingsAccount,
 } from '@/db';
+
+import { projectFutureValue } from './asset-projection';
+import type { AssetGrowthRates } from './asset-growth-rates';
+import { DEFAULT_GROWTH_RATES } from './asset-growth-rates';
 
 export interface DerivationInput {
   userId: string;
@@ -70,6 +75,16 @@ export interface DerivationInput {
   /** Joined for the SIP event label — "HSBC Value Fund SIP" not just
    *  "SIP #4". Indexed by mutualFundId for O(1) lookup. */
   mutualFunds: MutualFund[];
+  /** EPF accounts. Sprint 5.5b — project EPF corpus + monthly
+   *  contributions forward to retirement and emit one EPF_MATURITY
+   *  event per account. Pass an empty array if not loaded; the
+   *  function will simply emit no EPF events. */
+  epfAccounts?: EpfAccount[];
+  /** Per-class growth-rate overrides. When omitted, the
+   *  DEFAULT_GROWTH_RATES from asset-growth-rates.ts are used.
+   *  Sprint 5.5d — the calling route does a one-time getGrowthRates()
+   *  read and passes the result here, keeping this lib pure (no DB). */
+  growthRates?: AssetGrowthRates;
 }
 
 /* ─── helpers ───────────────────────────────────────────────────────── */
@@ -84,6 +99,27 @@ function addYears(iso: string, years: number): string {
 function isFutureDate(iso: string | null | undefined, today: string): boolean {
   if (!iso) return false;
   return iso > today;
+}
+
+/**
+ * Fractional years between two ISO dates. Used by the projection lib
+ * which accepts non-integer horizons.
+ */
+function yearsBetween(fromIso: string, toIso: string): number {
+  const a = new Date(fromIso).getTime();
+  const b = new Date(toIso).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+  return Math.max(0, (b - a) / MS_PER_YEAR);
+}
+
+/**
+ * INR formatter for projection-attribution notes. Keeps the rendered
+ * note compact (lakh/crore short forms would be nicer but we don't
+ * have an i18n abstraction in this lib yet).
+ */
+function rupees(paisa: number): string {
+  return `₹${Math.round(paisa / 100).toLocaleString('en-IN')}`;
 }
 
 /**
@@ -204,39 +240,61 @@ function deriveNps(
   retirement: RetirementAssumptions | null,
   today: string,
   userId: string,
+  growthRates: AssetGrowthRates,
 ): NewCashflowEvent[] {
   const out: NewCashflowEvent[] = [];
   if (!retirement) return out;
   const yearsToRetirement = Math.max(0, retirement.targetAge - retirement.currentAge);
   const retirementDate = addYears(today, yearsToRetirement);
+  const npsRate = growthRates.NPS;
 
   for (const acc of accounts) {
     if (acc.status && acc.status !== 'ACTIVE') continue;
     if (acc.tier !== 'TIER1') continue;
-    const corpus = acc.totalValue ?? 0;
-    if (corpus <= 0) continue;
+    const currentCorpus = acc.totalValue ?? 0;
+    if (currentCorpus <= 0 && (acc.monthlyContributionPaisa ?? 0) <= 0) continue;
 
-    // 60% lump sum withdrawal — tax-free per current NPS rules.
-    const lumpSum = Math.round(corpus * 0.6);
+    // Project corpus forward: balance side (currentCorpus grows at NPS
+    // rate) + contribution side (monthly contributions compounded).
+    // The horizon honours per-account expectedMaturityDate when set
+    // (a few users retire from NPS earlier than the global retirement
+    // assumption); otherwise fall back to the global retirement target.
+    const maturityIso = acc.expectedMaturityDate || retirementDate;
+    const horizonYears = yearsBetween(today, maturityIso);
+    const projection = projectFutureValue({
+      currentBalancePaisa: currentCorpus,
+      contributionPerPeriodPaisa: acc.monthlyContributionPaisa ?? 0,
+      periodsPerYear: 12,
+      annualRatePct: npsRate,
+      yearsToProject: horizonYears,
+    });
+    const projectedCorpus = projection.totalPaisa;
+
+    // 60/40 split applied on the PROJECTED corpus (not the current
+    // balance) — this is the Sprint 5.5b correction.
+    const lumpSum = Math.round(projectedCorpus * 0.6);
     out.push({
       userId,
       name: `NPS Tier-I lumpsum (${acc.accountNumber})`,
       sourceKind: 'NPS_LUMPSUM' satisfies CashflowSourceKind,
       sourceId: acc.id,
-      startDate: acc.expectedMaturityDate || retirementDate,
-      endDate: acc.expectedMaturityDate || retirementDate,
+      startDate: maturityIso,
+      endDate: maturityIso,
       amountPaisa: lumpSum,
       frequency: 'ONE_TIME' satisfies CashflowFrequency,
       growthPctPerYear: 0,
       taxTreatment: 'TAX_FREE' satisfies CashflowTaxTreatment,
       autoDerived: true,
-      notes: '60% withdrawal of corpus at retirement (NPS rule)',
+      notes:
+        `60% of projected corpus at retirement. ` +
+        `Projected ${rupees(projectedCorpus)}: ${rupees(projection.balanceComponentPaisa)} ` +
+        `from current corpus at ${npsRate}%, ${rupees(projection.contributionComponentPaisa)} ` +
+        `from ${rupees(acc.monthlyContributionPaisa ?? 0)}/mo contributions ` +
+        `over ${horizonYears.toFixed(1)} years.`,
     });
 
-    // 40% mandatory annuity. Approximation: 6% annual on the 40%
-    // corpus, paid monthly. ANNUITY_RATE is a placeholder — actual
-    // payout depends on the chosen annuity provider's quote.
-    const annuityCorpus = corpus - lumpSum;
+    // 40% mandatory annuity at 6% yield (provider quote varies).
+    const annuityCorpus = projectedCorpus - lumpSum;
     const ANNUITY_RATE = 0.06;
     const monthlyAnnuity = Math.round((annuityCorpus * ANNUITY_RATE) / 12);
     out.push({
@@ -244,14 +302,87 @@ function deriveNps(
       name: `NPS Tier-I annuity (${acc.accountNumber})`,
       sourceKind: 'NPS_ANNUITY' satisfies CashflowSourceKind,
       sourceId: acc.id,
-      startDate: acc.expectedMaturityDate || retirementDate,
+      startDate: maturityIso,
       endDate: null,
       amountPaisa: monthlyAnnuity,
       frequency: 'MONTHLY' satisfies CashflowFrequency,
       growthPctPerYear: 0,
       taxTreatment: 'TAXABLE' satisfies CashflowTaxTreatment,
       autoDerived: true,
-      notes: `40% of corpus × 6% annuity rate / 12 — recheck against provider quote`,
+      notes:
+        `40% of projected corpus (${rupees(annuityCorpus)}) × 6% annuity rate / 12. ` +
+        `Recheck against actual provider quote at retirement.`,
+    });
+  }
+  return out;
+}
+
+/**
+ * EPF — project current corpus + ongoing contributions to retirement
+ * and emit one EPF_MATURITY event per account (Sprint 5.5b new).
+ *
+ * Tax: EPF withdrawal at retirement is tax-free per sec 10(12) provided
+ * the member has 5+ years of continuous service. By the time a user
+ * reaches their target retirement age this is essentially always true,
+ * so we mark TAX_FREE. (Mid-career rollovers / partial withdrawals are
+ * out of scope here — those would need a separate event.)
+ */
+function deriveEpf(
+  accounts: EpfAccount[],
+  retirement: RetirementAssumptions | null,
+  today: string,
+  userId: string,
+  growthRates: AssetGrowthRates,
+): NewCashflowEvent[] {
+  const out: NewCashflowEvent[] = [];
+  if (!retirement) return out;
+  const yearsToRetirement = Math.max(0, retirement.targetAge - retirement.currentAge);
+  const retirementDate = addYears(today, yearsToRetirement);
+  const pfRate = growthRates.PF;
+
+  for (const acc of accounts) {
+    if (acc.isActive === false) continue;
+    // We use total_balance which already aggregates
+    // employee_balance + employer_balance + interest_balance per the
+    // schema convention. (Some accounts have only the totalBalance
+    // populated; trusting the aggregate keeps us robust to either case.)
+    const currentBalance = acc.totalBalance ?? 0;
+    const monthlyContrib = acc.monthlyContributionPaisa ?? 0;
+    if (currentBalance <= 0 && monthlyContrib <= 0) continue;
+
+    // PPF-extension dates only apply to PPF rows in epf_accounts (legacy
+    // — most PPF lives in small_savings now). For EPF proper, retire at
+    // the global retirement date.
+    const maturityIso = acc.ppfMaturityDate || retirementDate;
+    const horizonYears = yearsBetween(today, maturityIso);
+    const projection = projectFutureValue({
+      currentBalancePaisa: currentBalance,
+      contributionPerPeriodPaisa: monthlyContrib,
+      periodsPerYear: 12,
+      annualRatePct: pfRate,
+      yearsToProject: horizonYears,
+    });
+
+    if (projection.totalPaisa <= 0) continue;
+
+    out.push({
+      userId,
+      name: `${acc.accountType} maturity (${acc.accountNumber ?? acc.accountHolder})`,
+      sourceKind: 'EPF_MATURITY' satisfies CashflowSourceKind,
+      sourceId: acc.id,
+      startDate: maturityIso,
+      endDate: maturityIso,
+      amountPaisa: projection.totalPaisa,
+      frequency: 'ONE_TIME' satisfies CashflowFrequency,
+      growthPctPerYear: 0,
+      // EPF withdrawal at retirement (5+ years service) is tax-free.
+      taxTreatment: 'TAX_FREE' satisfies CashflowTaxTreatment,
+      autoDerived: true,
+      notes:
+        `Projected ${rupees(projection.totalPaisa)} at retirement: ` +
+        `${rupees(projection.balanceComponentPaisa)} from current corpus at ${pfRate}%, ` +
+        `${rupees(projection.contributionComponentPaisa)} from ${rupees(monthlyContrib)}/mo ` +
+        `contributions over ${horizonYears.toFixed(1)} years. Tax-free at retirement (5+ yrs service).`,
     });
   }
   return out;
@@ -259,9 +390,14 @@ function deriveNps(
 
 function deriveSmallSavings(
   accounts: SmallSavingsAccount[],
+  _retirement: RetirementAssumptions | null,
   today: string,
   userId: string,
+  growthRates: AssetGrowthRates,
 ): NewCashflowEvent[] {
+  // _retirement reserved for future per-scheme retirement-anchored
+  // logic (e.g., PPF extension blocks based on age). Currently each
+  // small-savings scheme uses its own maturityDate.
   const out: NewCashflowEvent[] = [];
 
   // Mapping from scheme → (sourceKind, taxTreatment). SCSS pays out
@@ -311,11 +447,93 @@ function deriveSmallSavings(
     const meta = KIND_BY_SCHEME[acc.schemeType];
     if (!meta) continue;
     if (!isFutureDate(acc.maturityDate, today)) continue;
-    if (acc.currentBalancePaisa <= 0) continue;
+    if (acc.currentBalancePaisa <= 0 && (acc.periodicContributionPaisa ?? 0) <= 0) continue;
 
-    // Conservative: use the current balance rather than projecting
-    // forward. The detail page already shows a projection — this is
-    // the cashflow event "minimum maturity value".
+    // Per-scheme rate priority:
+    //   1. Per-instrument interest_rate_percent (govt-set rate locked
+    //      at account opening — the closest thing to truth we have).
+    //   2. SMALL_SAVINGS class rate from asset-growth-rates as a fallback
+    //      when the instrument's rate is zero / unset.
+    const ratePct =
+      acc.interestRatePercent > 0
+        ? acc.interestRatePercent
+        : growthRates.SMALL_SAVINGS;
+
+    const horizonYears = yearsBetween(today, acc.maturityDate);
+
+    // Compute the effective contribution horizon per scheme:
+    //   • PPF / VPF — contribute until maturity (full horizon).
+    //   • SSY — contributions stop at child age 14 (then the corpus
+    //           continues to grow but no new deposits). We approximate
+    //           by capping years at min(horizonYears, 14). The user
+    //           can refine this on the detail page if it matters.
+    //   • NSC / KVP — lumpsum schemes. Even if a non-zero periodic
+    //           contribution is recorded, it shouldn't apply post-open.
+    //           We zero out the contribution stream here so the
+    //           projection is pure compound interest on principal.
+    let contributionPerPeriod = acc.periodicContributionPaisa ?? 0;
+    let contributionYears = horizonYears;
+    if (acc.schemeType === 'NSC' || acc.schemeType === 'KVP') {
+      contributionPerPeriod = 0;
+    } else if (acc.schemeType === 'SSY') {
+      // Simplification noted: contribution years capped at 14 (SSY
+      // rule). For high precision we'd need the child's DOB + age-14
+      // arithmetic per beneficiary.
+      contributionYears = Math.min(horizonYears, 14);
+    }
+
+    // For SSY when contributionYears < horizonYears we run TWO
+    // projections: (a) contribution stream up to contributionYears,
+    // (b) compound the resulting corpus from contributionYears to
+    // maturity at the same rate, no further deposits.
+    let projectedPaisa = 0;
+    let breakdownNote: string;
+    const periodsPerYear: 1 | 12 =
+      acc.contributionFrequency === 'YEARLY' ? 1 : 12;
+
+    if (contributionYears < horizonYears) {
+      const phaseA = projectFutureValue({
+        currentBalancePaisa: acc.currentBalancePaisa,
+        contributionPerPeriodPaisa: contributionPerPeriod,
+        periodsPerYear,
+        annualRatePct: ratePct,
+        yearsToProject: contributionYears,
+      });
+      const phaseB = projectFutureValue({
+        currentBalancePaisa: phaseA.totalPaisa,
+        contributionPerPeriodPaisa: 0,
+        periodsPerYear,
+        annualRatePct: ratePct,
+        yearsToProject: horizonYears - contributionYears,
+      });
+      projectedPaisa = phaseB.totalPaisa;
+      breakdownNote =
+        `Projected ${rupees(projectedPaisa)} at ${acc.maturityDate}: ` +
+        `${rupees(phaseA.balanceComponentPaisa)} from current balance + ` +
+        `${rupees(phaseA.contributionComponentPaisa)} from ${rupees(contributionPerPeriod)}/` +
+        `${periodsPerYear === 12 ? 'mo' : 'yr'} contributions for ${contributionYears.toFixed(1)}y, ` +
+        `then compounded at ${ratePct}% for the remaining ${(horizonYears - contributionYears).toFixed(1)}y. ` +
+        `(SSY contributions stop at child age 14 — approximated.)`;
+    } else {
+      const proj = projectFutureValue({
+        currentBalancePaisa: acc.currentBalancePaisa,
+        contributionPerPeriodPaisa: contributionPerPeriod,
+        periodsPerYear,
+        annualRatePct: ratePct,
+        yearsToProject: horizonYears,
+      });
+      projectedPaisa = proj.totalPaisa;
+      const contribNote =
+        contributionPerPeriod > 0
+          ? `${rupees(proj.contributionComponentPaisa)} from ${rupees(contributionPerPeriod)}/` +
+            `${periodsPerYear === 12 ? 'mo' : 'yr'} contributions`
+          : `no recurring contributions (lumpsum scheme)`;
+      breakdownNote =
+        `Projected ${rupees(projectedPaisa)} at ${acc.maturityDate}: ` +
+        `${rupees(proj.balanceComponentPaisa)} from current balance at ${ratePct}%, ${contribNote} ` +
+        `over ${horizonYears.toFixed(1)} years.`;
+    }
+
     out.push({
       userId,
       name: `${acc.schemeType} maturity (${acc.accountNumber})`,
@@ -323,12 +541,12 @@ function deriveSmallSavings(
       sourceId: acc.id,
       startDate: acc.maturityDate,
       endDate: acc.maturityDate,
-      amountPaisa: acc.currentBalancePaisa,
+      amountPaisa: projectedPaisa,
       frequency: 'ONE_TIME' satisfies CashflowFrequency,
       growthPctPerYear: 0,
       taxTreatment: meta.tax,
       autoDerived: true,
-      notes: `Current balance at ${acc.maturityDate}; projection not applied (conservative).`,
+      notes: breakdownNote,
     });
   }
   return out;
@@ -469,12 +687,30 @@ function deriveSips(sips: SIP[], mfs: MutualFund[], userId: string): NewCashflow
  * the canonical "what the auto-derive layer thinks is going on".
  */
 export function deriveCashflowEvents(input: DerivationInput): NewCashflowEvent[] {
-  const { userId, today, insurance, npsAccounts, smallSavings, realEstate, salaryIncome, retirement, sips, mutualFunds } = input;
+  const {
+    userId,
+    today,
+    insurance,
+    npsAccounts,
+    smallSavings,
+    realEstate,
+    salaryIncome,
+    retirement,
+    sips,
+    mutualFunds,
+    epfAccounts,
+    growthRates,
+  } = input;
+  // Fall back to compile-time defaults if the caller didn't preload
+  // per-user rates. Production callers (api/cashflow-events/derive)
+  // always preload; this default keeps tests / dev tools simple.
+  const rates: AssetGrowthRates = growthRates ?? { ...DEFAULT_GROWTH_RATES };
   return [
     ...deriveInsuranceMaturities(insurance, today, userId),
     ...deriveInsuranceAnnuities(insurance, userId),
-    ...deriveNps(npsAccounts, retirement, today, userId),
-    ...deriveSmallSavings(smallSavings, today, userId),
+    ...deriveNps(npsAccounts, retirement, today, userId, rates),
+    ...deriveEpf(epfAccounts ?? [], retirement, today, userId, rates),
+    ...deriveSmallSavings(smallSavings, retirement, today, userId, rates),
     ...deriveRentalIncome(realEstate, today, userId),
     ...deriveSalary(salaryIncome, retirement, today, userId),
     ...deriveSips(sips, mutualFunds, userId),

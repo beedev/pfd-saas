@@ -30,6 +30,7 @@ import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import {
   cashflowEvents,
   db,
+  epfAccounts,
   insurancePolicies,
   mutualFunds,
   npsAccounts,
@@ -44,6 +45,7 @@ import {
   deriveCashflowEvents,
   type DerivationInput,
 } from '@/lib/finance/cashflow-derivation';
+import { getGrowthRates } from '@/lib/finance/asset-growth-rates';
 
 export async function POST() {
   const session = await auth();
@@ -52,9 +54,10 @@ export async function POST() {
     const userId = session.user.id;
     const today = new Date().toISOString().slice(0, 10);
 
-    // Fetch all source rows in parallel — eight independent queries, all
-    // scoped by user_id. sips + mutualFunds added for the SIP-as-cashflow
-    // derivation.
+    // Fetch all source rows in parallel — scoped by user_id. EPF accounts
+    // added in Sprint 5.5b for the new EPF_MATURITY derivation. Growth
+    // rates loaded centrally so cashflow + retirement-assets share a
+    // single source of truth (Sprint 5.5d).
     const [
       insurance,
       nps,
@@ -64,6 +67,8 @@ export async function POST() {
       retirementRows,
       sipRows,
       mfRows,
+      epfRows,
+      growthRates,
     ] = await Promise.all([
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
@@ -73,6 +78,8 @@ export async function POST() {
       db.select().from(retirementAssumptions).where(eq(retirementAssumptions.userId, userId)).limit(1),
       db.select().from(sips).where(eq(sips.userId, userId)),
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
+      db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
+      getGrowthRates(userId),
     ]);
 
     const input: DerivationInput = {
@@ -86,6 +93,8 @@ export async function POST() {
       retirement: retirementRows[0] || null,
       sips: sipRows,
       mutualFunds: mfRows,
+      epfAccounts: epfRows,
+      growthRates,
     };
     const candidates = deriveCashflowEvents(input);
 
@@ -235,6 +244,7 @@ export async function POST() {
         salaryIncome: salaries.length,
         retirementAssumptionsLoaded: retirementRows.length > 0,
         sips: sipRows.filter((s) => s.status === 'ACTIVE').length,
+        epfAccounts: epfRows.length,
       },
     });
   } catch (err) {

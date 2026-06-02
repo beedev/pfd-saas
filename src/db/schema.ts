@@ -1228,6 +1228,12 @@ export type CashflowSourceKind =
   | 'PENSION'
   | 'NPS_LUMPSUM'
   | 'NPS_ANNUITY'
+  // Sprint 5.5b — EPF corpus withdrawn at retirement (tax-free if
+  // 5+ years of continuous service, which it always is by the time
+  // we project a retirement maturity). Distinct from PPF_MATURITY
+  // because EPF lives in `epf_accounts` while PPF lives in
+  // `small_savings_accounts`.
+  | 'EPF_MATURITY'
   | 'PPF_MATURITY'
   | 'SSY_MATURITY'
   | 'NSC_MATURITY'
