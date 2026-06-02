@@ -402,7 +402,12 @@ function ScheduleCard({
           <Icon className="mt-1 h-4 w-4 shrink-0 text-gray-500" />
           <div>
             <h3 className="text-sm font-bold text-gray-900">{title}</h3>
-            <p className="mt-1 text-xs text-gray-600">{summary}</p>
+            {/* `summary` is React.ReactNode and call sites pass <div>
+                trees (e.g. Schedule BP's gross-receipts block). Must be
+                a <div> not a <p> — phrase content can't contain block
+                children; the browser auto-closes the <p> and React
+                throws a hydration mismatch. */}
+            <div className="mt-1 text-xs text-gray-600">{summary}</div>
           </div>
         </div>
         <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusBadge.color}`}>
