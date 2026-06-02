@@ -42,6 +42,7 @@ import type {
   CashflowSourceKind,
   CashflowTaxTreatment,
   EpfAccount,
+  ForexDeposit,
   InsurancePolicy,
   MutualFund,
   NPSAccount,
@@ -85,6 +86,18 @@ export interface DerivationInput {
    *  event per account. Pass an empty array if not loaded; the
    *  function will simply emit no EPF events. */
   epfAccounts?: EpfAccount[];
+  /** Forex deposits (Sprint 5.10). Each ACTIVE deposit with a future
+   *  maturity_date becomes a one-time FOREX_MATURITY event at maturity.
+   *  Foreign amounts converted to INR at derivation time via the rate
+   *  map below. Deposits without a maturity_date (ongoing savings) are
+   *  skipped — they have no payout event to surface. */
+  forexDeposits?: ForexDeposit[];
+  /** Live FX rates keyed by 3-letter ISO currency code, e.g.
+   *  { USD: 95.27, EUR: 102.4 }. Caller pre-resolves via
+   *  getFxRatesToInr(); missing keys cause the corresponding deposit
+   *  to be skipped (we won't fabricate an event with an unknown
+   *  exchange rate). */
+  fxRates?: Record<string, number>;
   /** Per-class growth-rate overrides. When omitted, the
    *  DEFAULT_GROWTH_RATES from asset-growth-rates.ts are used.
    *  Sprint 5.5d — the calling route does a one-time getGrowthRates()
@@ -693,6 +706,65 @@ function deriveSips(sips: SIP[], mfs: MutualFund[], userId: string): NewCashflow
 }
 
 /**
+ * Sprint 5.10e — forex deposit maturities.
+ *
+ * Each ACTIVE deposit with a future `maturity_date` becomes a one-time
+ * FOREX_MATURITY event at the maturity date. The INR amount is the
+ * foreign principal converted at the rate present at derivation time.
+ *
+ * Documented simplification: we do NOT project future FX rates. The
+ * INR payout is computed at TODAY's rate, then surfaced AT maturity.
+ * Forecasting USD/INR is genuinely hard (PPP vs interest-rate parity
+ * argue different directions); a flat-rate projection is the most
+ * honest "we don't know" stance. The asset-class growth rate (FOREX:
+ * 5%) handles the long-run drift in the projection layer separately.
+ *
+ * Deposits without a maturity_date (ongoing savings, "rainy day USD
+ * stash") are skipped — they have no payout event. Their balance still
+ * shows on the net-worth tile via the live-rate path.
+ *
+ * Currencies with no live rate in `fxRates` are also skipped (we won't
+ * fabricate an event with an unknown exchange rate) — the UI surfaces
+ * "rate unavailable" so the user can refresh and re-derive.
+ */
+function deriveForexDeposits(
+  deposits: ForexDeposit[],
+  today: string,
+  userId: string,
+  fxRates: Record<string, number>,
+): NewCashflowEvent[] {
+  const out: NewCashflowEvent[] = [];
+  for (const d of deposits) {
+    if (d.status !== 'ACTIVE') continue;
+    if (!isFutureDate(d.maturityDate, today)) continue;
+    const rate = fxRates[d.currencyCode.toUpperCase()];
+    if (!Number.isFinite(rate) || rate <= 0) continue;
+    const amount = parseFloat(d.amountInCurrency as unknown as string);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const amountPaisa = Math.round(amount * rate * 100);
+    out.push({
+      userId,
+      name: `Forex maturity — ${d.bankName} (${d.currencyCode})`,
+      sourceKind: 'FOREX_MATURITY' as CashflowSourceKind,
+      sourceId: d.id,
+      startDate: d.maturityDate!, // filter guarantees non-null + future
+      endDate: null,
+      amountPaisa,
+      frequency: 'ONE_TIME' as CashflowFrequency,
+      growthPctPerYear: 0, // see lib-level note above re: flat FX rate
+      // TAXABLE proxy — foreign-deposit interest is generally taxable
+      // for residents, and any FX gain on principal is too. The exact
+      // breakdown depends on NRE vs NRO + residency; TAXABLE here
+      // nudges the planning layer to plan for it.
+      taxTreatment: 'TAXABLE' as CashflowTaxTreatment,
+      autoDerived: true,
+      notes: `${amount.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${d.currencyCode} at live rate ₹${rate.toFixed(4)}/${d.currencyCode}. INR amount fixed at derivation time (no FX projection)`,
+    });
+  }
+  return out;
+}
+
+/**
  * Derive cashflow event candidates from a snapshot of the user's
  * portfolio. Pure: no DB, no time-of-day dependence except `today`.
  *
@@ -713,6 +785,8 @@ export function deriveCashflowEvents(input: DerivationInput): NewCashflowEvent[]
     sips,
     mutualFunds,
     epfAccounts,
+    forexDeposits,
+    fxRates,
     growthRates,
   } = input;
   // Fall back to compile-time defaults if the caller didn't preload
@@ -728,5 +802,6 @@ export function deriveCashflowEvents(input: DerivationInput): NewCashflowEvent[]
     ...deriveRentalIncome(realEstate, today, userId),
     ...deriveSalary(salaryIncome, retirement, today, userId),
     ...deriveSips(sips, mutualFunds, userId),
+    ...deriveForexDeposits(forexDeposits ?? [], today, userId, fxRates ?? {}),
   ];
 }

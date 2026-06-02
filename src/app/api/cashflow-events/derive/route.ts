@@ -31,6 +31,7 @@ import {
   cashflowEvents,
   db,
   epfAccounts,
+  forexDeposits,
   insurancePolicies,
   mutualFunds,
   npsAccounts,
@@ -46,6 +47,7 @@ import {
   type DerivationInput,
 } from '@/lib/finance/cashflow-derivation';
 import { getGrowthRates } from '@/lib/finance/asset-growth-rates';
+import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 
 export async function POST() {
   const session = await auth();
@@ -68,6 +70,7 @@ export async function POST() {
       sipRows,
       mfRows,
       epfRows,
+      forexRows,
       growthRates,
     ] = await Promise.all([
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
@@ -79,8 +82,15 @@ export async function POST() {
       db.select().from(sips).where(eq(sips.userId, userId)),
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
       db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
+      db.select().from(forexDeposits).where(eq(forexDeposits.userId, userId)),
       getGrowthRates(userId),
     ]);
+
+    // Sprint 5.10e — resolve live FX rates for the union of currencies
+    // the user holds in forex_deposits. Empty array short-circuits to
+    // {} so we don't make an empty Yahoo call.
+    const forexCcys = Array.from(new Set(forexRows.map((r) => r.currencyCode)));
+    const fxRates = forexCcys.length > 0 ? await getFxRatesToInr(forexCcys) : {};
 
     const input: DerivationInput = {
       userId,
@@ -94,6 +104,8 @@ export async function POST() {
       sips: sipRows,
       mutualFunds: mfRows,
       epfAccounts: epfRows,
+      forexDeposits: forexRows,
+      fxRates,
       growthRates,
     };
     const candidates = deriveCashflowEvents(input);
@@ -245,6 +257,8 @@ export async function POST() {
         retirementAssumptionsLoaded: retirementRows.length > 0,
         sips: sipRows.filter((s) => s.status === 'ACTIVE').length,
         epfAccounts: epfRows.length,
+        forexDeposits: forexRows.filter((d) => d.status === 'ACTIVE').length,
+        fxRatesResolved: Object.keys(fxRates).length,
       },
     });
   } catch (err) {

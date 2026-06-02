@@ -1250,6 +1250,16 @@ export type CashflowSourceKind =
    *  (yearlyContributionForGoal); SIP cashflow events are
    *  goal_id=NULL to avoid double-counting. */
   | 'SIP'
+  /** Sprint 5.10 — foreign-currency deposit matures on its maturity
+   *  date, lands in the user's INR balance at the FX rate captured at
+   *  derivation time. Treated as TAXABLE proxy because foreign-deposit
+   *  interest is generally taxable for Indian residents, and any FX
+   *  gain on principal is also typically taxable as capital gain — but
+   *  the exact slice depends on residency, account type (NRE vs NRO),
+   *  and whether the gain is reinvested. The TAXABLE label is a
+   *  conservative default that nudges users to plan for it rather than
+   *  silently treating it as TAX_FREE. */
+  | 'FOREX_MATURITY'
   | 'OTHER';
 
 export type CashflowFrequency = 'ONE_TIME' | 'MONTHLY' | 'YEARLY';

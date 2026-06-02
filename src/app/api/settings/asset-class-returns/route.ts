@@ -41,6 +41,9 @@ const DEFAULTS: Array<{ assetClass: string; returnPct: number }> = [
   { assetClass: 'CHIT_FUNDS', returnPct: 6 },
   { assetClass: 'REAL_ESTATE', returnPct: 6 },
   { assetClass: 'INSURANCE_POLICIES', returnPct: 5 },
+  // Sprint 5.10 — forex deposits. See asset-growth-rates-constants.ts
+  // for the 5% rationale (INR depreciation drift ≈ deposit interest).
+  { assetClass: 'FOREX', returnPct: 5 },
 ];
 
 async function ensureSeeded(userId: string): Promise<void> {

@@ -40,6 +40,7 @@ const LABELS: Record<string, string> = {
   CHIT_FUNDS: 'Chit Funds',
   REAL_ESTATE: 'Real Estate',
   INSURANCE_POLICIES: 'Insurance Policies',
+  FOREX: 'Forex Deposits',
 };
 
 // Hint text per class — concise, sourced from typical Indian rates
@@ -58,6 +59,7 @@ const HINTS: Record<string, string> = {
   CHIT_FUNDS: 'Historical XIRR not guaranteed — plan low',
   REAL_ESTATE: 'Indian residential ~5–7% appreciation',
   INSURANCE_POLICIES: 'LIC endowment ~5% incl. bonus',
+  FOREX: 'Foreign-currency deposits ~5% — INR depreciation ≈ interest',
 };
 
 // Only itemized classes have a meaningful per-instrument rate concept
@@ -83,6 +85,7 @@ const ORDER = [
   'CHIT_FUNDS',
   'REAL_ESTATE',
   'INSURANCE_POLICIES',
+  'FOREX',
 ];
 
 export function AssetClassReturnsForm() {

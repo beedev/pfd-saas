@@ -34,6 +34,13 @@ export const DEFAULT_GROWTH_RATES = {
   FIXED_DEPOSITS: 7,
   CHIT_FUNDS: 6,
   INSURANCE_POLICIES: 5,
+  // Sprint 5.10 — forex deposits. Conservative 5% real-return assumption
+  // is a wash with INR depreciation against major currencies historically
+  // (~3–4% USD vs INR drift annually) plus the deposit's own interest
+  // (1–4%). Captures the "your dollars don't disappear but they don't
+  // outpace inflation either" intuition. Override in /settings if you
+  // believe USD/EUR appreciation is part of your thesis.
+  FOREX: 5,
 } as const;
 
 export type AssetClassKey = keyof typeof DEFAULT_GROWTH_RATES;
