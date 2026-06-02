@@ -2112,6 +2112,14 @@ export const liabilities = pgTable('liabilities', {
   purposeOfLoan: text('purpose_of_loan'),
   documentPath: text('document_path'),
   notes: text('notes'),
+  // Sprint 5.9a — auto-deduction flags. When true, the loan's
+  // FY-aggregated principal/interest splits (computed from the
+  // amortization schedule) flow into Sec 80C / Sec 24(b) tax aggregates
+  // without forcing the user to also create manual deduction rows.
+  // Defaults: false for new rows; the migration auto-flips both flags
+  // to true for existing HOME_LOAN rows.
+  principalQualifies80c: boolean('principal_qualifies_80c').notNull().default(false),
+  interestQualifies24b: boolean('interest_qualifies_24b').notNull().default(false),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
