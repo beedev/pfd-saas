@@ -23,7 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 import {
   db,
   salaryIncome,
@@ -34,11 +34,19 @@ import {
   taxSlabs,
   taxRegimeConfig,
   userPreferences,
+  invoices,
+  itrFormSelection,
   type TaxRegime,
 } from '@/db';
 import { auth } from '@/auth';
 import { computeItr2Summary } from '@/lib/finance/itr2-summary';
 import type { CapitalGainRow, CgAssetType, CgGainType } from '@/lib/finance/capital-gains-tax';
+
+function fyDateRange(fy: string): [string, string] {
+  const [start] = fy.split('-');
+  const startYear = parseInt(start, 10);
+  return [`${startYear}-04-01`, `${startYear + 1}-03-31`];
+}
 
 /** Map schema `assetType` codes to the lib's CgAssetType. The lib's
  *  type covers both names — STOCKS in DB maps to STOCKS in lib. */
@@ -66,6 +74,8 @@ export async function GET(request: NextRequest) {
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
     const userId = session.user.id;
 
+    const [fyStart, fyEnd] = fyDateRange(fy);
+
     const [
       salaries,
       properties,
@@ -75,6 +85,8 @@ export async function GET(request: NextRequest) {
       slabs,
       configs,
       prefs,
+      fyInvoices,
+      wizardSelection,
     ] = await Promise.all([
       db
         .select()
@@ -116,6 +128,27 @@ export async function GET(request: NextRequest) {
         .select()
         .from(userPreferences)
         .where(eq(userPreferences.userId, userId))
+        .limit(1),
+      // Sprint 5.4 — business-income detection (ITR-2's only ineligibility)
+      db
+        .select({
+          taxableAmount: invoices.taxableAmount,
+        })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.userId, userId),
+            gte(invoices.invoiceDate, fyStart),
+            lte(invoices.invoiceDate, fyEnd),
+          ),
+        ),
+      // Sprint 5.4 — wizard recommendation
+      db
+        .select()
+        .from(itrFormSelection)
+        .where(
+          and(eq(itrFormSelection.userId, userId), eq(itrFormSelection.fy, fy)),
+        )
         .limit(1),
     ]);
 
@@ -199,6 +232,31 @@ export async function GET(request: NextRequest) {
       fy,
     });
 
+    // ─── Sprint 5.4 — eligibility detection ──────────────────────────
+    // ITR-2's only ineligibility flag is business income. Everything
+    // else (any number of HPs, capital gains, foreign income) is fine
+    // here. If business income exists, push to ITR-3.
+    const invoiceCount = fyInvoices.length;
+    const turnoverPaisa = fyInvoices.reduce(
+      (s, i) => s + (i.taxableAmount ?? 0),
+      0,
+    );
+
+    const flags: {
+      hasBusiness?: { invoiceCount: number; turnoverPaisa: number };
+      hasForeignIncome?: boolean;
+      isDirectorOrUnlisted?: boolean;
+      agriculturalOver5k?: boolean;
+    } = {};
+    if (invoiceCount > 0) {
+      flags.hasBusiness = { invoiceCount, turnoverPaisa };
+    }
+    flags.hasForeignIncome = false;
+    flags.isDirectorOrUnlisted = false;
+    flags.agriculturalOver5k = false;
+
+    const isEligible = !flags.hasBusiness;
+
     return NextResponse.json({
       fy,
       regime,
@@ -230,6 +288,9 @@ export async function GET(request: NextRequest) {
         },
       },
       summary,
+      eligibility: { isEligible, flags },
+      excludedIncomeBlocks: [],
+      wizardSelectedForm: wizardSelection[0]?.selectedForm ?? null,
     });
   } catch (err) {
     console.error('[tax/itr2/summary GET]', err);

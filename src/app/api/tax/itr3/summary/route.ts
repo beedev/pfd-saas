@@ -9,6 +9,7 @@ import {
   taxDeductions,
   incomeTaxPaid,
   invoices,
+  itrFormSelection,
 } from '@/db';
 import { auth } from '@/auth';
 
@@ -119,8 +120,29 @@ export async function GET(request: NextRequest) {
     const advanceTaxRows = itRows.filter((r) => r.paymentType === 'ADVANCE_TAX' || r.paymentType === 'SELF_ASSESSMENT');
     const totalAdvanceTax = advanceTaxRows.reduce((s, r) => s + r.amount, 0);
 
+    // Sprint 5.4 — wizard selection (ITR-3 is always eligible, but the
+    // banner still wants to know if the wizard picked a different form
+    // so it can render the mismatch callout).
+    const wizardSelection = await db
+      .select()
+      .from(itrFormSelection)
+      .where(
+        and(eq(itrFormSelection.userId, session.user.id), eq(itrFormSelection.fy, fy)),
+      )
+      .limit(1);
+
     return NextResponse.json({
       fy,
+      eligibility: {
+        isEligible: true,
+        flags: {
+          hasForeignIncome: false,
+          isDirectorOrUnlisted: false,
+          agriculturalOver5k: false,
+        },
+      },
+      excludedIncomeBlocks: [],
+      wizardSelectedForm: wizardSelection[0]?.selectedForm ?? null,
       schedules: {
         salary: {
           rowCount: salaries.length,

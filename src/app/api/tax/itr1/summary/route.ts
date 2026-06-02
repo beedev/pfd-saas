@@ -21,7 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import {
   db,
   salaryIncome,
@@ -31,11 +31,25 @@ import {
   taxSlabs,
   taxRegimeConfig,
   userPreferences,
+  capitalGains,
+  invoices,
+  itrFormSelection,
   type TaxRegime,
   type OtherIncomeSource,
 } from '@/db';
 import { auth } from '@/auth';
 import { computeItr1Summary } from '@/lib/finance/itr1-summary';
+
+/** FY string "2025-26" → ["2025-04-01", "2026-03-31"]. Used for the
+ *  invoice-date range when checking business-income eligibility. */
+function fyDateRange(fy: string): [string, string] {
+  const [start] = fy.split('-');
+  const startYear = parseInt(start, 10);
+  return [`${startYear}-04-01`, `${startYear + 1}-03-31`];
+}
+
+/** ITR-1 cap — gross total income must be ≤ ₹50L. */
+const ITR1_CAP_PAISA = 50 * 100 * 100000;
 
 /** Sources that count as "interest-like" income for ITR-1's
  *  Schedule OS line. Excludes business / freelance / agricultural
@@ -57,14 +71,19 @@ export async function GET(request: NextRequest) {
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
     const userId = session.user.id;
 
+    const [fyStart, fyEnd] = fyDateRange(fy);
+
     const [
       salaries,
-      properties,
+      allProperties,
       otherRows,
       deductions,
       slabs,
       configs,
       prefs,
+      cgRows,
+      fyInvoices,
+      wizardSelection,
     ] = await Promise.all([
       db
         .select()
@@ -72,12 +91,14 @@ export async function GET(request: NextRequest) {
         .where(
           and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, fy)),
         ),
+      // Sprint 5.4 — pull ALL properties (not just the first) so the page
+      // can disclose every row. Sorting by id keeps the "first = ITR-1's
+      // single eligible property" choice deterministic.
       db
         .select()
         .from(realEstate)
         .where(eq(realEstate.userId, userId))
-        .orderBy(asc(realEstate.id))
-        .limit(1),
+        .orderBy(asc(realEstate.id)),
       db
         .select()
         .from(otherSourcesIncome)
@@ -103,7 +124,40 @@ export async function GET(request: NextRequest) {
         .from(userPreferences)
         .where(eq(userPreferences.userId, userId))
         .limit(1),
+      // Sprint 5.4 — capital gains eligibility check
+      db
+        .select()
+        .from(capitalGains)
+        .where(
+          and(eq(capitalGains.userId, userId), eq(capitalGains.financialYear, fy)),
+        ),
+      // Sprint 5.4 — business-income eligibility via GST invoices in FY
+      db
+        .select({
+          taxableAmount: invoices.taxableAmount,
+          invoiceDate: invoices.invoiceDate,
+        })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.userId, userId),
+            gte(invoices.invoiceDate, fyStart),
+            lte(invoices.invoiceDate, fyEnd),
+          ),
+        ),
+      // Sprint 5.4 — wizard recommendation (if any)
+      db
+        .select()
+        .from(itrFormSelection)
+        .where(
+          and(eq(itrFormSelection.userId, userId), eq(itrFormSelection.fy, fy)),
+        )
+        .limit(1),
     ]);
+    // Keep the original single-property variable so the rest of the
+    // file's math stays untouched. ITR-1 still only computes against the
+    // first row; the additional rows are surfaced for disclosure only.
+    const properties = allProperties.slice(0, 1);
 
     if (slabs.length === 0 || configs.length === 0) {
       return NextResponse.json(
@@ -182,6 +236,101 @@ export async function GET(request: NextRequest) {
       regime,
     });
 
+    // ─── Sprint 5.4 — eligibility detection ──────────────────────────
+    // None of these mutate `summary` (ITR-1 math must stay byte-identical
+    // to the prior version); they're additive disclosure for the UI.
+
+    // Capital gains — sum taxableGain across all rows in FY.
+    const cgTotalPaisa = cgRows.reduce((s, r) => s + (r.taxableGain ?? 0), 0);
+
+    // Multi-property — count + rental from properties beyond the first
+    // (only non-self-occupied rows with positive monthly rent contribute,
+    // matching the IT-rules letter-out treatment for the form).
+    const extraPropertiesRent = allProperties
+      .slice(1)
+      .filter((p) => !p.isSelfOccupied && (p.monthlyRent ?? 0) > 0)
+      .reduce((s, p) => s + (p.monthlyRent ?? 0) * 12, 0);
+
+    // Business — sum taxableAmount across FY invoices.
+    const invoiceCount = fyInvoices.length;
+    const turnoverPaisa = fyInvoices.reduce(
+      (s, i) => s + (i.taxableAmount ?? 0),
+      0,
+    );
+
+    const excludedIncomeBlocks: Array<{
+      label: string;
+      amountPaisa: number;
+      reason: string;
+    }> = [];
+    if (cgTotalPaisa > 0) {
+      excludedIncomeBlocks.push({
+        label: 'Capital gains',
+        amountPaisa: cgTotalPaisa,
+        reason: 'ITR-1 does not include Schedule CG.',
+      });
+    }
+    if (extraPropertiesRent > 0) {
+      excludedIncomeBlocks.push({
+        label: 'Rental from additional properties',
+        amountPaisa: extraPropertiesRent,
+        reason: 'ITR-1 allows only one house property.',
+      });
+    }
+
+    const flags: {
+      exceedsCap?: { actualPaisa: number; capPaisa: number };
+      hasCapitalGains?: { totalPaisa: number; rowCount: number };
+      multipleHouseProperties?: { count: number; rentalPaisa: number };
+      hasBusiness?: { invoiceCount: number; turnoverPaisa: number };
+      hasForeignIncome?: boolean;
+      isDirectorOrUnlisted?: boolean;
+      agriculturalOver5k?: boolean;
+    } = {};
+    if (summary.grossTotalIncomePaisa > ITR1_CAP_PAISA) {
+      flags.exceedsCap = {
+        actualPaisa: summary.grossTotalIncomePaisa,
+        capPaisa: ITR1_CAP_PAISA,
+      };
+    }
+    if (cgRows.length > 0 && cgTotalPaisa > 0) {
+      flags.hasCapitalGains = {
+        totalPaisa: cgTotalPaisa,
+        rowCount: cgRows.length,
+      };
+    }
+    if (allProperties.length > 1) {
+      flags.multipleHouseProperties = {
+        count: allProperties.length,
+        rentalPaisa: extraPropertiesRent,
+      };
+    }
+    if (invoiceCount > 0) {
+      flags.hasBusiness = { invoiceCount, turnoverPaisa };
+    }
+    // Stubs — schema doesn't capture these yet. Typed for forward
+    // compatibility; UI will pick them up automatically.
+    flags.hasForeignIncome = false;
+    flags.isDirectorOrUnlisted = false;
+    flags.agriculturalOver5k = false;
+
+    const isEligible =
+      !flags.exceedsCap &&
+      !flags.hasCapitalGains &&
+      !flags.multipleHouseProperties &&
+      !flags.hasBusiness &&
+      !flags.hasForeignIncome &&
+      !flags.isDirectorOrUnlisted &&
+      !flags.agriculturalOver5k;
+
+    const housePropertyRows = allProperties.map((p) => ({
+      id: p.id,
+      name: p.propertyName,
+      rentalPaisa: (p.monthlyRent ?? 0) * 12,
+      sec24bPaisa: p.id === (property?.id ?? -1) ? interest24b : 0,
+      isSelfOccupied: !!p.isSelfOccupied,
+    }));
+
     return NextResponse.json({
       fy,
       regime,
@@ -213,6 +362,10 @@ export async function GET(request: NextRequest) {
         },
       },
       summary,
+      eligibility: { isEligible, flags },
+      excludedIncomeBlocks,
+      housePropertyRows,
+      wizardSelectedForm: wizardSelection[0]?.selectedForm ?? null,
     });
   } catch (err) {
     console.error('[tax/itr1/summary GET]', err);

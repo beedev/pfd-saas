@@ -18,7 +18,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import {
   db,
   salaryIncome,
@@ -28,12 +28,24 @@ import {
   taxSlabs,
   taxRegimeConfig,
   userPreferences,
+  realEstate,
+  capitalGains,
+  invoices,
+  itrFormSelection,
   type TaxRegime,
   type PresumptiveSection,
   type ReceiptMode,
 } from '@/db';
 import { auth } from '@/auth';
 import { computeItr4Summary } from '@/lib/finance/itr4-summary';
+
+function fyDateRange(fy: string): [string, string] {
+  const [start] = fy.split('-');
+  const startYear = parseInt(start, 10);
+  return [`${startYear}-04-01`, `${startYear + 1}-03-31`];
+}
+
+const ITR4_CAP_PAISA = 50 * 100 * 100000;
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -45,6 +57,8 @@ export async function GET(request: NextRequest) {
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
     const userId = session.user.id;
 
+    const [fyStart, fyEnd] = fyDateRange(fy);
+
     const [
       salaries,
       presumptiveRows,
@@ -53,6 +67,10 @@ export async function GET(request: NextRequest) {
       slabs,
       configs,
       prefs,
+      allProperties,
+      cgRows,
+      fyInvoices,
+      wizardSelection,
     ] = await Promise.all([
       db
         .select()
@@ -90,6 +108,37 @@ export async function GET(request: NextRequest) {
         .select()
         .from(userPreferences)
         .where(eq(userPreferences.userId, userId))
+        .limit(1),
+      // Sprint 5.4 — eligibility detection inputs
+      db
+        .select()
+        .from(realEstate)
+        .where(eq(realEstate.userId, userId))
+        .orderBy(asc(realEstate.id)),
+      db
+        .select()
+        .from(capitalGains)
+        .where(
+          and(eq(capitalGains.userId, userId), eq(capitalGains.financialYear, fy)),
+        ),
+      db
+        .select({
+          taxableAmount: invoices.taxableAmount,
+        })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.userId, userId),
+            gte(invoices.invoiceDate, fyStart),
+            lte(invoices.invoiceDate, fyEnd),
+          ),
+        ),
+      db
+        .select()
+        .from(itrFormSelection)
+        .where(
+          and(eq(itrFormSelection.userId, userId), eq(itrFormSelection.fy, fy)),
+        )
         .limit(1),
     ]);
 
@@ -130,6 +179,70 @@ export async function GET(request: NextRequest) {
     );
     const deductionsForRegime = regime === 'OLD' ? oldDeductionsTotal : 0;
 
+    // ─── Sprint 5.4 — eligibility detection ──────────────────────────
+    const cgTotalPaisa = cgRows.reduce((s, r) => s + (r.taxableGain ?? 0), 0);
+    const extraPropertiesRent = allProperties
+      .slice(1)
+      .filter((p) => !p.isSelfOccupied && (p.monthlyRent ?? 0) > 0)
+      .reduce((s, p) => s + (p.monthlyRent ?? 0) * 12, 0);
+    const invoiceCount = fyInvoices.length;
+    const turnoverPaisa = fyInvoices.reduce(
+      (s, i) => s + (i.taxableAmount ?? 0),
+      0,
+    );
+
+    const excludedIncomeBlocks: Array<{
+      label: string;
+      amountPaisa: number;
+      reason: string;
+    }> = [];
+    if (cgTotalPaisa > 0) {
+      excludedIncomeBlocks.push({
+        label: 'Capital gains',
+        amountPaisa: cgTotalPaisa,
+        reason: 'ITR-4 does not include Schedule CG.',
+      });
+    }
+    if (extraPropertiesRent > 0) {
+      excludedIncomeBlocks.push({
+        label: 'Rental from additional properties',
+        amountPaisa: extraPropertiesRent,
+        reason: 'ITR-4 allows only one house property.',
+      });
+    }
+
+    const flags: {
+      exceedsCap?: { actualPaisa: number; capPaisa: number };
+      hasCapitalGains?: { totalPaisa: number; rowCount: number };
+      multipleHouseProperties?: { count: number; rentalPaisa: number };
+      hasBusiness?: { invoiceCount: number; turnoverPaisa: number };
+      hasForeignIncome?: boolean;
+      isDirectorOrUnlisted?: boolean;
+      agriculturalOver5k?: boolean;
+    } = {};
+    if (cgRows.length > 0 && cgTotalPaisa > 0) {
+      flags.hasCapitalGains = {
+        totalPaisa: cgTotalPaisa,
+        rowCount: cgRows.length,
+      };
+    }
+    if (allProperties.length > 1) {
+      flags.multipleHouseProperties = {
+        count: allProperties.length,
+        rentalPaisa: extraPropertiesRent,
+      };
+    }
+    // ITR-4 expects presumptive business; non-presumptive (GST invoices
+    // not declared under 44ADA) would still be acceptable in theory, but
+    // we surface invoices here only as a hint since the user's wizard
+    // recommendation is what drives the actual eligibility narrative.
+    if (invoiceCount > 0 && presumptiveRows.length === 0) {
+      flags.hasBusiness = { invoiceCount, turnoverPaisa };
+    }
+    flags.hasForeignIncome = false;
+    flags.isDirectorOrUnlisted = false;
+    flags.agriculturalOver5k = false;
+
     const summary = computeItr4Summary({
       salaryGrossPaisa: salaryGross,
       salaryExemptionsPaisa: salaryExemptions,
@@ -155,6 +268,23 @@ export async function GET(request: NextRequest) {
       },
       regime,
     });
+
+    // ITR-4 cap check needs the computed gross — evaluate now.
+    if (summary.grossTotalIncomePaisa > ITR4_CAP_PAISA) {
+      flags.exceedsCap = {
+        actualPaisa: summary.grossTotalIncomePaisa,
+        capPaisa: ITR4_CAP_PAISA,
+      };
+    }
+
+    const isEligible =
+      !flags.exceedsCap &&
+      !flags.hasCapitalGains &&
+      !flags.multipleHouseProperties &&
+      !flags.hasBusiness &&
+      !flags.hasForeignIncome &&
+      !flags.isDirectorOrUnlisted &&
+      !flags.agriculturalOver5k;
 
     return NextResponse.json({
       fy,
@@ -198,6 +328,9 @@ export async function GET(request: NextRequest) {
         ...summary,
         salaryTdsPaisa: salaryTds,
       },
+      eligibility: { isEligible, flags },
+      excludedIncomeBlocks,
+      wizardSelectedForm: wizardSelection[0]?.selectedForm ?? null,
     });
   } catch (err) {
     console.error('[tax/itr4/summary GET]', err);
