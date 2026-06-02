@@ -66,6 +66,8 @@ const TABLES_WITH_NOTES = [
   'epf_accounts', 'small_savings_accounts', 'fixed_deposits',
   'liabilities', 'insurance_policies', 'health_insurance_policies',
   'vehicles', 'subscriptions', 'budget_entries',
+  // Sprint 5.3 — per-FY historical rental track.
+  'rental_history',
 ];
 /** Tables we seed into that don't have a `notes` column. Guard checks
  *  the row count without the notes filter; cleanup uses a stable
@@ -280,6 +282,45 @@ async function seedAll(tx) {
          ${NOTE('re-hosur')})
     `;
     tally('real_estate', 1);
+  }
+
+  // ─── rental_history — 3 prior FYs on the Whitefield flat ─────────
+  // Sprint 5.3 — backfill so /income YoY shows real per-FY rental
+  // figures. The current FY (2025-26) deliberately has NO row so the
+  // monthly_rent × 12 = ₹3,00,000 fallback path stays exercised.
+  //   FY 2022-23: ₹2.40L (₹20k/mo × 12)
+  //   FY 2023-24: ₹2.52L (₹21k/mo × 12)
+  //   FY 2024-25: ₹2.76L (₹23k/mo × 12)
+  {
+    // Whitefield is the only let-out property in this seed, look it up
+    // by property_name since INSERTs above don't capture ids.
+    const wfRows = await tx`
+      SELECT id FROM real_estate
+      WHERE user_id = ${TARGET_USER_ID}
+        AND property_name = 'Whitefield Flat, Bengaluru'
+      LIMIT 1
+    `;
+    if (wfRows.length === 0) {
+      throw new Error('rental_history seed: Whitefield property not found');
+    }
+    const whitefieldId = wfRows[0].id;
+    const RH_NOTE = `${FY_LABEL.replace(`${FY} —`, '')} rental history for prior FYs`.replace(/\s+/g, ' ').trim();
+    // RH_NOTE preserves the 'DEMO-SEED:' prefix so the cleanup-by-LIKE
+    // pattern still wipes these rows on re-runs.
+    const history = [
+      { fy: '2022-23', rent: rs(240000) },
+      { fy: '2023-24', rent: rs(252000) },
+      { fy: '2024-25', rent: rs(276000) },
+    ];
+    for (const h of history) {
+      await tx`
+        INSERT INTO rental_history
+          (user_id, real_estate_id, fy, rent_received_paisa, months_let, notes)
+        VALUES
+          (${TARGET_USER_ID}, ${whitefieldId}, ${h.fy}, ${h.rent}, 12, ${'DEMO-SEED: rental history for prior FYs'})
+      `;
+      tally('rental_history', 1);
+    }
   }
 
   // ─── capital_gains — 4 rows exercising every bracket ─────────────
