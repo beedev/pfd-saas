@@ -54,6 +54,13 @@ interface FixedDepositRow {
   principalPaisa: number;
   status: 'ACTIVE' | 'MATURED' | 'BROKEN' | null;
 }
+interface ForexDepositRow {
+  id: number;
+  currencyCode: string;
+  amountInCurrency: number;
+  inrValuePaisa: number | null; // null = live rate unavailable
+  status: 'ACTIVE' | 'MATURED' | 'CLOSED';
+}
 const CASH_VALUE_POLICIES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP'];
 
 const formatINR = (paisa: number) =>
@@ -77,6 +84,7 @@ export default function NetWorthDashboard() {
   const [debts, setDebts] = useState<LiabilityRow[]>([]);
   const [chits, setChits] = useState<ChitFundRow[]>([]);
   const [fds, setFds] = useState<FixedDepositRow[]>([]);
+  const [forex, setForex] = useState<ForexDepositRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sparkline, setSparkline] = useState<Array<{ date: string; value: number }>>([]);
   const [hasTodaySnapshot, setHasTodaySnapshot] = useState(false);
@@ -94,8 +102,9 @@ export default function NetWorthDashboard() {
       fetch('/api/investments/liabilities').then((r) => r.json()),
       fetch('/api/investments/chit-funds').then((r) => r.json()),
       fetch('/api/investments/fixed-deposits').then((r) => r.json()),
+      fetch('/api/investments/forex-deposits').then((r) => r.json()),
     ])
-      .then(([stocksData, mfData, goldData, npsData, pfData, reData, insData, liaData, chitData, fdData]) => {
+      .then(([stocksData, mfData, goldData, npsData, pfData, reData, insData, liaData, chitData, fdData, forexData]) => {
         setHoldings(stocksData.holdings || []);
         setFunds(mfData.mutualFunds || []);
         setGold(goldData.gold || []);
@@ -106,6 +115,7 @@ export default function NetWorthDashboard() {
         setDebts(liaData.liabilities || []);
         setChits(chitData.chitFunds || []);
         setFds(fdData.fixedDeposits || []);
+        setForex(forexData.forexDeposits || []);
       })
       .catch(() => {
         setHoldings([]);
@@ -178,10 +188,17 @@ export default function NetWorthDashboard() {
   const fdValuePaisa = fds
     .filter((f) => f.status === 'ACTIVE')
     .reduce((s, f) => s + (f.principalPaisa ?? 0), 0);
+  // Sprint 5.10d — aggregate live INR value across the user's ACTIVE
+  // forex deposits. Rows where the live rate didn't resolve carry
+  // inrValuePaisa=null and are excluded from the tile to avoid silent
+  // zeroing — the detail page surfaces "rate unavailable" explicitly.
+  const forexValuePaisa = forex
+    .filter((f) => f.status === 'ACTIVE')
+    .reduce((s, f) => s + (f.inrValuePaisa ?? 0), 0);
 
-  // Net worth = stocks + MF + gold + NPS + PF + real estate + insurance cash + chit funds + FDs − liabilities
+  // Net worth = stocks + MF + gold + NPS + PF + real estate + insurance cash + chit funds + FDs + forex − liabilities
   const totalAssetsPaisa =
-    stocksValuePaisa + mfValuePaisa + goldValuePaisa + npsValuePaisa + pfValuePaisa + reValuePaisa + insCashPaisa + chitValuePaisa + fdValuePaisa;
+    stocksValuePaisa + mfValuePaisa + goldValuePaisa + npsValuePaisa + pfValuePaisa + reValuePaisa + insCashPaisa + chitValuePaisa + fdValuePaisa + forexValuePaisa;
   const netWorthPaisa = totalAssetsPaisa - liabilitiesPaisa;
   const netWorthInvestedPaisa = stocksInvestedPaisa + mfInvestedPaisa + goldInvestedPaisa;
   const netWorthGainPaisa = stocksValuePaisa + mfValuePaisa + goldValuePaisa - netWorthInvestedPaisa;
@@ -199,6 +216,7 @@ export default function NetWorthDashboard() {
   const liabValue = liabilitiesPaisa / 100;
   const chitValue = chitValuePaisa / 100;
   const fdValue = fdValuePaisa / 100;
+  const forexValue = forexValuePaisa / 100;
 
   // Allocation split — by current value across all asset classes
   const totalForAllocation = totalAssetsPaisa;
@@ -331,6 +349,7 @@ export default function NetWorthDashboard() {
           { label: 'Insurance (cash)', value: insValue, format: 'currency' },
           { label: 'Chit Funds', value: chitValue, format: 'currency' },
           { label: 'Fixed Deposits', value: fdValue, format: 'currency' },
+          { label: 'Forex Deposits', value: forexValue, format: 'currency' },
           { label: 'Liabilities', value: liabValue, format: 'currency' },
         ]}
       />

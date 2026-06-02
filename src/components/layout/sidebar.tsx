@@ -79,6 +79,8 @@ const navigation: NavSection[] = [
       { name: 'Small Savings', href: '/investments/small-savings', icon: PiggyBank },
       { name: 'Fixed Deposits', href: '/investments/fixed-deposits', icon: Banknote },
       { name: 'Real Estate', href: '/investments/real-estate', icon: Home },
+      // Sprint 5.10d — Forex deposits asset class.
+      { name: 'Forex Deposits', href: '/investments/forex-deposits', icon: Banknote },
       { name: 'Chit Funds', href: '/investments/chit-funds', icon: Users },
       // Sprint 5.6e — EPF / NPS PDF statement importer.
       { name: 'Import from statement', href: '/investments/import-statement', icon: Upload },
