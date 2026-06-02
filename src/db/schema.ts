@@ -1647,6 +1647,11 @@ export const npsAccounts = pgTable('nps_accounts', {
   openingDate: text('opening_date').notNull(),
   expectedMaturityDate: text('expected_maturity_date'),
   lastStatementDate: text('last_statement_date'),
+  // Sprint 5.5a — recurring monthly contribution (employee + employer
+  // sides combined, ₹ in paisa per month). Drives the contribution-
+  // aware retirement projection: balance grows from current corpus AND
+  // from the ongoing contribution stream until retirement.
+  monthlyContributionPaisa: bigint('monthly_contribution_paisa', { mode: 'number' }).notNull().default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -1726,6 +1731,10 @@ export const epfAccounts = pgTable('epf_accounts', {
   isActive: boolean('is_active').default(true),
   openingDate: text('opening_date').notNull(),
   lastContributionDate: text('last_contribution_date'),
+  // Sprint 5.5a — recurring monthly EPF contribution (employee + employer
+  // share). Used by the cashflow derivation layer to project the EPF
+  // corpus forward to retirement at the PF asset-class growth rate.
+  monthlyContributionPaisa: bigint('monthly_contribution_paisa', { mode: 'number' }).notNull().default(0),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -1787,6 +1796,16 @@ export const smallSavingsAccounts = pgTable('small_savings_accounts', {
   // Total deposits since opening (paisa, useful for tax 80C tracking).
   totalDepositedPaisa: bigint('total_deposited_paisa', { mode: 'number' }).notNull().default(0),
   totalInterestPaisa: bigint('total_interest_paisa', { mode: 'number' }).notNull().default(0),
+  // Sprint 5.5a — recurring contribution to this small savings account.
+  // PPF and SSY are typically funded monthly; NSC/KVP are lumpsum
+  // (contribution = 0). The frequency column tells the projection lib
+  // whether to treat the contribution as monthly (×12 per year) or
+  // yearly (e.g., one annual PPF deposit instead of 12 monthly ones).
+  periodicContributionPaisa: bigint('periodic_contribution_paisa', { mode: 'number' }).notNull().default(0),
+  contributionFrequency: text('contribution_frequency')
+    .$type<'MONTHLY' | 'YEARLY'>()
+    .notNull()
+    .default('MONTHLY'),
   status: text('status').$type<SmallSavingsStatus>().notNull().default('ACTIVE'),
   passbookPath: text('passbook_path'),
   notes: text('notes'),
