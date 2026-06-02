@@ -362,9 +362,12 @@ export async function GET(_request: NextRequest) {
       // approximation the home dashboard uses on stale-rate days.
       const SPOT_INR_PER_USD = 83;
       const components: Component[] = activeForex.map((f) => {
-        const todayPaisa = Math.round(
-          f.amountInCurrency * SPOT_INR_PER_USD * 100,
-        );
+        // amountInCurrency is numeric(18,4) returned as string by the
+        // postgres driver — parseFloat at the boundary.
+        const amt = typeof f.amountInCurrency === 'string'
+          ? parseFloat(f.amountInCurrency)
+          : (f.amountInCurrency as number);
+        const todayPaisa = Math.round(amt * SPOT_INR_PER_USD * 100);
         const r = project(todayPaisa, 0, ratePct, yearsToRetire);
         return {
           itemName: `${f.currencyCode} · ${f.bankName}`,
@@ -398,7 +401,7 @@ export async function GET(_request: NextRequest) {
           if (today <= 0) return null;
           const r = project(today, 0, ratePct, yearsToRetire);
           return {
-            itemName: `${g.holdingType} · ${g.grams ?? 0}g`,
+            itemName: `${g.type} · ${g.grams ?? 0}g`,
             todayPaisa: today,
             atRetirementPaisa: r.totalPaisa,
             growthRatePct: ratePct,

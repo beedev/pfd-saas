@@ -16,6 +16,137 @@ countries later.
 
 ## Status
 
+**Sprint 5.8 + 5.9 + 5.11 complete — loan accounting + retirement tax brackets + corpus breakdown.**
+
+### Sprint 5.9 — Loan accounting + 80C principal flag (six phases)
+
+- **Phase 5.9a — Schema (mig 0031).** `liabilities` gains
+  `principal_qualifies_80c boolean DEFAULT false NOT NULL` and
+  `interest_qualifies_24b boolean DEFAULT false NOT NULL`. Migration's
+  trailing UPDATE auto-flips both to true for every existing
+  `HOME_LOAN` row so legacy data behaves correctly. Migration journal
+  id 30 via the documented psql + manual INSERT pattern.
+- **Phase 5.9b — Loan-tax compute lib + API.**
+  `src/lib/finance/loan-tax.ts` walks each loan's amortization schedule
+  (forward via `amortizationSchedule()` from `emi.ts`, backward via a
+  reverse-walk of the EMI math) to extract the FY-window principal +
+  interest splits. New `GET /api/finance/loan-tax-deductions?fy=…`
+  returns per-liability rows + aggregate totals.
+- **Phase 5.9c — Wired into tax modules.** Regime-compare, ITR-1/2/3/4
+  summaries all pull loan deductions in:
+  - Loan principal flows into 80C with the ₹1.5L cap enforced at the
+    aggregator (sum manual + loan-derived 80C, clamp at cap).
+  - Loan interest flows into Section 24(b). For the first
+    self-occupied property, the max(user-entered, loan-derived) is
+    used through the existing `computeSection24bDeduction` lib so the
+    ₹2L cap still applies. For let-out / no-property cases it stacks
+    uncapped.
+  - Response payloads gain `eightyC: {manual, fromLoans, applied, cap,
+    overCap}` and `loanDeductions: {totalInterest, totalPrincipal,
+    perLiability}` for UI transparency.
+- **Phase 5.9d — Net-worth transparency.** Home dashboard's hero tile
+  gains an "₹X assets · ₹Y liabilities" clickable subtitle that
+  expands into a top-5-assets + all-liabilities breakdown. Confirms
+  net worth math = assets − liabilities (already correct on
+  /networth's `netWorthPaisa`).
+- **Phase 5.9e — Detail-page toggles.** Loan detail page Loan
+  Information card gains two checkboxes for 80C + 24(b) qualification
+  plus an inline FY-counted note ("FY 2025-26: ₹X principal · ₹Y
+  interest already counted in your tax deductions"). PATCH route
+  extended to accept the flags.
+- **Phase 5.9f — Verify.** BXDEva's HOME_LOAN (id 38) auto-flipped
+  both flags. FY 2025-26: ₹2.33L principal · ₹4.63L interest across
+  12 months. 80C: ₹3.02L manual + ₹2.33L loan = ₹5.35L raw, capped
+  at ₹1.5L (₹3.85L over). Sec 24(b): ₹4.4L total (self-occupied ₹2L
+  + let-out plot ₹2.4L).
+
+### Sprint 5.8 — Retirement tax-aware planning (five phases)
+
+- **Phase 5.8a — Schema (mig 0032).** `user_preferences` gains
+  `retirement_tax_brackets jsonb` with a default of `[{0,0%},
+  {₹10L,15%}, {₹30L,25%}]`. Stored as JSONB array sorted ascending by
+  threshold; threshold is in RUPEES (not paisa — matches user mental
+  model of "₹10L slab"). Migration journal id 31.
+- **Phase 5.8b — Pure compute lib.**
+  `src/lib/finance/retirement-tax.ts` exposes
+  `applyRetirementTaxBrackets(grossPaisa, brackets)` returning
+  `{taxPaisa, netPaisa, perBracketTax[], effectiveRatePct, warnings}`.
+  Validates + normalises malformed brackets (sort, prepend zero
+  threshold, drop NaN), returns per-band attribution so the UI tooltip
+  can show "₹10L at 0% = 0, ₹20L at 15% = ₹3L, ₹5L at 25% = ₹1.25L".
+- **Phase 5.8c — Projection wiring.** Retirement page replaces the
+  Sprint 4 Phase 5 flat marginal-rate proxy. Each year's TAXABLE
+  income (rental + annuity + NPS pension) now runs through
+  bracket-aware tax. Ladder income (LIC endowment) stays TAX_FREE
+  under Section 10(10D). `/api/user-preferences` GET + PATCH extended
+  to return + write the brackets, with server-side validation
+  (length 1-8, strictly ascending, first threshold=0, rates 0-100).
+- **Phase 5.8d — Settings editor.** New
+  `RetirementTaxBracketsForm` card on `/settings` — table view with
+  add/delete row, threshold + rate inputs, "Reset to defaults"
+  button, live preview ("0% up to ₹10L, 15% ₹10L-30L, 25% above ₹30L").
+- **Phase 5.8e — UI surface.** Retirement page year-by-year table's
+  Tax column now bracket-aware. Net income column already existed.
+  Footnote spells out the slabs + links to Settings.
+
+### Sprint 5.11 — Retirement corpus breakdown card (three phases)
+
+- **Phase 5.11a — Breakdown API.** New
+  `GET /api/finance/retirement-corpus-breakdown` returns
+  `{totalCorpusAtRetirementPaisa, retirementYear, byAssetClass: [{
+   assetClass, todayPaisa, atRetirementPaisa, growthMultiple,
+   components: [{itemName, todayPaisa, atRetirementPaisa, growthRatePct,
+   balanceComponentPaisa, contributionComponentPaisa,
+   monthlyContributionPaisa}]}]}`. Projects every asset row (holdings,
+  MFs, NPS, EPF, small savings, real estate, forex, gold, insurance,
+  FDs) using `projectFutureValue()` with rates from
+  `getGrowthRates()` — same helper retirement-assets uses, so the
+  numbers reconcile.
+- **Phase 5.11b — Breakdown card UI.** New
+  `RetirementCorpusBreakdownCard` component — collapsed shows
+  total + "show breakdown" toggle; expanded shows the asset-class
+  table with row-click drill-down into per-component projection.
+  Two-leg attribution (balance leg + contribution leg) surfaced via
+  badges for contribution-bearing components (NPS, EPF, PPF, SSY).
+- **Phase 5.11c — Retirement page integration.** Card lives alongside
+  the existing 4-tile summary (Corpus needed / Selected→Grows /
+  Gap / Monthly SIP needed) — all four tiles preserved. The
+  breakdown card itself shows the user's FULL asset base; the 4-tile
+  "Selected→Grows" uses only assets ticked into the retirement
+  picker, so the two numbers can legitimately differ when assets
+  are earmarked for other goals. A footnote in the card explains
+  this.
+
+### BXDEva verified numbers (FY 2025-26)
+
+- Home loan splits: ₹2.33L principal · ₹4.63L interest (12 months active).
+- Retirement Year 30 (2056): total corpus projected ₹26.1Cr. Top 3
+  contributors: Real Estate ₹11.4Cr (4.3×), Small Savings ₹3.97Cr
+  (44.8× — PPF + SSY hugely contribution-heavy), EPF ₹3.19Cr (42×).
+- Tax brackets default: 0% up to ₹10L, 15% ₹10L-30L, 25% above ₹30L.
+  Configurable per user via /settings.
+
+### Migration tracking pattern (still in force)
+
+`drizzle.__drizzle_migrations` is now a row behind the file count for
+multiple migrations (0028+0029+0030+0031+0032 all applied via `psql
+-v ON_ERROR_STOP=1 -f <sql>` followed by `setval` + manual `INSERT INTO
+drizzle.__drizzle_migrations(hash, created_at)`). Do NOT try to repair
+the migrator state. Keep using the documented pattern.
+
+### Default retirement tax brackets
+
+The seed `[{threshold:0, ratePct:0}, {threshold:1000000, ratePct:15},
+{threshold:3000000, ratePct:25}]` is Bharath's planning starting point.
+0% to ₹10L recognises basic-exemption + std-ded + 87A rebate covering
+roughly that band under either regime in the retirement-income mix.
+The 15% / 25% bands are deliberately conservative (real slabs go
+20%/30% in working life, but retirement-income mix usually has more
+capital-gains and rental components which carry their own lower rates).
+Treat as a planning proxy, not a real tax engine.
+
+---
+
 **Sprint 5.7 complete — mutual-fund sub-classification.** Four phases.
 
 - **Phase 5.7a — Schema + rates split.** Migration 0029 adds

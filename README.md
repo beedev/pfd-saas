@@ -241,7 +241,7 @@ Sprint sequence:
 - **Sprint 3** ✅ India modules — Health Insurance (cards/claims/portability), Income tracker, Vehicles (insurance/PUC/service log), Subscriptions, Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS with interest projection)
 - **Sprint 3.5** ✅ Goals/Retirement architecture + IA regroup — sidebar regrouped (Investments / Insurance / Liabilities), `cashflow_events` substrate (auto-derived inflow timeline from insurance / NPS / PPF / SSY / rental / salary), goals get disbursement model + asset mapping + year-by-year projection, retirement page reads cashflow events for income arrivals
 - **Sprint 4** ✅ Tax hardening — NEW vs OLD regime comparison + slab engine (FY 2025-26 / 2026-27 seeded for both regimes), Form 26AS reconciliation (PDF upload + book-vs-26AS view), quarterly advance-tax planner with 234B/234C warnings, ITR form wizard (1/2/3/4) auto-detecting from income sources, tax-aware net-of-tax inflow simulation flowing through goal + retirement projections via `cashflow_events.tax_treatment` + ITR-1/2/4 full walkthroughs (Sprint 4.1) + tax-calc fidelity (Sprint 5.1) with Yeswanth xlsx importer
-- **Sprint 5** ⏳ SaaS infra — Razorpay billing, pricing tiers, Docker self-host, marketing + docs sites + MF subclass + Forex deposits (Sprint 5.7 + 5.10)
+- **Sprint 5** ⏳ SaaS infra — Razorpay billing, pricing tiers, Docker self-host, marketing + docs sites + MF subclass + Forex deposits + loan deductions + retirement brackets + corpus breakdown (Sprint 5.7 + 5.10 + 5.8/5.9/5.11)
 - **Sprint 6** ⏳ Launch — deploy, domain, legal, observability, backups, beta, public
 
 ## License
