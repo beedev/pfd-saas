@@ -437,8 +437,15 @@ export default function LiabilityDetailPage() {
   const amortColumns: Column<AmortizationRow>[] = [
     { key: 'month', header: 'Month', render: (v) => {
       const monthNum = Number(v);
-      if (liability?.startDate) {
-        const d = new Date(liability.startDate);
+      // The schedule is computed forward from TODAY's outstanding (see
+      // useMemo above — opens at `currentBalance`, not original principal).
+      // Anchor the month labels to the same point — the next EMI date —
+      // so opening balances and date stamps tell the same story. Fall
+      // back to `startDate` only when the loan hasn't logged a next
+      // payment yet (brand-new entries).
+      const anchor = liability?.nextPaymentDate ?? liability?.startDate;
+      if (anchor) {
+        const d = new Date(anchor);
         d.setMonth(d.getMonth() + monthNum - 1);
         return <span>{d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>;
       }
@@ -773,11 +780,22 @@ export default function LiabilityDetailPage() {
                         }`}
                       >
                         <td className="py-1.5 pr-3 text-[var(--dxp-text)]">
-                          {row.dueDate
-                            ? new Date(row.dueDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
-                            : liability.startDate
-                              ? new Date(new Date(liability.startDate).setMonth(new Date(liability.startDate).getMonth() + row.monthNumber - 1)).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
-                              : `Month ${row.monthNumber}`}
+                          {(() => {
+                            // Bank-uploaded schedule: row.dueDate is the truth.
+                            // Fallback: anchor to nextPaymentDate (today-forward)
+                            // not startDate (origination), matching the computed-
+                            // schedule renderer above.
+                            if (row.dueDate) {
+                              return new Date(row.dueDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+                            }
+                            const anchor = liability.nextPaymentDate ?? liability.startDate;
+                            if (anchor) {
+                              const d = new Date(anchor);
+                              d.setMonth(d.getMonth() + row.monthNumber - 1);
+                              return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+                            }
+                            return `Month ${row.monthNumber}`;
+                          })()}
                         </td>
                         <td className="py-1.5 pr-3 text-right font-mono">{formatINR(row.openingBalance)}</td>
                         <td className="py-1.5 pr-3 text-right font-mono">{formatINR(row.emi)}</td>
