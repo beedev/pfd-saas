@@ -1904,6 +1904,58 @@ export const realEstate = pgTable('real_estate', {
 export type RealEstate = typeof realEstate.$inferSelect;
 export type NewRealEstate = typeof realEstate.$inferInsert;
 
+/* ─── Sprint 5.3 — historical rental track per property × FY ──────────
+ * Each row = "this property earned this much rent during this FY".
+ *
+ * Why a separate table (not e.g. JSON on real_estate)?
+ *   • Lets users edit / annotate prior-year figures independently of
+ *     today's `monthly_rent` (which reflects the *current* tenant only).
+ *   • Drives the YoY trend rows on /income (Sprint 5.2 footnote: rental
+ *     was previously excluded from YoY because monthly_rent has no
+ *     history). With this table, /api/income/summary trend rows can
+ *     report real per-FY rental for every prior year the user backfills.
+ *   • Keeps the JOIN cheap for the income page (one row per property
+ *     per FY, scoped by user_id index).
+ *
+ * Fallback contract for the *current* FY:
+ *   • If a row exists for the current FY → use it.
+ *   • Else → fall back to `real_estate.monthly_rent × months_let_default`
+ *     so a brand-new user with no history sees their tenanted property
+ *     reflected in the income totals immediately.
+ *
+ * Months_let: 1..12 because partly-vacant FYs are common (mid-year
+ * tenant exits, new acquisitions). Enforced via CHECK constraint at
+ * the SQL layer — Drizzle doesn't surface CHECK in this version so the
+ * migration SQL is hand-edited to add it.
+ *
+ * Unique (user_id, real_estate_id, fy) prevents two rows for the same
+ * property+FY. If the tenant changes mid-year, the row holds the
+ * combined annual total; the `notes` field captures the human-readable
+ * split (e.g. "Tenant A Apr-Aug ₹1.2L, Tenant B Sep-Mar ₹1.55L"). */
+export const rentalHistory = pgTable('rental_history', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  realEstateId: integer('real_estate_id').notNull().references(() => realEstate.id, { onDelete: 'cascade' }),
+  fy: text('fy').notNull(),  // 'YYYY-YY' format, validated at API boundary
+  rentReceivedPaisa: bigint('rent_received_paisa', { mode: 'number' }).notNull(),
+  /** Months the property was let during this FY. 12 = full year tenanted.
+   *  Lower values mean partial vacancy (e.g. 9 = three months vacant).
+   *  Enforced 1..12 via CHECK constraint in migration SQL. */
+  monthsLet: integer('months_let').notNull().default(12),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('rental_history_user_id_idx').on(table.userId),
+  index('rental_history_user_fy_idx').on(table.userId, table.fy),
+  index('rental_history_property_idx').on(table.realEstateId),
+  // One row per property × FY per tenant of the dashboard.
+  uniqueIndex('rental_history_property_fy_unique').on(table.userId, table.realEstateId, table.fy),
+]);
+
+export type RentalHistory = typeof rentalHistory.$inferSelect;
+export type NewRentalHistory = typeof rentalHistory.$inferInsert;
+
 // 8. Insurance Policies
 export type PolicyType = 'TERM_LIFE' | 'WHOLE_LIFE' | 'ENDOWMENT' | 'ULIP' | 'HEALTH' | 'CRITICAL_ILLNESS' | 'DISABILITY' | 'ACCIDENT';
 export type PolicyStatus = 'ACTIVE' | 'LAPSED' | 'SURRENDERED' | 'MATURED' | 'CLAIMED';
