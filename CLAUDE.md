@@ -191,6 +191,38 @@ Design tenet: **the Yeswanth template is the canonical reference;
 pfd-saas should match its math, not approximate it.** Every Sprint 5.1
 lib references the corresponding template row in its module docstring.
 
+**Sprint 5.3 (in progress) — historical rental track.** Closes the
+Sprint 5.2 footnote "rental income excluded from YoY — no history yet".
+Adds a per-property × FY rental ledger that drives `/income` instead
+of the brittle `monthly_rent × 12` proxy.
+
+- **Phase 1 — Schema (migration 0027).** New `rental_history` table:
+  `(user_id, real_estate_id, fy)` unique, `months_let` CHECK 1..12,
+  `rent_received_paisa` bigint, FK CASCADE on both parents. Indexes on
+  user_id, (user_id, fy), and real_estate_id.
+- **Phase 2 — CRUD API.** `/api/finance/rental-history` GET (with
+  optional `?fy` + `?propertyId` filters, JOINs real_estate to surface
+  property_name inline), POST (rupees → paisa, validates fy regex +
+  monthsLet range + property ownership; 23505 → 409), PATCH (field-diff,
+  realEstateId/fy are immutable → 400), DELETE (scoped by userId).
+  Smoke test extended to 20 endpoints (`/api/finance/rental-history?fy=
+  <FY>`).
+- **Phase 3 — /api/income/summary integration.** Stream rental now
+  carries `.source: 'history' | 'current_rate'`. Trend rows include
+  `rentalPaisa: number | null` (null = no history row, render as "—").
+  Current FY uses history if present, else falls back to monthly_rent
+  × 12 — both paths exercised by the demo seed.
+- **Phase 4 — UI.** `/income` YoY table gains a Rental column between
+  Other-sources and Capital-gains (formatINRNullable distinguishes null
+  from ₹0). The footnote is rewritten to explain the history vs
+  current-rate fallback. Real-estate detail page gets a Rental-history
+  Card with inline Add-FY + Edit/Save/Cancel rows; self-occupied
+  properties hide the section entirely (NIL annual value).
+- **Phase 5 — Seed.** BXDEva gets 3 prior FYs on the Whitefield flat
+  (FY 2022-23 ₹2.40L, 2023-24 ₹2.52L, 2024-25 ₹2.76L). Current FY
+  2025-26 has no row → exercises the current_rate fallback path so the
+  demo data covers both branches.
+
 **Sprint 5.2 complete.** Income Tax UI refresh — three sequenced
 commits that recompose the `/tax` hub and adjacent screens so the
 recommendation is always visible above its justification. No new
