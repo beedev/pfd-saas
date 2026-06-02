@@ -223,9 +223,10 @@ export function ItrEligibilityBanner({
   // Happy path — compact eligible badge (still shows excluded blocks if
   // any, since e.g. ITR-3 covers all but a user might still want to
   // see "Schedule FA pending" once we wire that in).
+  // Mobile: badge + note stack vertically; sm+: single row.
   if (!wizardMismatch && fired.length === 0) {
     return (
-      <div className="flex items-center justify-between rounded-md border border-emerald-300 bg-emerald-50/60 px-3 py-2">
+      <div className="flex flex-col gap-2 rounded-md border border-emerald-300 bg-emerald-50/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-700" />
           <span className="text-sm font-bold text-emerald-800">

@@ -151,7 +151,10 @@ export function AdvanceTaxCard({ fy }: { fy: string }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        {/* Mobile: title stacks above the projected-tax meta; sm+: side
+            by side as before. The meta line is long and won't fit next
+            to the title at 375px. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
             <CalendarClock className="h-5 w-5 text-[var(--dxp-brand)]" />
             Advance Tax — FY {fy}

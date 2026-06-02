@@ -215,19 +215,20 @@ export default function TaxDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Mobile: title + FY selector stack vertically; selector goes full
+          width so a 375px viewport doesn't squeeze it. md+: original
+          horizontal layout. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[var(--dxp-text)]">
             Income Tax
           </h1>
-          <p className="text-[var(--dxp-text-secondary)]">
+          <p className="text-sm text-[var(--dxp-text-secondary)]">
             Recommendation, deductions, and filing pack — for FY {fy}
           </p>
         </div>
-        <div className="flex gap-2">
-          <div className="w-40">
-            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
-          </div>
+        <div className="w-full sm:w-40">
+          <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
         </div>
       </div>
 
@@ -374,7 +375,7 @@ export default function TaxDashboardPage() {
           {deductionRows.length > 0 && (
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-base font-bold text-[var(--dxp-text)]">
                     Manual deduction entries ({deductionRows.length})
                   </h3>
@@ -388,19 +389,21 @@ export default function TaxDashboardPage() {
               <CardContent>
                 <div className="space-y-1">
                   {deductionRows.map((d) => (
+                    // Mobile: stack badge/desc/amount in two rows.
+                    // sm+: original single-line flex layout.
                     <div
                       key={d.id}
-                      className="flex items-center gap-3 rounded border border-[var(--dxp-border-light)] px-3 py-2 text-sm"
+                      className="flex flex-wrap items-center gap-2 sm:gap-3 rounded border border-[var(--dxp-border-light)] px-3 py-2 text-sm"
                     >
                       <Badge variant="info">{d.section}</Badge>
                       {d.subType && (
                         <span className="text-xs text-[var(--dxp-text-muted)]">{d.subType}</span>
                       )}
-                      <span className="flex-1 truncate text-[var(--dxp-text-secondary)]">
+                      <span className="order-last w-full sm:order-none sm:w-auto sm:flex-1 truncate text-[var(--dxp-text-secondary)]">
                         {d.description}
                       </span>
                       <span className="text-xs text-[var(--dxp-text-muted)]">{d.paymentDate ?? '—'}</span>
-                      <span className="font-mono font-bold text-[var(--dxp-text)]">
+                      <span className="ml-auto sm:ml-0 font-mono font-bold text-[var(--dxp-text)]">
                         {formatINR(d.amountPaisa ?? 0)}
                       </span>
                       <Link href={`/tax/${d.id}/edit`}>
@@ -426,7 +429,7 @@ export default function TaxDashboardPage() {
           {/* Tax Paid Section */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
                   <IndianRupee className="h-5 w-5 text-[var(--dxp-brand)]" />
                   Tax Paid So Far
@@ -495,8 +498,9 @@ export default function TaxDashboardPage() {
               {taxPayments.length > 0 ? (
                 <div className="space-y-2">
                   {taxPayments.map((tp) => (
-                    <div key={tp.id} className="flex items-center justify-between rounded border border-[var(--dxp-border-light)] px-3 py-2 text-sm">
-                      <div className="flex items-center gap-2">
+                    // Mobile: meta row wraps; sm+: original justify-between layout.
+                    <div key={tp.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--dxp-border-light)] px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="info">{tp.paymentType.replace('_', ' ')}</Badge>
                         <span className="text-[var(--dxp-text-secondary)]">{tp.paymentDate}</span>
                         {tp.referenceNumber && <span className="text-xs text-[var(--dxp-text-muted)]">Ref: {tp.referenceNumber}</span>}
