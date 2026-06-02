@@ -50,6 +50,7 @@ import {
 } from 'recharts';
 
 import { CashflowTimeline } from '@/components/cashflow-timeline';
+import { RetirementCorpusBreakdownCard } from '@/components/retirement-corpus-breakdown-card';
 import {
   applyRetirementTaxBrackets,
   DEFAULT_RETIREMENT_TAX_BRACKETS,
@@ -1286,6 +1287,12 @@ export default function RetirementPage() {
           { label: 'Monthly SIP needed', value: projection.requiredSip / 100, format: 'currency' },
         ]}
       />
+
+      {/* Sprint 5.11b — Expandable corpus breakdown card. Shows the same
+          "Corpus selected → grows to" number from the tile above, but
+          drills into per-asset-class projection with two-leg
+          attribution (balance leg + contribution leg). */}
+      <RetirementCorpusBreakdownCard />
 
       <div className={`rounded-lg border-l-4 p-4 ${trackColor}`}>
         <p className="text-sm font-bold">{trackLabel}</p>
