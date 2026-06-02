@@ -17,7 +17,15 @@
  *       - everything else           → network, cache the response opportunistically
  */
 
-const CACHE_VERSION = 'pfd-saas-v1';
+// Bump this whenever the app shell / nav / sidebar shape changes —
+// the bumped string triggers the `activate` listener to wipe old
+// caches and `clients.claim()` so open tabs pick up fresh bundles
+// instead of hydrating with stale `/_next/static/*` chunks they
+// already loaded.
+// v2 (2026-06-02): Sprint 4 + 4.1 + 5.1 nav additions (ITR-1/2/4,
+// Form 26AS, Import from TaxCalc) — v1 users were seeing the
+// pre-Sprint-4 sidebar with hydration mismatches.
+const CACHE_VERSION = 'pfd-saas-v2';
 const PRECACHE_URLS = ['/offline.html', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
