@@ -191,6 +191,83 @@ Design tenet: **the Yeswanth template is the canonical reference;
 pfd-saas should match its math, not approximate it.** Every Sprint 5.1
 lib references the corresponding template row in its module docstring.
 
+**Sprint 5.4 (in progress) — ITR eligibility audit + unified disclosure.**
+Closes the gap that all four ITR pages were silently dropping income
+that didn't fit the form, with no warning to the user. Audit table in
+`docs/ITR-AUDIT-2026-06.md`. No schema changes (migration head still
+0027).
+
+Symptoms before:
+- ITR-1 page silently picked `real_estate ORDER BY id LIMIT 1` and
+  hid every other property — a user with 3 properties saw none of the
+  extras even though ₹3L of rental income was being computed elsewhere.
+- ITR-1 + ITR-4 ignored ₹7.85L of capital gains for FY 2025-26 with no
+  disclosure. Only the ₹50L cap was surfaced.
+- ITR-2 silently treated GST invoices as not-business — would have let
+  a user file ITR-2 when they actually needed ITR-3.
+- The wizard's recommendation (persisted in `itr_form_selection`) was
+  never re-checked on the form pages. A user deep-linking to /tax/itr1
+  with capital gains would see "correct-looking" numbers that dropped
+  ₹10L of income.
+- ITR-1/4 surfaced only `exceedsCap`. Capital gains / multi-HP / business
+  / foreign / director / agricultural-over-5k were all in prose footers.
+
+Sprint 5.4 fix shape (4 commits):
+- **Phase A — Audit.** `docs/ITR-AUDIT-2026-06.md` — table of current vs
+  correct behaviour for each form, plus the cross-cutting findings.
+- **Phase B — `ItrEligibilityBanner` component** at
+  `src/components/forms/itr-eligibility-banner.tsx`. One reusable banner
+  for all four pages. Props: `formCode`, `fy`, `wizardSelectedForm?`,
+  `excludedIncomeBlocks`, `eligibilityFlags`. Each form evaluates only
+  the flags relevant to it (ITR-1: cap + CG + multi-HP + business +
+  foreign + director + agri; ITR-2: business only; ITR-3: nothing —
+  catch-all; ITR-4: cap + CG + multi-HP + foreign + director + agri).
+  Wizard mismatch → amber callout with "Go to {recommended}" CTA. No
+  ineligibility + no mismatch → compact green "Eligible for {form}" row.
+- **Phase C — Summary endpoints return eligibility + excluded blocks.**
+  `/api/tax/itr{1,2,3,4}/summary` extended with `eligibility.flags`,
+  `excludedIncomeBlocks`, `wizardSelectedForm`. ITR-1 additionally
+  returns `housePropertyRows` listing every property even though only
+  the first is in scope. Three flags are typed stubs that always resolve
+  to `false` until schema captures them: `hasForeignIncome` (Schedule
+  FA), `isDirectorOrUnlisted` (user profile flag), `agriculturalOver5k`
+  (agri income line). Stubs are wired correctly so the UI picks up the
+  signal when capture lands. No math changed in any compute lib.
+- **Phase D — Pages wire the banner + ITR-1 multi-property disclosure.**
+  Banner mounted at the top of all four pages above the existing
+  `ItrResultBanner`. ITR-1 + ITR-4 relabel "Total income" →
+  "{form} eligible income" and render a one-liner "Actual income across
+  all forms: ₹X" below the stat when excludedIncomeBlocks is non-empty.
+  ITR-1 House Property section now renders every property — first row
+  with badge "In ITR-1", extra rows in a separate table marked
+  "Additional properties (excluded from ITR-1)" with Self-occupied /
+  Let-out / Vacant badges. Section header amber callout when >1
+  property: "ITR-1 allows only one house property. Your additional ₹X
+  of rental income won't fit — file ITR-2 to include all of these."
+
+Verification (BXDEva FY 2025-26):
+- ITR-1: `wizardSelectedForm: 'ITR-2'`, `isEligible: false`,
+  flags fired = `hasCapitalGains` (₹7.85L, 4 rows) +
+  `multipleHouseProperties` (3 properties, ₹3L extra rent). Excluded
+  blocks = capital gains ₹7.85L + additional rental ₹3L. All 3
+  properties in `housePropertyRows`.
+- ITR-2: `isEligible: true`. No `hasBusiness` flag (no invoices).
+- ITR-3: `isEligible: true` (always).
+- ITR-4: same as ITR-1 — `hasCapitalGains` + `multipleHouseProperties`.
+
+Deferred to a future sprint:
+- **Schedule FA capture.** Foreign assets/income disclosure. Stub
+  resolves to false today.
+- **Director-of-company / unlisted-shares flag.** User-profile boolean
+  pair. Stub resolves to false today.
+- **Agricultural income capture.** Currently has no schema home; would
+  need a row type on `other_sources_income` or its own table. Stub
+  resolves to false today.
+- **ITR-2 per-property 24(b) allocation.** Currently the entire 24B
+  deduction lands on the first property — fine for a single-loan home
+  but wrong if loans exist on multiple. Not blocking; flagged in
+  Sprint 4.1 docs.
+
 **Sprint 5.3 (in progress) — historical rental track.** Closes the
 Sprint 5.2 footnote "rental income excluded from YoY — no history yet".
 Adds a per-property × FY rental ledger that drives `/income` instead
