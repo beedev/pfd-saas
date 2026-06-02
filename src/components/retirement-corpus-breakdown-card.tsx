@@ -277,6 +277,14 @@ export function RetirementCorpusBreakdownCard() {
               and a Contribution leg (recurring contribution annuity).
               Click a class row to see per-asset detail.
             </p>
+            <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">
+              Note: this breakdown shows your FULL asset base projected
+              to retirement. The &ldquo;Corpus selected → grows to&rdquo;
+              tile above uses only items you&apos;ve ticked in for
+              retirement on the asset-picker; the two numbers can differ
+              when you&apos;ve earmarked specific MFs/properties for
+              other goals.
+            </p>
           </div>
         )}
       </CardContent>
