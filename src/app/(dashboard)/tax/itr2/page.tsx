@@ -21,6 +21,7 @@ import { Card, CardHeader, CardContent, Badge, Select, StatsDisplay } from '@dxp
 import { Loader2, AlertTriangle, Banknote, Home, Wallet, Calculator, Receipt, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { ItrResultBanner } from '@/components/forms/itr-result-banner';
 
 interface HouseRow {
   label: string;
@@ -178,6 +179,14 @@ export default function Itr2Page() {
         </Card>
       ) : !data ? null : (
         <>
+          {/* Sprint 5.2 (E) — ITR result banner */}
+          <ItrResultBanner
+            fy={fy}
+            form="ITR-2"
+            regime={data.regime}
+            totalTaxPaisa={data.summary.totalTaxPaisa}
+            salaryTdsPaisa={data.blocks.salary.tdsPaisa}
+          />
           <StatsDisplay
             currency="INR"
             locale="en-IN"

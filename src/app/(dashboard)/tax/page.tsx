@@ -1,13 +1,29 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Button, Card, CardHeader, CardContent, StatsDisplay, Select, Input, Badge } from '@dxp/ui';
-import { Plus, Loader2, Calculator, FileText, Gift, EyeOff, Eye, Trash2, IndianRupee, ClipboardCheck, FileCheck2 } from 'lucide-react';
+import { Button, Card, CardHeader, CardContent, Select, Input, Badge } from '@dxp/ui';
+import {
+  Plus,
+  Loader2,
+  EyeOff,
+  Eye,
+  Trash2,
+  IndianRupee,
+  Coins,
+  FileCheck2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { RegimeComparisonCard } from '@/components/forms/regime-comparison-card';
 import { AdvanceTaxCard } from '@/components/forms/advance-tax-card';
+import { TaxKpiStrip } from '@/components/forms/tax-kpi-strip';
+import { TaxProfileInline } from '@/components/forms/tax-profile-inline';
+import { Section80RegimeAwareStats } from '@/components/forms/section80-regime-aware-stats';
+import {
+  TaxOnboardingChecklist,
+  type OnboardingStatus,
+} from '@/components/forms/tax-onboarding-checklist';
 
 interface SectionBucket {
   section: string;
@@ -39,6 +55,11 @@ interface TaxPayment {
   notes: string | null;
 }
 
+// Sections eligible under NEW regime (besides 80CCD(2) which is always
+// eligible_under_new=true via DB default). Used for the per-bucket
+// "OLD only" vs "BOTH" badge.
+const NEW_ELIGIBLE_SECTIONS = new Set(['80CCD_2']);
+
 const formatINR = (paisa: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
     paisa / 100
@@ -68,6 +89,15 @@ export default function TaxDashboardPage() {
   const [taxPayments, setTaxPayments] = useState<TaxPayment[]>([]);
   const [totalTaxPaid, setTotalTaxPaid] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  // Sprint 5.2 — onboarding completion signals (drives U9 checklist)
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  // Bump this to force child components (KPI strip, regime card,
+  // regime-aware stats) to re-fetch after a tax-profile chip toggle.
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // Ref to the advance-tax card for the Quick Actions "Mark advance tax
+  // paid" CTA — clicking scrolls the user to it.
+  const advanceTaxRef = useRef<HTMLDivElement | null>(null);
 
   // Tax paid form
   const [showTaxForm, setShowTaxForm] = useState(false);
@@ -80,13 +110,39 @@ export default function TaxDashboardPage() {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [s, tp] = await Promise.all([
+      const [s, tp, itr1, f26, sel, fp] = await Promise.all([
         fetch(`/api/tax/summary?fy=${encodeURIComponent(fy)}`).then((r) => r.json()),
         fetch(`/api/tax/tax-paid?fy=${encodeURIComponent(fy)}`).then((r) => r.json()),
+        // Onboarding signals — non-blocking, only used to decide whether
+        // to surface the U9 checklist. Each endpoint returns minimal
+        // data we can check existence on.
+        fetch(`/api/tax/itr1/summary?fy=${encodeURIComponent(fy)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetch(`/api/tax/form-26as?fy=${encodeURIComponent(fy)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetch(`/api/tax/itr-form-selection?fy=${encodeURIComponent(fy)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetch(`/api/tax/documents?fy=${encodeURIComponent(fy)}&category=FILING_PACK`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
       ]);
       setSummary(s);
       setTaxPayments(tp.payments ?? []);
       setTotalTaxPaid(tp.totalPaisa ?? 0);
+
+      const hasSalary = (itr1?.blocks?.salary?.grossPaisa ?? 0) > 0;
+      const hasDeductions =
+        (s?.totalDeductionsPaisa ?? 0) > 0 ||
+        ((s?.buckets ?? []) as SectionBucket[]).some(
+          (b) => (b.totalPaisa ?? 0) > 0,
+        );
+      const has26AS = (f26?.uploads?.length ?? 0) > 0;
+      const hasItrSelection = sel?.selection != null || sel?.form != null;
+      const hasFilingPack = (fp?.documents?.length ?? 0) > 0;
+      setOnboarding({ hasSalary, hasDeductions, has26AS, hasItrSelection, hasFilingPack });
     } catch (e) {
       console.error(e);
     } finally {
@@ -116,24 +172,32 @@ export default function TaxDashboardPage() {
 
   const fyOptions = generateFyOptions().map((y) => ({ value: y, label: `FY ${y}` }));
 
+  // Decide whether to render the full dashboard or the empty-state
+  // checklist instead. Rule: render checklist if both salary AND
+  // deductions are missing. If at least one exists, render BOTH (so
+  // the user sees progress + the regime card).
+  const showChecklistOnly =
+    onboarding && !onboarding.hasSalary && !onboarding.hasDeductions;
+  const showChecklistAlongside =
+    onboarding &&
+    !showChecklistOnly &&
+    Object.values(onboarding).filter(Boolean).length < 5;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Section 80 — Tax Deductions</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">
+            Income Tax
+          </h1>
           <p className="text-[var(--dxp-text-secondary)]">
-            Track your deductions across every Section 80 bucket for the financial year
+            Recommendation, deductions, and filing pack — for FY {fy}
           </p>
         </div>
         <div className="flex gap-2">
           <div className="w-40">
             <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
           </div>
-          <Link href="/tax/new">
-            <Button variant="primary">
-              <Plus className="mr-2 h-4 w-4" /> Add deduction
-            </Button>
-          </Link>
         </div>
       </div>
 
@@ -141,127 +205,84 @@ export default function TaxDashboardPage() {
         <div className="flex h-40 items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-[var(--dxp-text-muted)]" />
         </div>
+      ) : showChecklistOnly && onboarding ? (
+        <TaxOnboardingChecklist fy={fy} status={onboarding} />
       ) : (
         <>
-          {/* Sprint 4 Phase 1 — regime comparison card. Reads the user's
-              actual income (salary + business/GST + other + rental) and
-              shows OLD vs NEW regime tax side-by-side with the
-              recommendation. Goes above the deduction stats because the
-              "which regime?" decision is upstream of the "how much did I
-              deduct?" tracking that follows. */}
-          <RegimeComparisonCard fy={fy} />
+          {/* U7 — Tax profile chips (top, compact) */}
+          <TaxProfileInline onChange={() => setRefreshTick((t) => t + 1)} />
 
-          {/* Sprint 4 Phase 3 — quarterly advance-tax planner. Sits
-              directly under regime-compare so the user sees the
-              projected liability and the 4 due-date slots together. */}
-          <AdvanceTaxCard fy={fy} />
+          {/* A — Tax KPI strip */}
+          <TaxKpiStrip key={`kpi-${fy}-${refreshTick}`} fy={fy} />
 
-          <StatsDisplay
-            currency="INR"
-            locale="en-IN"
-            columns={3}
-            stats={[
-              {
-                label: 'Total Deductions',
-                value: summary.totalDeductionsPaisa / 100,
-                format: 'currency',
-              },
-              {
-                label: 'Estimated Tax Saved (30%)',
-                value: summary.estimatedTaxSavedPaisa / 100,
-                format: 'currency',
-              },
-              {
-                label: 'Document Coverage %',
-                value: summary.documentCoveragePercent,
-                format: 'number',
-              },
-            ]}
-          />
+          {/* B — Regime comparison (banner promoted above columns) */}
+          <RegimeComparisonCard key={`regime-${fy}-${refreshTick}`} fy={fy} />
 
-          <div className="grid gap-4 md:grid-cols-4 lg:grid-cols-5">
-            <Link href="/tax/itr-wizard">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <FileCheck2 className="h-8 w-8 text-[var(--dxp-brand)]" />
-                    <div>
-                      <p className="font-bold text-[var(--dxp-text)]">ITR Wizard</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">Pick the right form</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-            <Link href="/tax/form-26as">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <ClipboardCheck className="h-8 w-8 text-[var(--dxp-brand)]" />
-                    <div>
-                      <p className="font-bold text-[var(--dxp-text)]">Form 26AS</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">TDS reconciliation</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-            <Link href="/tax/80g">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <Gift className="h-8 w-8 text-[var(--dxp-brand)]" />
-                    <div>
-                      <p className="font-bold text-[var(--dxp-text)]">80G Donations</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">Charitable contributions</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-            <Link href="/tax/ltcg-stcg">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <Calculator className="h-8 w-8 text-[var(--dxp-brand)]" />
-                    <div>
-                      <p className="font-bold text-[var(--dxp-text)]">Capital Gains</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">LTCG / STCG calculator</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-            <Link href="/tax/filing-pack">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-8 w-8 text-[var(--dxp-brand)]" />
-                    <div>
-                      <p className="font-bold text-[var(--dxp-text)]">Filing Pack</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">Generate ZIP for filing</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
+          {/* Quarterly advance-tax planner */}
+          <div ref={advanceTaxRef}>
+            <AdvanceTaxCard fy={fy} />
           </div>
 
+          {/* C — Quick Actions row (replaces 5-tile sub-nav grid) */}
+          <Card>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="mr-1 text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">
+                  Quick actions
+                </span>
+                <Link href="/tax/new">
+                  <Button variant="primary" size="sm">
+                    <Plus className="mr-1 h-3 w-3" /> Add deduction
+                  </Button>
+                </Link>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    advanceTaxRef.current?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    });
+                  }}
+                >
+                  <Coins className="mr-1 h-3 w-3" /> Mark advance tax paid
+                </Button>
+                <Link href="/tax/itr-wizard">
+                  <Button variant="secondary" size="sm">
+                    <FileCheck2 className="mr-1 h-3 w-3" /> Run ITR wizard
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* D — Section 80 regime-aware stats (replaces 3-tile stats) */}
+          <Section80RegimeAwareStats key={`s80-${fy}-${refreshTick}`} fy={fy} />
+
+          {/* Per-bucket progress bars + regime-eligibility badges */}
           <div className="grid gap-4 md:grid-cols-2">
             {summary.buckets.map((bucket) => {
               const capStr = bucket.capPaisa != null ? formatINR(bucket.capPaisa) : 'No cap';
               const pct = Math.min(100, bucket.usedPercent);
               const color =
                 pct >= 90 ? 'bg-rose-500' : pct >= 60 ? 'bg-amber-500' : 'bg-emerald-500';
+              const eligibleBoth = NEW_ELIGIBLE_SECTIONS.has(bucket.section);
               return (
                 <Card key={bucket.section} className={bucket.isExcluded ? 'opacity-40' : ''}>
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-base font-bold text-[var(--dxp-text)]">
-                          {bucket.label}
-                          {bucket.isExcluded && <span className="ml-2 text-xs font-normal text-rose-500">Excluded</span>}
-                        </h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-[var(--dxp-text)]">
+                            {bucket.label}
+                          </h3>
+                          <Badge variant={eligibleBoth ? 'success' : 'default'}>
+                            {eligibleBoth ? 'BOTH' : 'OLD only'}
+                          </Badge>
+                          {bucket.isExcluded && (
+                            <span className="text-xs font-normal text-rose-500">Excluded</span>
+                          )}
+                        </div>
                         <p className="text-xs text-[var(--dxp-text-muted)]">{bucket.description}</p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -313,6 +334,11 @@ export default function TaxDashboardPage() {
               );
             })}
           </div>
+
+          {/* Optional inline onboarding checklist (when partial progress) */}
+          {showChecklistAlongside && onboarding && (
+            <TaxOnboardingChecklist fy={fy} status={onboarding} />
+          )}
 
           {/* Tax Paid Section */}
           <Card>

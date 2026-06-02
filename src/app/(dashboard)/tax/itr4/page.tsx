@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { ItrResultBanner } from '@/components/forms/itr-result-banner';
 
 interface PresumptiveRow {
   id: number;
@@ -209,6 +210,14 @@ export default function Itr4Page() {
         </Card>
       ) : !data ? null : (
         <>
+          {/* Sprint 5.2 (E) — ITR result banner */}
+          <ItrResultBanner
+            fy={fy}
+            form="ITR-4"
+            regime={data.regime}
+            totalTaxPaisa={data.summary.totalTaxPaisa}
+            salaryTdsPaisa={data.summary.salaryTdsPaisa}
+          />
           {data.summary.exceedsCap && (
             <Card>
               <CardContent>

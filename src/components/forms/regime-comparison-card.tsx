@@ -175,6 +175,26 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
         </div>
       </CardHeader>
       <CardContent>
+        {/* Sprint 5.2 (B) — promoted recommendation banner. Sits ABOVE
+            the side-by-side columns so the answer is visible before the
+            justification. */}
+        <div className="mb-4 rounded-md border border-emerald-300 bg-emerald-50/60 p-3">
+          <div className="flex items-start gap-2">
+            <ArrowRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-700" />
+            <div>
+              <p className="text-sm font-semibold text-emerald-900">
+                Filing under <strong>{recommended}</strong> saves{' '}
+                <strong>{formatINR(data.comparison.savingsPaisa)}</strong> vs {other}.
+              </p>
+              <p className="mt-0.5 text-xs text-emerald-800">
+                {recommended === 'NEW'
+                  ? 'NEW is the govt default — simpler slabs, no Section 80 tracking needed.'
+                  : 'OLD wins because your Section 80 deductions out-cut the lower NEW slabs.'}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Side-by-side regime columns */}
         <div className="grid gap-4 md:grid-cols-2">
           <RegimeColumn
@@ -200,34 +220,6 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             onSetDefault={() => setRegimeDefault('OLD')}
             savingPreference={savingPreference}
           />
-        </div>
-
-        {/* Recommendation banner */}
-        <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50/60 p-3">
-          <div className="flex items-start gap-2">
-            <ArrowRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-700" />
-            <div>
-              <p className="text-sm font-semibold text-emerald-900">
-                Filing under <strong>{recommended}</strong> saves you{' '}
-                <strong>{formatINR(data.comparison.savingsPaisa)}</strong> vs {other}.
-              </p>
-              <p className="mt-1 text-xs text-emerald-800">
-                {recommended === 'NEW' ? (
-                  <>
-                    NEW regime is the govt default starting FY 2024-25 and uses simpler slabs
-                    with no deduction tracking. The Section 80 entries below DON&apos;T apply
-                    under NEW — they only matter if you switch to OLD.
-                  </>
-                ) : (
-                  <>
-                    OLD regime wins thanks to your {formatINR(data.deductions.oldRegime)} of
-                    Section 80 deductions. Keep tracking those entries; without them OLD would
-                    cost more.
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* Honesty footnote — what the engine doesn't yet do */}

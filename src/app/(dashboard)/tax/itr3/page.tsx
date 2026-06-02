@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Download, FileText, Plus, AlertCircle, CheckCircle2, Briefcase, Banknote, Receipt, Wallet, Calculator } from 'lucide-react';
 import { toast } from 'sonner';
+import { ItrResultBanner } from '@/components/forms/itr-result-banner';
 
 interface Summary {
   fy: string;
@@ -51,13 +52,31 @@ export default function Itr3HubPage() {
   const [fy, setFy] = useState<string>(currentFy());
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  // Sprint 5.2 — total tax + regime for the ITR result banner. ITR-3
+  // summary doesn't compute a regime-aware total, so we lean on
+  // regime-compare's recommendation.
+  const [totalTaxPaisa, setTotalTaxPaisa] = useState<number>(0);
+  const [regime, setRegime] = useState<'OLD' | 'NEW'>('NEW');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/tax/itr3/summary?fy=${fy}`);
-      const data = await r.json();
-      setSummary(data);
+      const [r, rc] = await Promise.all([
+        fetch(`/api/tax/itr3/summary?fy=${fy}`).then((x) => x.json()),
+        fetch(`/api/tax/regime-compare?fy=${fy}`)
+          .then((x) => (x.ok ? x.json() : null))
+          .catch(() => null),
+      ]);
+      setSummary(r);
+      if (rc?.comparison) {
+        const rec = rc.comparison.recommendation as 'OLD' | 'NEW';
+        setRegime(rec);
+        setTotalTaxPaisa(
+          rec === 'NEW'
+            ? rc.comparison.new.totalTaxPaisa
+            : rc.comparison.old.totalTaxPaisa,
+        );
+      }
     } catch (e) {
       console.error(e);
       toast.error('Failed to load summary');
@@ -106,6 +125,14 @@ export default function Itr3HubPage() {
         <div className="flex h-32 items-center justify-center text-gray-400">Loading…</div>
       ) : (
         <>
+          {/* Sprint 5.2 (E) — ITR result banner */}
+          <ItrResultBanner
+            fy={fy}
+            form="ITR-3"
+            regime={regime}
+            totalTaxPaisa={totalTaxPaisa}
+            salaryTdsPaisa={s?.salary.totalSalaryTds ?? 0}
+          />
           {/* Schedule cards */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <ScheduleCard

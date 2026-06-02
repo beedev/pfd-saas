@@ -23,6 +23,7 @@ import { Card, CardHeader, CardContent, Badge, Button, Select, StatsDisplay } fr
 import { Loader2, AlertTriangle, ArrowRight, Banknote, Home, Wallet, Calculator, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { ItrResultBanner } from '@/components/forms/itr-result-banner';
 
 interface Itr1Summary {
   fy: string;
@@ -156,6 +157,14 @@ export default function Itr1Page() {
         </Card>
       ) : !data ? null : (
         <>
+          {/* Sprint 5.2 (E) — ITR result banner */}
+          <ItrResultBanner
+            fy={fy}
+            form="ITR-1"
+            regime={data.regime}
+            totalTaxPaisa={data.summary.totalTaxPaisa}
+            salaryTdsPaisa={data.blocks.salary.tdsPaisa}
+          />
           {data.summary.exceedsCap && (
             <Card>
               <CardContent>
