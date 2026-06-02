@@ -57,6 +57,10 @@ const probes = [
   { path: `/api/tax/itr3/salary?fy=${FY}`,         expect: [200] },
   { path: `/api/tax/itr3/tds?fy=${FY}`,            expect: [200] },
   { path: `/api/tax/itr3/other-income?fy=${FY}`,   expect: [200] },
+  // Sprint 5.3 — historical rental track. Smoke covers the list endpoint
+  // (filtered to one FY) from phase 2 onward so a route-level regression
+  // surfaces before it reaches /income.
+  { path: `/api/finance/rental-history?fy=${FY}`,  expect: [200] },
 ];
 
 const results = [];
