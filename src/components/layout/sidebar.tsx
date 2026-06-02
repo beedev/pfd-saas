@@ -80,6 +80,8 @@ const navigation: NavSection[] = [
       { name: 'Fixed Deposits', href: '/investments/fixed-deposits', icon: Banknote },
       { name: 'Real Estate', href: '/investments/real-estate', icon: Home },
       { name: 'Chit Funds', href: '/investments/chit-funds', icon: Users },
+      // Sprint 5.6e — EPF / NPS PDF statement importer.
+      { name: 'Import from statement', href: '/investments/import-statement', icon: Upload },
     ],
   },
   {
