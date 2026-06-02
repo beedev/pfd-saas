@@ -219,34 +219,64 @@ export default function Form26asPage() {
         </div>
       </div>
 
-      {/* Top banner */}
-      {!isLoading && data && hasUploads && (
-        <Card>
-          <CardContent>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                {isMatch ? (
-                  <CheckCircle2 className="h-7 w-7 text-emerald-500" />
-                ) : (
-                  <AlertTriangle className="h-7 w-7 text-amber-500" />
-                )}
-                <div>
-                  <p className="text-base font-bold text-[var(--dxp-text)]">
-                    {isMatch
-                      ? `Reconciled — books match Form 26AS within ±₹1k.`
-                      : `Discrepancy of ${formatINR(Math.abs(delta))} between your books and Form 26AS.`}
-                  </p>
-                  <p className="text-xs text-[var(--dxp-text-muted)]">
-                    Books: <span className="font-mono">{formatINR(booksTotal)}</span> &nbsp;·&nbsp; Form 26AS (sum across {data.uploads.length} upload{data.uploads.length === 1 ? '' : 's'}): <span className="font-mono">{formatINR(tracesTotal)}</span>
-                  </p>
-                </div>
+      {/* H — Reconciliation reco banner (promoted, prominent). Renders
+          in all three states: matched / discrepancy / no-uploads. */}
+      {!isLoading && data && (
+        <div
+          className={`rounded-md border p-4 ${
+            !hasUploads
+              ? 'border-sky-300 bg-sky-50/40'
+              : isMatch
+              ? 'border-emerald-300 bg-emerald-50/60'
+              : 'border-amber-300 bg-amber-50/40'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {!hasUploads ? (
+                <Upload className="h-7 w-7 text-sky-700" />
+              ) : isMatch ? (
+                <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+              ) : (
+                <AlertTriangle className="h-7 w-7 text-amber-500" />
+              )}
+              <div>
+                <p className="text-base font-bold text-[var(--dxp-text)]">
+                  {!hasUploads
+                    ? 'Upload your 26AS to reconcile TDS credits.'
+                    : isMatch
+                    ? 'Looks aligned — books match Form 26AS within ±₹1k.'
+                    : `Discrepancy of ${formatINR(Math.abs(delta))} — review ${data.tdsCredits.length} row${data.tdsCredits.length === 1 ? '' : 's'}.`}
+                </p>
+                <p className="text-xs text-[var(--dxp-text-secondary)]">
+                  Your books:{' '}
+                  <span className="font-mono font-bold text-[var(--dxp-text)]">
+                    {formatINR(booksTotal)}
+                  </span>{' '}
+                  &nbsp;·&nbsp; From 26AS:{' '}
+                  <span className="font-mono font-bold text-[var(--dxp-text)]">
+                    {formatINR(tracesTotal)}
+                  </span>{' '}
+                  &nbsp;·&nbsp; Difference:{' '}
+                  <span
+                    className={`font-mono font-bold ${
+                      isMatch
+                        ? 'text-emerald-700'
+                        : hasUploads
+                        ? 'text-amber-700'
+                        : 'text-[var(--dxp-text)]'
+                    }`}
+                  >
+                    {formatINR(Math.abs(delta))}
+                  </span>
+                </p>
               </div>
-              <Badge variant={isMatch ? 'success' : 'warning'}>
-                {isMatch ? 'MATCH' : 'MISMATCH'}
-              </Badge>
             </div>
-          </CardContent>
-        </Card>
+            <Badge variant={!hasUploads ? 'info' : isMatch ? 'success' : 'warning'}>
+              {!hasUploads ? 'NO 26AS YET' : isMatch ? 'MATCH' : 'MISMATCH'}
+            </Badge>
+          </div>
+        </div>
       )}
 
       {isLoading || !data ? (
