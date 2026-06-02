@@ -141,6 +141,18 @@ export const userPreferences = pgTable('user_preferences', {
    *  ceiling). This is a setup-time toggle since the user's employer
    *  category rarely changes mid-FY. */
   isGovtEmployeeForNps: boolean('is_govt_employee_for_nps').notNull().default(false),
+  // Sprint 5.8a — Retirement tax brackets. JSONB array sorted
+  // ascending by threshold (rupees, NOT paisa — matches user mental
+  // model of "₹10L slab"). Default: 0% up to ₹10L, 15% ₹10L-₹30L,
+  // 25% above ₹30L. Configurable per user via /settings.
+  retirementTaxBrackets: jsonb('retirement_tax_brackets')
+    .$type<Array<{ threshold: number; ratePct: number }>>()
+    .notNull()
+    .default([
+      { threshold: 0, ratePct: 0 },
+      { threshold: 1000000, ratePct: 15 },
+      { threshold: 3000000, ratePct: 25 },
+    ]),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 });
