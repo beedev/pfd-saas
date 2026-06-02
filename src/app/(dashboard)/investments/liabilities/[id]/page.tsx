@@ -64,6 +64,9 @@ interface Liability {
   remainingTenor: number | null;
   nextPaymentDate: string | null;
   notes: string | null;
+  // Sprint 5.9e — tax-qualification flags
+  principalQualifies80c: boolean;
+  interestQualifies24b: boolean;
 }
 
 const STATUS_OPTIONS: Array<{ label: string; value: LiabilityStatus }> = [
@@ -97,6 +100,9 @@ interface FormState {
   maturityDate: string;
   remainingTenor: string;
   notes: string;
+  // Sprint 5.9e — tax-qualification flags
+  principalQualifies80c: boolean;
+  interestQualifies24b: boolean;
 }
 
 function liabilityToForm(l: Liability): FormState {
@@ -110,6 +116,8 @@ function liabilityToForm(l: Liability): FormState {
     maturityDate: l.maturityDate ?? '',
     remainingTenor: l.remainingTenor?.toString() ?? '',
     notes: l.notes ?? '',
+    principalQualifies80c: !!l.principalQualifies80c,
+    interestQualifies24b: !!l.interestQualifies24b,
   };
 }
 
@@ -122,6 +130,11 @@ export default function LiabilityDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
+
+  // Sprint 5.9e — FY-aggregated tax counts for this loan, refreshed
+  // when flags change. Shown as an inline note: "FY 2025-26: ₹X principal
+  // · ₹Y interest already counted in your tax deductions".
+  const [taxNote, setTaxNote] = useState<{ fy: string; principalPaisa: number; interestPaisa: number } | null>(null);
 
   // Uploaded amortization schedule state
   const [uploadedAmort, setUploadedAmort] = useState<UploadedAmortRow[]>([]);
@@ -278,6 +291,40 @@ export default function LiabilityDetailPage() {
     loadAmortization();
   }, [load, loadExpenses, loadAmortization]);
 
+  // Sprint 5.9e — fetch the FY-aggregated principal/interest for this
+  // loan whenever the row reloads or flags change. Defaults to the
+  // current FY.
+  useEffect(() => {
+    if (!liability) return;
+    if (!liability.principalQualifies80c && !liability.interestQualifies24b) {
+      setTaxNote(null);
+      return;
+    }
+    const now = new Date();
+    const m = now.getMonth() + 1;
+    const y = now.getFullYear();
+    const startYear = m >= 4 ? y : y - 1;
+    const fy = `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+    fetch(`/api/finance/loan-tax-deductions?fy=${encodeURIComponent(fy)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        const row = (d.perLiability ?? []).find(
+          (l: { id: number }) => l.id === liability.id,
+        );
+        if (row) {
+          setTaxNote({
+            fy,
+            principalPaisa: row.fyPrincipalPaisa ?? 0,
+            interestPaisa: row.fyInterestPaisa ?? 0,
+          });
+        } else {
+          setTaxNote(null);
+        }
+      })
+      .catch(() => setTaxNote(null));
+  }, [liability]);
+
   const onDelete = async () => {
     if (!confirm('Delete this liability?')) return;
     setIsDeleting(true);
@@ -307,6 +354,9 @@ export default function LiabilityDetailPage() {
         maturityDate: form.maturityDate || null,
         remainingTenor: form.remainingTenor ? Number(form.remainingTenor) : null,
         notes: form.notes || null,
+        // Sprint 5.9e — tax-qualification flags
+        principalQualifies80c: form.principalQualifies80c,
+        interestQualifies24b: form.interestQualifies24b,
       };
       const r = await fetch(`/api/investments/liabilities/${params.id}`, {
         method: 'PATCH',
@@ -843,9 +893,9 @@ export default function LiabilityDetailPage() {
         </CardHeader>
         <CardContent>
           {!isEditing ? (
-            <DetailView liability={liability} />
+            <DetailView liability={liability} taxNote={taxNote} />
           ) : (
-            <EditForm form={form} setField={setField} isCard={isCard} />
+            <EditForm form={form} setField={setField} isCard={isCard} taxNote={taxNote} />
           )}
         </CardContent>
       </Card>
@@ -855,7 +905,13 @@ export default function LiabilityDetailPage() {
 
 /* --- view mode ----------------------------------------------------------- */
 
-function DetailView({ liability }: { liability: Liability }) {
+function DetailView({
+  liability,
+  taxNote,
+}: {
+  liability: Liability;
+  taxNote: { fy: string; principalPaisa: number; interestPaisa: number } | null;
+}) {
   const fields: Array<[string, string]> = [
     ['Name', liability.name],
     ['Creditor', liability.creditorName],
@@ -877,6 +933,55 @@ function DetailView({ liability }: { liability: Liability }) {
           </div>
         ))}
       </dl>
+      {/* Sprint 5.9e — tax-qualification flags status */}
+      <div className="mt-4 rounded border border-[var(--dxp-border)] p-3 text-xs">
+        <p className="font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">
+          Tax treatment
+        </p>
+        <ul className="mt-1 space-y-0.5 text-[var(--dxp-text)]">
+          <li className="flex items-center gap-2">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                liability.principalQualifies80c ? 'bg-emerald-500' : 'bg-[var(--dxp-border)]'
+              }`}
+            />
+            Principal{' '}
+            {liability.principalQualifies80c ? 'qualifies' : 'does not qualify'} for
+            Section 80C deduction
+          </li>
+          <li className="flex items-center gap-2">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                liability.interestQualifies24b ? 'bg-emerald-500' : 'bg-[var(--dxp-border)]'
+              }`}
+            />
+            Interest{' '}
+            {liability.interestQualifies24b ? 'qualifies' : 'does not qualify'} for
+            Section 24(b) deduction
+          </li>
+        </ul>
+        {taxNote && (taxNote.principalPaisa > 0 || taxNote.interestPaisa > 0) && (
+          <p className="mt-2 text-[var(--dxp-text-secondary)]">
+            FY {taxNote.fy}:{' '}
+            {liability.principalQualifies80c && taxNote.principalPaisa > 0 && (
+              <>
+                <span className="font-mono">{formatINR(taxNote.principalPaisa)}</span> principal
+              </>
+            )}
+            {liability.principalQualifies80c &&
+              taxNote.principalPaisa > 0 &&
+              liability.interestQualifies24b &&
+              taxNote.interestPaisa > 0 &&
+              ' · '}
+            {liability.interestQualifies24b && taxNote.interestPaisa > 0 && (
+              <>
+                <span className="font-mono">{formatINR(taxNote.interestPaisa)}</span> interest
+              </>
+            )}{' '}
+            already counted in your tax deductions.
+          </p>
+        )}
+      </div>
       {liability.notes && (
         <p className="mt-4 text-sm text-[var(--dxp-text-secondary)]">{liability.notes}</p>
       )}
@@ -890,10 +995,12 @@ function EditForm({
   form,
   setField,
   isCard,
+  taxNote,
 }: {
   form: FormState;
   setField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   isCard: boolean;
+  taxNote: { fy: string; principalPaisa: number; interestPaisa: number } | null;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -963,6 +1070,65 @@ function EditForm({
             className="w-full rounded border border-[var(--dxp-border)] bg-[var(--dxp-surface)] p-2 text-sm text-[var(--dxp-text)] focus:border-[var(--dxp-brand)] focus:outline-none"
           />
         </Field>
+      </div>
+
+      {/* Sprint 5.9e — tax-qualification flags. Default is true for
+          HOME_LOAN (set by migration 0031), false for everything else.
+          User can toggle e.g. for AUTO_LOAN that's actually a
+          let-out home (rare but possible). */}
+      <div className="sm:col-span-2">
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">
+          Tax treatment
+        </p>
+        <label className="flex cursor-pointer items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.principalQualifies80c}
+            onChange={(e) => setField('principalQualifies80c', e.target.checked)}
+            className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--dxp-brand)]"
+          />
+          <span className="text-[var(--dxp-text)]">
+            Principal qualifies for 80C deduction
+            <span className="block text-xs text-[var(--dxp-text-muted)]">
+              Default for HOME_LOAN. Subject to the ₹1.5L 80C cap.
+            </span>
+          </span>
+        </label>
+        <label className="mt-2 flex cursor-pointer items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.interestQualifies24b}
+            onChange={(e) => setField('interestQualifies24b', e.target.checked)}
+            className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--dxp-brand)]"
+          />
+          <span className="text-[var(--dxp-text)]">
+            Interest qualifies for Section 24(b) deduction
+            <span className="block text-xs text-[var(--dxp-text-muted)]">
+              Default for HOME_LOAN. ₹2L self-occupied cap / uncapped let-out.
+            </span>
+          </span>
+        </label>
+        {taxNote && (taxNote.principalPaisa > 0 || taxNote.interestPaisa > 0) && (
+          <p className="mt-2 text-xs text-[var(--dxp-text-secondary)]">
+            FY {taxNote.fy}:{' '}
+            {form.principalQualifies80c && taxNote.principalPaisa > 0 && (
+              <>
+                <span className="font-mono">{formatINR(taxNote.principalPaisa)}</span> principal
+              </>
+            )}
+            {form.principalQualifies80c &&
+              taxNote.principalPaisa > 0 &&
+              form.interestQualifies24b &&
+              taxNote.interestPaisa > 0 &&
+              ' · '}
+            {form.interestQualifies24b && taxNote.interestPaisa > 0 && (
+              <>
+                <span className="font-mono">{formatINR(taxNote.interestPaisa)}</span> interest
+              </>
+            )}{' '}
+            already counted in your tax deductions.
+          </p>
+        )}
       </div>
     </div>
   );

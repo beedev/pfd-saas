@@ -68,6 +68,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         maturityDate: typeof body.maturityDate === 'string' ? (body.maturityDate || null) : current.maturityDate,
         remainingTenor: typeof body.remainingTenor === 'number' ? body.remainingTenor : current.remainingTenor,
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
+        // Sprint 5.9e — tax flags. Default to existing values when the
+        // body doesn't include them (keeps non-flag PATCHes lossless).
+        principalQualifies80c:
+          typeof body.principalQualifies80c === 'boolean'
+            ? body.principalQualifies80c
+            : current.principalQualifies80c,
+        interestQualifies24b:
+          typeof body.interestQualifies24b === 'boolean'
+            ? body.interestQualifies24b
+            : current.interestQualifies24b,
         updatedAt: new Date(),
       })
       .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
