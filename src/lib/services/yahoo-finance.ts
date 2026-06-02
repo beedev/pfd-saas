@@ -168,5 +168,52 @@ async function searchSymbol(query: string): Promise<YahooSearchResult[]> {
   }
 }
 
+// ─── FX rate helpers — Sprint 5.10b ───────────────────────────────────
+// Yahoo exposes FX rates via the same chart endpoint using the symbol
+// pattern `<BASE><QUOTE>=X` (e.g. USDINR=X, EURINR=X). The same 5-min
+// in-memory cache keyed on the symbol is reused, so multiple callers
+// asking for the same currency in a render cycle share one fetch.
+//
+// We deliberately reuse getQuote() instead of forking a parallel cache;
+// keeping a single source of truth means cache invalidation, stale-on-
+// error, and User-Agent header changes stay consistent across stock
+// quotes and FX quotes.
+
+/**
+ * Fetch INR conversion rates for a set of foreign currencies.
+ *
+ * Returns a map { USD: 83.45, EUR: 90.12, … }. Currencies that fail to
+ * resolve are omitted from the result (callers should treat a missing
+ * key as "live rate unavailable" and either skip the row or fall back
+ * to a stored last-known rate).
+ *
+ * INR itself is short-circuited to 1.0 — Yahoo doesn't quote INRINR=X
+ * and callers shouldn't have to special-case it.
+ */
+export async function getFxRatesToInr(
+  currencyCodes: string[],
+): Promise<Record<string, number>> {
+  const unique = Array.from(
+    new Set(currencyCodes.map((c) => c.toUpperCase()).filter(Boolean)),
+  );
+  const result: Record<string, number> = {};
+  // Resolve in parallel via the shared getQuote cache. Non-INR symbols
+  // become `<CCY>INR=X`; INR is a constant.
+  await Promise.all(
+    unique.map(async (ccy) => {
+      if (ccy === 'INR') {
+        result.INR = 1;
+        return;
+      }
+      const sym = `${ccy}INR=X`;
+      const q = await getQuote(sym);
+      if (q && Number.isFinite(q.regularMarketPrice) && q.regularMarketPrice > 0) {
+        result[ccy] = q.regularMarketPrice;
+      }
+    }),
+  );
+  return result;
+}
+
 export { getQuote, getQuotes, searchSymbol };
 export type { YahooQuote, YahooSearchResult };
