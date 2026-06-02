@@ -16,6 +16,85 @@ countries later.
 
 ## Status
 
+**Sprint 5.7 complete — mutual-fund sub-classification.** Four phases.
+
+- **Phase 5.7a — Schema + rates split.** Migration 0029 adds
+  `mutual_funds.category text DEFAULT 'UNKNOWN' NOT NULL` with a CHECK
+  constraint over (EQUITY|DEBT|HYBRID|UNKNOWN). Distinct from
+  `fund_type` (AMFI scheme classification); category is the rate-bucket
+  key. `DEFAULT_GROWTH_RATES` gains three new keys: MF_EQUITY=11,
+  MF_DEBT=7, MF_HYBRID=9. Existing `MUTUAL_FUNDS` umbrella rate stays
+  as the UNKNOWN fallback. Settings UI surfaces the three subclass
+  rows with a footnote spelling out "subclass rates only fire when the
+  per-fund category is set". Migration journal updated via the psql +
+  manual INSERT pattern (id 28, hash captured).
+- **Phase 5.7b — Projection wiring.** New helper
+  `getMfRate(category, rates)` resolves per-fund rates with a single
+  precedence chain. `goal-corpus.ts` CorpusContext now carries a per-MF
+  array with resolved category + rate; `weightedReturnForGoal` special-
+  cases MUTUAL_FUNDS aggregate inclusion to sum
+  `value × category_rate` per fund, so a goal with mostly equity MFs
+  sees ~11% vs ~7% if mostly debt. Cashflow `deriveSips` surfaces the
+  category in the event label/notes (math unchanged — SIPs stay flat
+  outflows). Retirement-assets API gets a new MUTUAL_FUNDS class row
+  with `mfBreakdown` aggregate (per-category value + rate + fund
+  count) for at-a-glance UI display.
+- **Phase 5.7c — UI inline edit + bulk modal.** MF detail page gets a
+  Category dropdown with a live hint showing the resolved rate
+  ("Using Equity growth rate of 11% per year"). MF list page shows an
+  amber banner when any fund is UNKNOWN — clicking "Categorise now"
+  opens a modal with one row per uncategorised fund + per-row dropdown,
+  committing via the new POST
+  `/api/investments/mutual-funds/bulk-categorise` endpoint. List page
+  table also gains a Category column for at-a-glance visibility.
+- **Phase 5.7d — Seed + verify.** BXDEva's 8 MFs now carry explicit
+  categories — 5 EQUITY (₹9.93L), 2 DEBT (₹5.38L, including the Liquid
+  fund), 1 HYBRID (₹0.85L). 30-year projection delta vs the
+  before-state (uniform 11%):
+    BEFORE total ₹3.70Cr → AFTER total ₹2.80Cr (24% lower, more
+    honest — debt MFs no longer over-projected at equity rates).
+
+**Sprint 5.10 complete — forex deposits asset class.** Six phases.
+
+- **Phase 5.10a — Schema (mig 0030).** New `forex_deposits` table
+  with `amount_in_currency numeric(18,4)` (foreign currency, not paisa
+  — paisa rule is INR-only), `currency_code` (ISO 4217), interest
+  rate, opening/maturity dates, status (ACTIVE/MATURED/CLOSED), notes.
+  Indexed on user_id and (user_id, status) for the dashboard tile.
+  Migration journal: id 29.
+- **Phase 5.10b — Live FX rate service.** New `getFxRatesToInr()` in
+  `src/lib/services/yahoo-finance.ts` resolves `<CCY>INR=X` symbols
+  through the existing 5-min getQuote cache. INR short-circuited to
+  1.0; failed lookups omitted from the result. New auth-gated GET
+  `/api/investments/forex-deposits/live-rates` exposes rates for the
+  union of the user's currencies.
+- **Phase 5.10c — CRUD API.** GET/POST /api/investments/forex-deposits
+  + GET/PATCH/DELETE /api/investments/forex-deposits/[id]. Each row
+  is enriched with `fxRate` + `inrValuePaisa` at read time. Validation:
+  currency `/^[A-Z]{3}$/`, amount > 0, allowed status. numeric() round-
+  trip preserved by parseFloat at the boundary.
+- **Phase 5.10d — UI pages + sidebar + net-worth tile.**
+  `/investments/forex-deposits` list, `/new` create form (with live
+  INR preview as the user types), `/[id]` detail with inline edit
+  matching NPS/EPF. Sidebar entry between Real Estate and Chit Funds.
+  New "Forex Deposits" stat in the home net-worth StatsDisplay
+  aggregated from ACTIVE deposits with non-null inrValuePaisa.
+- **Phase 5.10e — Cashflow derivation + asset-growth-rates.** New
+  `FOREX` key in DEFAULT_GROWTH_RATES (5% — INR depreciation drift ≈
+  deposit interest). New `FOREX_MATURITY` CashflowSourceKind (TAXABLE
+  default, documented rationale). `deriveForexDeposits` emits ONE_TIME
+  events at the deposit's maturity_date using the live FX rate
+  captured at derivation time (flat-rate, no FX projection — honest
+  stance). `/api/cashflow-events/derive` route preloads forex rows +
+  rates, threads them through DerivationInput; response now reports
+  forexDeposits + fxRatesResolved in the `considered` summary.
+- **Phase 5.10f — Seed + verify.** BXDEva gets 3 deposits: USD 5,000
+  (HDFC NRE), EUR 2,000 maturing 2028 (ICICI NRE Bank), AED 10,000
+  (ENBD). Live FX resolved at runtime: USD ₹95.265, EUR ₹110.9168,
+  AED ₹25.886. Total INR equivalent ₹9.57L. Cashflow derive emits a
+  single FOREX_MATURITY event for the EUR FD (₹221,834 at 2028-06-01);
+  ongoing savings correctly skipped.
+
 **Sprint 5.6 complete — EPF + NPS PDF statement importer.** Six phases.
 
 - **Phase 5.6a — Parser framework.** `DocType` union extended with
@@ -533,6 +612,11 @@ Deferred from Sprint 2:
 Deferred from Sprint 3 / 3.5:
 - MF CAS PDF parser. Awaiting a sample PDF. (EPF passbook + NPS SoT
   importers closed by Sprint 5.6.)
+- ~~MF subclass projection~~ — closed by Sprint 5.7 (per-fund
+  category drives MF_EQUITY/DEBT/HYBRID rates in goal-corpus, retire-
+  ment-assets, and the inline-edit UI).
+- ~~Forex deposits asset class~~ — closed by Sprint 5.10 (new
+  forex_deposits table + live INR conversion + cashflow integration).
 - Migration of `timestamp` → `timestamptz` across all 50+ tables. Known
   tech debt — flagged when the per-tenant cron timezone bug surfaced in
   Sprint 2 Phase 5.
