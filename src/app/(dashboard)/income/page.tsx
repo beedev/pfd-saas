@@ -12,7 +12,7 @@
  * client never assembles the totals — that's the API's job.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Banknote,
@@ -23,7 +23,22 @@ import {
   PiggyBank,
   TrendingUp,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, StatsDisplay, Badge } from '@dxp/ui';
+import { Card, CardContent, CardHeader, StatsDisplay, Badge, Select } from '@dxp/ui';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+
+/** ±2 years around current FY — same window as the /tax page so the
+ *  two pages stay navigable in lockstep. */
+function generateFyOptions(): Array<{ value: string; label: string }> {
+  const current = getCurrentFinancialYear();
+  const startYear = Number(current.split('-')[0]);
+  const out: Array<{ value: string; label: string }> = [];
+  for (let i = -2; i <= 2; i++) {
+    const s = startYear + i;
+    const e = String((s + 1) % 100).padStart(2, '0');
+    out.push({ value: `${s}-${e}`, label: `FY ${s}-${e}` });
+  }
+  return out;
+}
 
 interface IncomeSummary {
   currentFy: string;
@@ -48,31 +63,58 @@ function formatINR(paisa: number): string {
 export default function IncomePage() {
   const [data, setData] = useState<IncomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // FY state lives on the page so the selector is local — no URL sync
+  // since the page is a roll-up not a deep-link target. The selector
+  // defaults to the server's current FY on first load, then the user
+  // drives it from there.
+  const [fy, setFy] = useState<string>(getCurrentFinancialYear());
+  const [isLoading, setIsLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/income/summary?fy=${encodeURIComponent(fy)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      setData(j);
+    } catch {
+      setError('Could not load income summary');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fy]);
 
   useEffect(() => {
-    fetch('/api/income/summary')
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then(setData)
-      .catch(() => setError('Could not load income summary'));
-  }, []);
+    load();
+  }, [load]);
+
+  const fyOptions = generateFyOptions();
 
   if (error) {
     return <p className="text-sm text-red-600">{error}</p>;
   }
-  if (!data) {
+  if (isLoading || !data) {
     return <p className="text-sm text-[var(--dxp-text-muted)]">Loading income summary…</p>;
   }
 
-  const { currentFy: fy, stream, totalsPaisa, trend } = data;
+  const { stream, totalsPaisa, trend } = data;
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold text-[var(--dxp-text)]">Income</h1>
-        <p className="text-sm text-[var(--dxp-text-secondary)] mt-1">
-          Roll-up across salary, other sources, rental, and capital gains for FY {fy}.
-          Click any row to edit at the source.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--dxp-text)]">Income</h1>
+          <p className="text-sm text-[var(--dxp-text-secondary)] mt-1">
+            Roll-up across salary, other sources, rental, and capital gains for FY {fy}.
+            Click any row to edit at the source.
+          </p>
+        </div>
+        <div className="w-40">
+          {/* FY selector — mirrors the /tax page pattern so users can
+              walk historical FYs without two different mental models. */}
+          <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+        </div>
       </header>
 
       <StatsDisplay

@@ -48,14 +48,18 @@ function dateToFy(iso: string | null | undefined): string | null {
   return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   }
 
   const userId = session.user.id;
-  const fy = currentFy();
+  // Accept ?fy=YYYY-YY to view prior-year roll-ups. Defaults to the
+  // current Indian FY. Validate format strictly — a bad value would
+  // silently return an empty roll-up which looks like a bug.
+  const fyParam = new URL(request.url).searchParams.get('fy');
+  const fy = fyParam && /^\d{4}-\d{2}$/.test(fyParam) ? fyParam : currentFy();
 
   try {
     const [salaries, others, gains, properties, invs] = await Promise.all([
