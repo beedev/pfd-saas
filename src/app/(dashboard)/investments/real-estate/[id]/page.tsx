@@ -15,7 +15,7 @@ import {
   Input,
   Select,
 } from '@dxp/ui';
-import { ArrowLeft, Loader2, Home, Trash2, Pencil, Save, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Home, Trash2, Pencil, Save, X, Plus, CalendarDays } from 'lucide-react';
 
 type PropertyType = 'RESIDENTIAL' | 'COMMERCIAL' | 'LAND' | 'PLOT';
 type PropertyStatus = 'OWNED' | 'MORTGAGED' | 'UNDER_CONSTRUCTION' | 'RENTED';
@@ -308,6 +308,13 @@ export default function PropertyDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Sprint 5.3 — historical rental track. Self-occupied properties
+          earn no rent by definition (sec 24 NIL annual value), so we hide
+          the section there instead of confusing users with an inert table. */}
+      {!property.isSelfOccupied && (
+        <RentalHistorySection propertyId={property.id} />
+      )}
     </div>
   );
 }
@@ -535,5 +542,342 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </label>
       {children}
     </div>
+  );
+}
+
+/* ─── Sprint 5.3 — Rental history (per FY × property) ─────────────────── */
+
+interface RentalHistoryRow {
+  id: number;
+  realEstateId: number;
+  propertyName?: string;
+  fy: string;
+  rentReceivedPaisa: number;
+  monthsLet: number;
+  notes: string | null;
+}
+
+interface RentalRowFormState {
+  fy: string;
+  rentReceivedRupees: string;
+  monthsLet: string;
+  notes: string;
+}
+
+/** Default suggested FY for the "+ Add FY" form. Uses the previous FY
+ *  since users typically backfill (current FY is usually still in flight). */
+function defaultPriorFy(): string {
+  const d = new Date();
+  const startYear = d.getMonth() + 1 >= 4 ? d.getFullYear() - 1 : d.getFullYear() - 2;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+}
+
+function RentalHistorySection({ propertyId }: { propertyId: number }) {
+  const [rows, setRows] = useState<RentalHistoryRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAdding, setIsAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [draft, setDraft] = useState<RentalRowFormState>({
+    fy: defaultPriorFy(),
+    rentReceivedRupees: '',
+    monthsLet: '12',
+    notes: '',
+  });
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const r = await fetch(`/api/finance/rental-history?propertyId=${propertyId}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || 'Failed to load rental history');
+      setRows(j.rows ?? []);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load rental history';
+      toast.error(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [propertyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const resetDraft = () => {
+    setDraft({
+      fy: defaultPriorFy(),
+      rentReceivedRupees: '',
+      monthsLet: '12',
+      notes: '',
+    });
+  };
+
+  const startEdit = (row: RentalHistoryRow) => {
+    setEditingId(row.id);
+    setIsAdding(false);
+    setDraft({
+      fy: row.fy,
+      rentReceivedRupees: (row.rentReceivedPaisa / 100).toString(),
+      monthsLet: String(row.monthsLet),
+      notes: row.notes ?? '',
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setIsAdding(false);
+    resetDraft();
+  };
+
+  const onAddSave = async () => {
+    if (!/^\d{4}-\d{2}$/.test(draft.fy)) {
+      toast.error('FY must be YYYY-YY (e.g. 2024-25)');
+      return;
+    }
+    const months = Number(draft.monthsLet);
+    if (!Number.isInteger(months) || months < 1 || months > 12) {
+      toast.error('Months let must be 1..12');
+      return;
+    }
+    const rupees = Number(draft.rentReceivedRupees);
+    if (!Number.isFinite(rupees) || rupees < 0) {
+      toast.error('Rent received must be a non-negative number');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const r = await fetch('/api/finance/rental-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          realEstateId: propertyId,
+          fy: draft.fy,
+          rentReceivedRupees: rupees,
+          monthsLet: months,
+          notes: draft.notes || null,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || 'Failed to add');
+      toast.success('Rental year added');
+      setIsAdding(false);
+      resetDraft();
+      await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to add';
+      toast.error(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const onEditSave = async () => {
+    if (editingId === null) return;
+    const months = Number(draft.monthsLet);
+    if (!Number.isInteger(months) || months < 1 || months > 12) {
+      toast.error('Months let must be 1..12');
+      return;
+    }
+    const rupees = Number(draft.rentReceivedRupees);
+    if (!Number.isFinite(rupees) || rupees < 0) {
+      toast.error('Rent received must be a non-negative number');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const r = await fetch(`/api/finance/rental-history/${editingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rentReceivedRupees: rupees,
+          monthsLet: months,
+          notes: draft.notes || null,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || 'Failed to update');
+      toast.success('Rental year updated');
+      cancelEdit();
+      await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to update';
+      toast.error(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const onDelete = async (row: RentalHistoryRow) => {
+    if (!confirm(`Delete rental entry for FY ${row.fy}?`)) return;
+    try {
+      const r = await fetch(`/api/finance/rental-history/${row.id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error('Delete failed');
+      toast.success('Removed');
+      await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      toast.error(msg);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+            <CalendarDays className="h-5 w-5 text-[var(--dxp-brand)]" />
+            Rental history
+          </h3>
+          {!isAdding && editingId === null && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setIsAdding(true);
+                setEditingId(null);
+                resetDraft();
+              }}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add FY
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-[var(--dxp-text-muted)]">Loading rental history…</p>
+        ) : (
+          <>
+            {rows.length === 0 && !isAdding && (
+              <p className="text-sm text-[var(--dxp-text-muted)]">
+                No rental history yet — add prior-year entries to populate the YoY
+                breakdown on /income.
+              </p>
+            )}
+
+            {(rows.length > 0 || isAdding) && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-[var(--dxp-border-light)] text-xs uppercase tracking-wider text-[var(--dxp-text-secondary)]">
+                    <tr>
+                      <th className="px-3 py-2 text-left">FY</th>
+                      <th className="px-3 py-2 text-right">Rent received</th>
+                      <th className="px-3 py-2 text-right">Months let</th>
+                      <th className="px-3 py-2 text-left">Notes</th>
+                      <th className="px-3 py-2 text-right w-32">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--dxp-border-light)]">
+                    {rows.map((row) =>
+                      editingId === row.id ? (
+                        <tr key={row.id} className="bg-amber-50/40">
+                          <td className="px-3 py-2">
+                            <span className="font-medium text-[var(--dxp-text)]">{row.fy}</span>
+                            <span className="ml-2 text-[10px] text-[var(--dxp-text-muted)]">(immutable)</span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <Input
+                              type="number"
+                              value={draft.rentReceivedRupees}
+                              onChange={(e) => setDraft((d) => ({ ...d, rentReceivedRupees: e.target.value }))}
+                            />
+                          </td>
+                          <td className="px-3 py-2 w-24">
+                            <Input
+                              type="number"
+                              value={draft.monthsLet}
+                              onChange={(e) => setDraft((d) => ({ ...d, monthsLet: e.target.value }))}
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <Input
+                              value={draft.notes}
+                              onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={isSaving}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="primary" size="sm" onClick={onEditSave} disabled={isSaving}>
+                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr key={row.id}>
+                          <td className="px-3 py-2 font-medium text-[var(--dxp-text)]">{row.fy}</td>
+                          <td className="px-3 py-2 text-right font-mono">{formatINR(row.rentReceivedPaisa)}</td>
+                          <td className="px-3 py-2 text-right">{row.monthsLet}</td>
+                          <td className="px-3 py-2 text-[var(--dxp-text-secondary)]">{row.notes || '—'}</td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="secondary" size="sm" onClick={() => startEdit(row)} disabled={isAdding || editingId !== null}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="danger" size="sm" onClick={() => onDelete(row)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ),
+                    )}
+
+                    {isAdding && (
+                      <tr className="bg-emerald-50/40">
+                        <td className="px-3 py-2 w-32">
+                          <Input
+                            value={draft.fy}
+                            onChange={(e) => setDraft((d) => ({ ...d, fy: e.target.value }))}
+                            placeholder="2024-25"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            type="number"
+                            value={draft.rentReceivedRupees}
+                            onChange={(e) => setDraft((d) => ({ ...d, rentReceivedRupees: e.target.value }))}
+                            placeholder="240000"
+                          />
+                        </td>
+                        <td className="px-3 py-2 w-24">
+                          <Input
+                            type="number"
+                            value={draft.monthsLet}
+                            onChange={(e) => setDraft((d) => ({ ...d, monthsLet: e.target.value }))}
+                            placeholder="12"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            value={draft.notes}
+                            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+                            placeholder="optional"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={isSaving}>
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="primary" size="sm" onClick={onAddSave} disabled={isSaving}>
+                              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

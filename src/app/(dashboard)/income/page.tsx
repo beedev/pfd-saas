@@ -47,17 +47,34 @@ interface IncomeSummary {
     freelance: { count: number; totalPaisa: number };
     otherTaxable: { count: number; totalPaisa: number };
     otherExempt: { count: number; totalPaisa: number };
-    rental: { count: number; totalPaisa: number };
+    rental: { count: number; totalPaisa: number; source?: 'history' | 'current_rate' };
     capitalGains: { ltcgPaisa: number; stcgPaisa: number; totalPaisa: number };
   };
   totalsPaisa: { all: number; taxable: number; exempt: number };
-  trend: Array<{ fy: string; salaryPaisa: number; freelancePaisa: number; otherPaisa: number; cgPaisa: number; totalPaisa: number }>;
+  trend: Array<{
+    fy: string;
+    salaryPaisa: number;
+    freelancePaisa: number;
+    otherPaisa: number;
+    /** null = no rental_history row for this FY — render as "—". */
+    rentalPaisa: number | null;
+    cgPaisa: number;
+    totalPaisa: number;
+  }>;
 }
 
 function formatINR(paisa: number): string {
   if (!paisa) return '—';
   const rupees = Math.round(paisa / 100);
   return `₹${rupees.toLocaleString('en-IN')}`;
+}
+
+/** Trend-cell formatter — distinguishes "no history row (null)" from
+ *  "history says ₹0" by rendering only the explicit null as the em-dash. */
+function formatINRNullable(paisa: number | null): string {
+  if (paisa === null) return '—';
+  if (paisa === 0) return '₹0';
+  return `₹${Math.round(paisa / 100).toLocaleString('en-IN')}`;
 }
 
 export default function IncomePage() {
@@ -157,7 +174,11 @@ export default function IncomePage() {
               detail={`${stream.rental.count} property/properties tenanted`}
               amount={stream.rental.totalPaisa}
               href="/investments/real-estate"
-              note="Monthly rent × 12 — set per property"
+              note={
+                stream.rental.source === 'history'
+                  ? 'From rental_history for this FY'
+                  : 'monthly_rent × 12 fallback — add a rental_history row to track this FY explicitly'
+              }
             />
             <StreamRow
               icon={PiggyBank}
@@ -200,6 +221,7 @@ export default function IncomePage() {
                   <th className="px-3 py-2 text-right">Salary</th>
                   <th className="px-3 py-2 text-right">Freelance</th>
                   <th className="px-3 py-2 text-right">Other sources</th>
+                  <th className="px-3 py-2 text-right">Rental</th>
                   <th className="px-3 py-2 text-right">Capital gains</th>
                   <th className="px-3 py-2 text-right">Total</th>
                 </tr>
@@ -214,6 +236,7 @@ export default function IncomePage() {
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.salaryPaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.freelancePaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.otherPaisa)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{formatINRNullable(row.rentalPaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono">{formatINR(row.cgPaisa)}</td>
                     <td className="px-3 py-2 text-right font-mono font-semibold">{formatINR(row.totalPaisa)}</td>
                   </tr>
@@ -222,8 +245,10 @@ export default function IncomePage() {
             </table>
           </div>
           <p className="text-xs text-[var(--dxp-text-muted)] mt-3">
-            Rental income excluded from YoY — it&rsquo;s computed from current monthly_rent
-            (no history yet). Capital gains use sale-date FY.
+            Rental shown from your rental_history entries. The current FY falls back to
+            current monthly_rent × 12 if no history row exists yet — add a row per FY on
+            each property&rsquo;s detail page to track changes over time. Capital gains use
+            sale-date FY.
           </p>
         </CardContent>
       </Card>
