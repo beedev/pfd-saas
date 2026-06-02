@@ -126,10 +126,13 @@ Still deferred from Sprint 4.1:
   using the higher of (actual cost) or (FMV on 31-Jan-2018) for
   equities held before that cut-off. User adjusts `taxableGain`
   manually for now.
-- **Pre-Jul-2024 CG election toggle.** Capital-gains rows currently
-  auto-apply the pre/post-23-Jul-2024 cutoff based on saleDate. User
-  override (election to use indexed treatment when it's cheaper) is
-  deferred — Sprint 5.1c auto-applies based on cutoff date only.
+- **Pre-Jul-2024 CG election toggle (persistence).** Capital-gains rows
+  on `/tax/ltcg-stcg` now show an inline "elect pre-reform indexed
+  treatment" checkbox on eligible LTCG rows (Sprint 5.2 commit 3, item
+  U6), but the election is **in-memory only**. Persistence needs
+  migration 0027 adding `capital_gains.elect_pre_reform_method` boolean
+  + downstream tax recompute. Deferred to a follow-up so the schema
+  drift guard stays clean for Sprint 5.2 close.
 
 **Sprint 5.1 (post-Sprint-4.1 follow-on).** Tax-calc fidelity to the
 canonical Yeswanth TaxCalc FY 2026-27 reference. Four focused phases
@@ -187,6 +190,51 @@ closing the OLD-regime exemption gaps:
 Design tenet: **the Yeswanth template is the canonical reference;
 pfd-saas should match its math, not approximate it.** Every Sprint 5.1
 lib references the corresponding template row in its module docstring.
+
+**Sprint 5.2 complete.** Income Tax UI refresh — three sequenced
+commits that recompose the `/tax` hub and adjacent screens so the
+recommendation is always visible above its justification. No new
+schema (migration head still 0026).
+
+- **Commit 1 — IT hub page restructure.** New `TaxKpiStrip` (total tax
+  / TDS / advance paid / balance|refund), `TaxProfileInline` chips
+  (metro / sr citizen self+parents / family pensioner with PATCH
+  user-preferences and parent refresh hook), `Section80RegimeAwareStats`
+  (OLD vs NEW eligible deductions side-by-side + tax delta),
+  `ItrResultBanner` on each ITR form page with Switch-form CTA, and
+  `TaxOnboardingChecklist` for empty-state. Regime banner promoted
+  above the side-by-side columns. 5-tile sub-nav grid replaced by a
+  3-button Quick Actions row.
+- **Commit 2 — Section 80 entry UX overhaul.** New 4-step
+  `DeductionWizardForm` (section → sub-type → amount+dates →
+  extras+proof) with per-section sub-type lists, live cap-usage bar
+  fetched from existing rows for that section/FY, inline 80G PAN
+  validation above ₹2k, 80EEA eligibility checkboxes, 80CCD(2)
+  auto-eligible-under-new pill, "Eligible under NEW?" checkbox for
+  others, optional receipt+cert upload. `/tax/new` honours
+  `?section=` query param; `/tax/80g/new` redirects there. New
+  `/tax/[id]/edit` for in-place editing. U8 carry-forward banner +
+  modal calls new `POST /api/tax/deductions/carry-forward`. The
+  deductions POST endpoint now also accepts `multipart/form-data`
+  with `payload` JSON + `receipt`/`certificate` files (rolls back
+  the deduction row on upload failure).
+- **Commit 3 — Capital gains + 80G + Form 26AS polish.** `/tax/80g`
+  rewritten as four CBDT-category buckets (100/no-limit,
+  50/no-limit, 100/with-limit, 50/with-limit) with per-bucket
+  subtotal and post-cap effective deduction read from
+  regime-compare. `/tax/ltcg-stcg` adds a 23-Jul-2024 cutoff
+  explanation banner and groups rows into Post-reform vs Pre-reform
+  sections with applicable rate shown inline. U6 "elect pre-reform
+  indexed" toggle on eligible LTCG rows (debt MF / real estate /
+  gold sold on/after cutoff) — election is **in-memory only in
+  this iteration**; persistence will need migration 0027.
+  `/tax/form-26as` reco banner promoted to a full-width prominent
+  card with tri-state styling (no-uploads / match / discrepancy).
+
+UX tenets that drove the sprint:
+1. Recommendation first, then justification.
+2. Data entry should teach the user the law, not assume they know it.
+3. Every screen surfaces an answer above its explanation.
 
 **Sprint 3.5 complete.** Goals/Retirement architecture + IA regroup.
 Four focused phases on top of Sprint 3:
