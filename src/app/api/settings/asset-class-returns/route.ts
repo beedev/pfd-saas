@@ -27,6 +27,12 @@ import { auth } from '@/auth';
 const DEFAULTS: Array<{ assetClass: string; returnPct: number }> = [
   { assetClass: 'STOCKS', returnPct: 12 },
   { assetClass: 'MUTUAL_FUNDS', returnPct: 11 },
+  // Sprint 5.7 — MF sub-classification rates. These apply ONLY when the
+  // fund's `category` column is set (EQUITY/DEBT/HYBRID). Funds with
+  // category=UNKNOWN fall back to the umbrella MUTUAL_FUNDS rate.
+  { assetClass: 'MF_EQUITY', returnPct: 11 },
+  { assetClass: 'MF_DEBT', returnPct: 7 },
+  { assetClass: 'MF_HYBRID', returnPct: 9 },
   { assetClass: 'GOLD', returnPct: 9 },
   { assetClass: 'NPS', returnPct: 9.5 },
   { assetClass: 'PF', returnPct: 8.25 },

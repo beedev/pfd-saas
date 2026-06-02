@@ -1449,11 +1449,22 @@ export type NewHolding = typeof holdings.$inferInsert;
 // 2. Mutual Funds
 export type MutualFundType = 'EQUITY' | 'DEBT' | 'HYBRID' | 'LIQUID' | 'GOLD';
 
+/**
+ * MF category — sub-classification used to resolve the right growth rate
+ * (MF_EQUITY / MF_DEBT / MF_HYBRID). Distinct from `fundType` which is
+ * the AMFI scheme classification (EQUITY/DEBT/HYBRID/LIQUID/GOLD) —
+ * category is the rate-bucket key, fund_type is the scheme key. New rows
+ * default to UNKNOWN; the bulk-categorise UI surfaces them for triage.
+ * See Sprint 5.7a/b.
+ */
+export type MutualFundCategory = 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
+
 export const mutualFunds = pgTable('mutual_funds', {
   id: serial('id').primaryKey(),
   isin: text('isin').notNull(),
   schemeName: text('scheme_name').notNull(),
   fundType: text('fund_type').$type<MutualFundType>().notNull(),
+  category: text('category').$type<MutualFundCategory>().default('UNKNOWN').notNull(),
   folioNumber: text('folio_number'),
   units: real('units').notNull(),
   nav: bigint('nav', { mode: 'number' }).notNull(),

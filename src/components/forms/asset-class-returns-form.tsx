@@ -28,7 +28,10 @@ type ClassRow = {
 
 const LABELS: Record<string, string> = {
   STOCKS: 'Stocks',
-  MUTUAL_FUNDS: 'Mutual Funds',
+  MUTUAL_FUNDS: 'Mutual Funds (uncategorised)',
+  MF_EQUITY: 'MF — Equity',
+  MF_DEBT: 'MF — Debt',
+  MF_HYBRID: 'MF — Hybrid',
   GOLD: 'Gold',
   NPS: 'NPS',
   PF: 'EPF',
@@ -43,7 +46,10 @@ const LABELS: Record<string, string> = {
 // so the user knows what's "normal" before tuning their planning rate.
 const HINTS: Record<string, string> = {
   STOCKS: 'Nifty 50 long-term ~12% — set conservatively',
-  MUTUAL_FUNDS: 'Equity ~11%, hybrid ~9% — pick what feels safe',
+  MUTUAL_FUNDS: 'Umbrella rate — used only when fund category is UNKNOWN',
+  MF_EQUITY: 'Equity MFs (large/mid/small/flexi/ELSS) ~10–12%',
+  MF_DEBT: 'Debt MFs (corp bond, liquid, gilt) ~6–8%',
+  MF_HYBRID: 'Hybrid / multi-asset / arbitrage ~8–10%',
   GOLD: 'INR gold ~9–11% — bumpy historically',
   NPS: 'Tier-I 75/25 ~9.5%; lower for debt-heavy',
   PF: 'EPF rate ~8.25%',
@@ -66,6 +72,9 @@ const HAS_INSTRUMENT_RATE: Record<string, boolean> = {
 const ORDER = [
   'STOCKS',
   'MUTUAL_FUNDS',
+  'MF_EQUITY',
+  'MF_DEBT',
+  'MF_HYBRID',
   'GOLD',
   'NPS',
   'PF',
@@ -164,6 +173,12 @@ export function AssetClassReturnsForm() {
           rate applies to <em>all</em> instruments by default. Flip the
           per-class toggle if you want to use each instrument&apos;s
           actual rate (FD interest, NSC scheme rate, chit XIRR) instead.
+        </p>
+        <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">
+          MF subclass rates (MF — Equity / Debt / Hybrid) apply ONLY when
+          the fund&apos;s category is set on its detail page. Funds with
+          category &lsquo;Unknown&rsquo; fall back to the umbrella
+          &lsquo;Mutual Funds&rsquo; rate above.
         </p>
       </CardHeader>
       <CardContent>
