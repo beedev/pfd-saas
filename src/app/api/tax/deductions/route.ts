@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
-import { db, taxDeductions } from '@/db';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { db, taxDeductions, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { auth } from '@/auth';
 
@@ -55,7 +58,32 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const body = (await request.json()) as CreateBody;
+    // Sprint 5.2 commit 2 — support multipart/form-data so the wizard
+    // can submit deduction + receipt/certificate atomically. Falls
+    // through to the JSON path for backward-compat with the old POSTs.
+    const contentType = request.headers.get('content-type') || '';
+    let body: CreateBody;
+    let receiptFile: File | null = null;
+    let certificateFile: File | null = null;
+
+    if (contentType.includes('multipart/form-data')) {
+      const fd = await request.formData();
+      const payload = fd.get('payload');
+      if (typeof payload !== 'string') {
+        return NextResponse.json(
+          { error: 'multipart body requires JSON `payload` field' },
+          { status: 400 },
+        );
+      }
+      body = JSON.parse(payload) as CreateBody;
+      const r = fd.get('receipt');
+      const c = fd.get('certificate');
+      if (r instanceof File && r.size > 0) receiptFile = r;
+      if (c instanceof File && c.size > 0) certificateFile = c;
+    } else {
+      body = (await request.json()) as CreateBody;
+    }
+
     if (!body.section) {
       return NextResponse.json({ error: 'section is required' }, { status: 400 });
     }
@@ -110,7 +138,64 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    return NextResponse.json({ deduction: result[0] }, { status: 201 });
+    const deduction = result[0];
+
+    // Sprint 5.2 — if multipart, upload files now. We don't get a real
+    // PG transaction across deduction + filesystem writes, so on file
+    // failure we roll back manually by deleting the deduction row +
+    // any partially-written files.
+    if (receiptFile || certificateFile) {
+      const uploadedPaths: string[] = [];
+      try {
+        const baseDir = path.join(
+          process.cwd(),
+          'uploads',
+          'tax-deductions',
+          session.user.id,
+        );
+        await fs.promises.mkdir(baseDir, { recursive: true });
+
+        for (const [file, kind, category] of [
+          [receiptFile, 'receipt', 'DEDUCTION_RECEIPT'],
+          [certificateFile, 'certificate', '80G_CERTIFICATE'],
+        ] as const) {
+          if (!file) continue;
+          const ext = path.extname(file.name) || '.pdf';
+          const safeExt = ext.replace(/[^.A-Za-z0-9]/g, '');
+          const filename = `${deduction.id}-${kind}-${crypto.randomBytes(4).toString('hex')}${safeExt}`;
+          const fullPath = path.join(baseDir, filename);
+          const arrayBuffer = await file.arrayBuffer();
+          await fs.promises.writeFile(fullPath, Buffer.from(arrayBuffer));
+          uploadedPaths.push(fullPath);
+
+          await db.insert(taxDocuments).values({
+            userId: session.user.id,
+            category,
+            financialYear: fy,
+            title: `${body.recipientName ?? body.section} — ${kind}`,
+            filePath: fullPath,
+            deductionId: deduction.id,
+            uploadedAt: new Date(),
+          });
+        }
+      } catch (uploadErr) {
+        // Rollback: delete files + deduction row
+        for (const p of uploadedPaths) {
+          await fs.promises.unlink(p).catch(() => {});
+        }
+        await db
+          .delete(taxDeductions)
+          .where(eq(taxDeductions.id, deduction.id))
+          .catch(() => {});
+        console.error('[tax/deductions POST upload]', uploadErr);
+        return NextResponse.json(
+          { error: 'Deduction saved but document upload failed; rolled back' },
+          { status: 500 },
+        );
+      }
+    }
+
+    return NextResponse.json({ deduction }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to create deduction';
     console.error('[tax/deductions POST]', err);

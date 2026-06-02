@@ -1,151 +1,238 @@
 'use client';
 
-import { useState, ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+/**
+ * /tax/new — guided Section 80 entry wizard (Sprint 5.2 commit 2).
+ *
+ * Replaces the old flat form with a 4-step single-page wizard. Honours
+ * `?section=80G` (or any code) on mount to pre-select the section, so
+ * old links like /tax/80g/new still land here with the right preset.
+ *
+ * Also surfaces the U8 carry-forward banner when the user has prior-FY
+ * rows that haven't yet been copied to the current FY.
+ */
+
+import { useEffect, useState, useCallback, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Card, CardHeader, CardContent, Button } from '@dxp/ui';
+import { Loader2, X, History } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, Card, CardHeader, CardContent, Input, Select } from '@dxp/ui';
-import { Loader2 } from 'lucide-react';
-import { ALL_SECTIONS, SECTION_CAPS, getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { DeductionWizardForm } from '@/components/forms/deduction-wizard-form';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
-const PAYMENT_METHODS = ['CASH', 'CHEQUE', 'NEFT', 'UPI', 'CARD'];
+function currentFy(): string {
+  return getCurrentFinancialYear();
+}
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function previousFy(): string {
+  const c = currentFy();
+  const s = Number(c.split('-')[0]) - 1;
+  return `${s}-${String((s + 1) % 100).padStart(2, '0')}`;
+}
+
+interface PriorDeduction {
+  id: number;
+  section: string;
+  description: string | null;
+  amountPaisa: number | null;
+  paymentDate: string | null;
+}
+
+function formatINR(paisa: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(paisa / 100);
+}
+
+function NewDeductionInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialSection = searchParams.get('section') ?? undefined;
+
+  const [priorRows, setPriorRows] = useState<PriorDeduction[]>([]);
+  const [carryBannerDismissed, setCarryBannerDismissed] = useState(false);
+  const [showCarryModal, setShowCarryModal] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isCarrying, setIsCarrying] = useState(false);
+  const [carryAll, setCarryAll] = useState(true);
+
+  const cur = currentFy();
+  const prev = previousFy();
+
+  // Fetch prior-FY rows (for the U8 banner). Only show if any exist.
+  useEffect(() => {
+    fetch(`/api/tax/deductions?fy=${encodeURIComponent(prev)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPriorRows(d?.deductions ?? []))
+      .catch(() => setPriorRows([]));
+  }, [prev]);
+
+  const carryForward = useCallback(
+    async (mode: 'all' | 'selected') => {
+      const ids = mode === 'selected' ? Array.from(selectedIds) : undefined;
+      if (mode === 'selected' && (!ids || ids.length === 0)) {
+        toast.error('Pick at least one row to carry forward');
+        return;
+      }
+      setIsCarrying(true);
+      try {
+        const r = await fetch('/api/tax/deductions/carry-forward', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fromFy: prev, toFy: cur, deductionIds: ids }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.error || 'Carry-forward failed');
+        toast.success(`Carried ${d.copiedCount} row(s) into FY ${cur}`);
+        setShowCarryModal(false);
+        setCarryBannerDismissed(true);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Carry-forward failed');
+      } finally {
+        setIsCarrying(false);
+      }
+    },
+    [selectedIds, prev, cur],
+  );
+
+  const toggleSelected = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const showBanner = useMemo(
+    () => priorRows.length > 0 && !carryBannerDismissed,
+    [priorRows, carryBannerDismissed],
+  );
+
   return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-[var(--dxp-text)]">{label}</label>
-      {children}
+    <div className="max-w-3xl space-y-5">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">
+          Add Section 80 deduction
+        </h1>
+        <p className="text-[var(--dxp-text-secondary)]">
+          Four steps — pick the section, sub-type, amount, then any extras.
+        </p>
+      </div>
+
+      {/* U8 — Carry-forward banner */}
+      {showBanner && (
+        <div className="flex items-center gap-3 rounded-md border border-sky-300 bg-sky-50/40 p-3">
+          <History className="h-5 w-5 text-sky-700" />
+          <div className="flex-1 text-sm text-[var(--dxp-text)]">
+            <span className="font-bold">{priorRows.length}</span> deduction
+            {priorRows.length === 1 ? '' : 's'} from FY {prev} — carry into FY {cur}?
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setCarryAll(true);
+              setShowCarryModal(true);
+            }}
+            disabled={isCarrying}
+          >
+            Carry forward all
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setCarryAll(false);
+              setShowCarryModal(true);
+              setSelectedIds(new Set(priorRows.map((r) => r.id)));
+            }}
+          >
+            Pick which ones
+          </Button>
+          <button
+            onClick={() => setCarryBannerDismissed(true)}
+            className="rounded p-1 hover:bg-sky-100"
+            title="Dismiss"
+          >
+            <X className="h-4 w-4 text-sky-700" />
+          </button>
+        </div>
+      )}
+
+      {/* Modal — carry-forward picker */}
+      {showCarryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <Card className="w-full max-w-2xl">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-[var(--dxp-text)]">
+                  {carryAll ? `Carry ALL ${priorRows.length} rows` : 'Pick rows to carry'}
+                </h3>
+                <button onClick={() => setShowCarryModal(false)} className="rounded p-1 hover:bg-[var(--dxp-surface-alt,var(--dxp-surface))]">
+                  <X className="h-4 w-4 text-[var(--dxp-text-muted)]" />
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-80 overflow-y-auto space-y-1">
+                {priorRows.map((r) => (
+                  <label
+                    key={r.id}
+                    className={`flex items-center gap-3 rounded border border-[var(--dxp-border-light)] px-3 py-2 text-sm ${
+                      carryAll ? 'opacity-70' : 'cursor-pointer hover:bg-[var(--dxp-surface-alt,var(--dxp-surface))]'
+                    }`}
+                  >
+                    {!carryAll && (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleSelected(r.id)}
+                      />
+                    )}
+                    <span className="font-bold text-[var(--dxp-text)]">{r.section}</span>
+                    <span className="flex-1 text-[var(--dxp-text-secondary)]">{r.description}</span>
+                    <span className="font-mono text-[var(--dxp-text)]">{formatINR(r.amountPaisa ?? 0)}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setShowCarryModal(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => carryForward(carryAll ? 'all' : 'selected')}
+                  disabled={isCarrying}
+                >
+                  {isCarrying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Carry into FY {cur}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <DeductionWizardForm
+        initialSection={initialSection}
+        onSaved={() => router.push('/tax')}
+        onCancel={() => router.push('/tax')}
+      />
     </div>
   );
 }
 
 export default function NewDeductionPage() {
-  const router = useRouter();
-  const [section, setSection] = useState<string>('80C');
-  const [description, setDescription] = useState('');
-  const [amountRupees, setAmountRupees] = useState<string>('');
-  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [paymentMethod, setPaymentMethod] = useState<string>('NEFT');
-  const [financialYear, setFinancialYear] = useState<string>(getCurrentFinancialYear());
-  const [notes, setNotes] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  // Sprint 5.1c — 80D bucket selector
-  const [eightyDBucket, setEightyDBucket] = useState<'SELF_FAMILY' | 'PARENTS'>('SELF_FAMILY');
-
-  const submit = async () => {
-    if (!amountRupees) {
-      toast.error('Amount is required');
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const r = await fetch('/api/tax/deductions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          section,
-          description: description || SECTION_CAPS[section as keyof typeof SECTION_CAPS]?.label,
-          amountRupees: Number(amountRupees),
-          paymentDate,
-          paymentMethod,
-          financialYear,
-          notes,
-          ...(section === '80D' ? { eightyDBucket } : {}),
-        }),
-      });
-      if (!r.ok) throw new Error((await r.json()).error || 'Failed');
-      toast.success('Deduction added');
-      router.push('/tax');
-    } catch (e) {
-      console.error(e);
-      toast.error(e instanceof Error ? e.message : 'Failed');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const sectionOpts = ALL_SECTIONS.map((s) => ({ value: s, label: SECTION_CAPS[s].label }));
-  const pmOpts = PAYMENT_METHODS.map((p) => ({ value: p, label: p }));
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Add Deduction</h1>
-        <p className="text-[var(--dxp-text-secondary)]">Record a tax-deductible payment</p>
-      </div>
-
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <h3 className="text-base font-bold text-[var(--dxp-text)]">Deduction details</h3>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <Field label="Section">
-              <Select options={sectionOpts} value={section} onChange={setSection} />
-            </Field>
-            {section === '80D' && (
-              <Field label="80D bucket">
-                <Select
-                  options={[
-                    { value: 'SELF_FAMILY', label: 'Self + family (₹25k / ₹50k sr citizen)' },
-                    { value: 'PARENTS', label: 'Parents (₹25k / ₹50k if parents are sr citizen)' },
-                  ]}
-                  value={eightyDBucket}
-                  onChange={(v) => setEightyDBucket(v as 'SELF_FAMILY' | 'PARENTS')}
-                />
-              </Field>
-            )}
-            <Field label="Description">
-              <Input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. ELSS SIP, PPF contribution, etc."
-              />
-            </Field>
-            <Field label="Amount (INR)">
-              <Input
-                type="number"
-                value={amountRupees}
-                onChange={(e) => setAmountRupees(e.target.value)}
-                placeholder="50000"
-              />
-            </Field>
-            <Field label="Payment Date">
-              <Input
-                type="date"
-                value={paymentDate}
-                onChange={(e) => setPaymentDate(e.target.value)}
-              />
-            </Field>
-            <Field label="Payment Method">
-              <Select options={pmOpts} value={paymentMethod} onChange={setPaymentMethod} />
-            </Field>
-            <Field label="Financial Year">
-              <Input
-                value={financialYear}
-                onChange={(e) => setFinancialYear(e.target.value)}
-                placeholder="2026-27"
-              />
-            </Field>
-            <Field label="Notes">
-              <Input
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Optional"
-              />
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Link href="/tax">
-                <Button variant="secondary">Cancel</Button>
-              </Link>
-              <Button variant="primary" onClick={submit} disabled={isSaving}>
-                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <Suspense
+      fallback={
+        <div className="flex h-40 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-[var(--dxp-text-muted)]" />
+        </div>
+      }
+    >
+      <NewDeductionInner />
+    </Suspense>
   );
 }

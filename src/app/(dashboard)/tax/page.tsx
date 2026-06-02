@@ -12,6 +12,7 @@ import {
   IndianRupee,
   Coins,
   FileCheck2,
+  Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
@@ -55,6 +56,16 @@ interface TaxPayment {
   notes: string | null;
 }
 
+interface DeductionRow {
+  id: number;
+  section: string;
+  subType: string | null;
+  description: string | null;
+  amountPaisa: number | null;
+  paymentDate: string | null;
+  financialYear: string;
+}
+
 // Sections eligible under NEW regime (besides 80CCD(2) which is always
 // eligible_under_new=true via DB default). Used for the per-bucket
 // "OLD only" vs "BOTH" badge.
@@ -89,6 +100,8 @@ export default function TaxDashboardPage() {
   const [taxPayments, setTaxPayments] = useState<TaxPayment[]>([]);
   const [totalTaxPaid, setTotalTaxPaid] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  // Sprint 5.2 (U5) — manual deduction rows for inline edit/delete
+  const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   // Sprint 5.2 — onboarding completion signals (drives U9 checklist)
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   // Bump this to force child components (KPI strip, regime card,
@@ -110,7 +123,7 @@ export default function TaxDashboardPage() {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [s, tp, itr1, f26, sel, fp] = await Promise.all([
+      const [s, tp, itr1, f26, sel, fp, ded] = await Promise.all([
         fetch(`/api/tax/summary?fy=${encodeURIComponent(fy)}`).then((r) => r.json()),
         fetch(`/api/tax/tax-paid?fy=${encodeURIComponent(fy)}`).then((r) => r.json()),
         // Onboarding signals — non-blocking, only used to decide whether
@@ -128,7 +141,12 @@ export default function TaxDashboardPage() {
         fetch(`/api/tax/documents?fy=${encodeURIComponent(fy)}&category=FILING_PACK`)
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
+        // U5 — manual deductions for the inline edit/delete list
+        fetch(`/api/tax/deductions?fy=${encodeURIComponent(fy)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
       ]);
+      setDeductionRows((ded?.deductions ?? []) as DeductionRow[]);
       setSummary(s);
       setTaxPayments(tp.payments ?? []);
       setTotalTaxPaid(tp.totalPaisa ?? 0);
@@ -153,6 +171,18 @@ export default function TaxDashboardPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const deleteDeduction = async (id: number) => {
+    if (!confirm('Delete this deduction? This cannot be undone.')) return;
+    try {
+      const r = await fetch(`/api/tax/deductions/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error('Delete failed');
+      toast.success('Deleted');
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed');
+    }
+  };
 
   const toggleSection = async (section: string, currentlyExcluded: boolean) => {
     try {
@@ -338,6 +368,59 @@ export default function TaxDashboardPage() {
           {/* Optional inline onboarding checklist (when partial progress) */}
           {showChecklistAlongside && onboarding && (
             <TaxOnboardingChecklist fy={fy} status={onboarding} />
+          )}
+
+          {/* U5 — Manual deduction entries with edit/delete */}
+          {deductionRows.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-[var(--dxp-text)]">
+                    Manual deduction entries ({deductionRows.length})
+                  </h3>
+                  <Link href="/tax/new">
+                    <Button variant="secondary" size="sm">
+                      <Plus className="mr-1 h-3 w-3" /> Add
+                    </Button>
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-1">
+                  {deductionRows.map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex items-center gap-3 rounded border border-[var(--dxp-border-light)] px-3 py-2 text-sm"
+                    >
+                      <Badge variant="info">{d.section}</Badge>
+                      {d.subType && (
+                        <span className="text-xs text-[var(--dxp-text-muted)]">{d.subType}</span>
+                      )}
+                      <span className="flex-1 truncate text-[var(--dxp-text-secondary)]">
+                        {d.description}
+                      </span>
+                      <span className="text-xs text-[var(--dxp-text-muted)]">{d.paymentDate ?? '—'}</span>
+                      <span className="font-mono font-bold text-[var(--dxp-text)]">
+                        {formatINR(d.amountPaisa ?? 0)}
+                      </span>
+                      <Link href={`/tax/${d.id}/edit`}>
+                        <Button variant="ghost" size="sm" title="Edit">
+                          <Pencil className="h-3 w-3 text-[var(--dxp-text-muted)]" />
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteDeduction(d.id)}
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3 w-3 text-rose-500" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Tax Paid Section */}
