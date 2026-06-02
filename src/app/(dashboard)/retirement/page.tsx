@@ -1000,8 +1000,8 @@ export default function RetirementPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Retirement Projection</h1>
-        <p className="text-[var(--dxp-text-secondary)]">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Retirement Projection</h1>
+        <p className="text-sm text-[var(--dxp-text-secondary)]">
           Pick which assets fund retirement and how each contributes.
         </p>
       </div>
@@ -1015,7 +1015,10 @@ export default function RetirementPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('assets'); } }}
           className="cursor-pointer"
         >
-          <div className="flex items-start justify-between gap-3">
+          {/* Mobile: title + 3-line summary stack vertically with the
+              summary left-aligned. md+: original side-by-side layout
+              with summary right-aligned. */}
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="flex items-center gap-2">
               <span className="text-[var(--dxp-text-muted)]">{sectionOpen.assets ? '▼' : '▶'}</span>
               <Coins className="h-5 w-5 text-amber-600" />
@@ -1026,7 +1029,7 @@ export default function RetirementPage() {
                 </p>
               </div>
             </div>
-            <div className="text-right text-[11px]">
+            <div className="text-left md:text-right text-[11px]">
               <p>
                 <span className="text-[var(--dxp-text-muted)]">Current value of selection: </span>
                 <span className="font-mono font-bold text-[var(--dxp-text)]">
@@ -1180,7 +1183,8 @@ export default function RetirementPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection('buckets'); } }}
           className="cursor-pointer"
         >
-          <div className="flex items-start justify-between">
+          {/* Mobile: title block + ON/OFF toggle stack vertically. */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
                 <span className="text-[var(--dxp-text-muted)]">{sectionOpen.buckets ? '▼' : '▶'}</span>
@@ -1600,6 +1604,12 @@ export default function RetirementPage() {
             </button>
             {runwayTableOpen && (
               <div className="mt-2 overflow-x-auto">
+                {/* 12-column retirement runway is wider than 375px even
+                    at text-xs. Subtle hint mobile-only so the user
+                    knows to scroll. */}
+                <p className="mb-1 text-[10px] text-[var(--dxp-text-muted)] sm:hidden">
+                  scroll horizontally to see all columns →
+                </p>
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-[var(--dxp-border)] text-[var(--dxp-text-muted)]">
@@ -1837,9 +1847,9 @@ function ClassRow({
             setOpen((v) => !v);
           }
         }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 rounded-lg cursor-pointer"
+        className="w-full flex flex-wrap items-center justify-between gap-2 sm:gap-3 px-3 py-2 text-left hover:bg-gray-50 rounded-lg cursor-pointer"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {open ? (
             <ChevronUp className="h-4 w-4 text-gray-500" />
           ) : (
@@ -1871,7 +1881,7 @@ function ClassRow({
             </button>
           )}
         </div>
-        <div className="text-right text-[11px] font-mono">
+        <div className="text-right text-[11px] font-mono ml-auto">
           {breakdown && breakdown.today > 0 && (
             <p>
               <span className="text-gray-700 font-semibold">{formatINRShort(breakdown.today)}</span>

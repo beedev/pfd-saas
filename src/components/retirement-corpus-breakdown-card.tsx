@@ -152,6 +152,11 @@ export function RetirementCorpusBreakdownCard() {
 
         {expanded && (
           <div className="mt-4 overflow-x-auto">
+            {/* 5-column table (asset class + 3 numbers + note) overflows
+                375px viewports. Hint only on mobile. */}
+            <p className="mb-1 text-[10px] text-[var(--dxp-text-muted)] sm:hidden">
+              scroll horizontally →
+            </p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--dxp-border)] text-xs uppercase tracking-wider text-[var(--dxp-text-muted)]">
