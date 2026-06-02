@@ -16,6 +16,102 @@ countries later.
 
 ## Status
 
+**Sprint 5.6 complete — EPF + NPS PDF statement importer.** Six phases.
+
+- **Phase 5.6a — Parser framework.** `DocType` union extended with
+  `'epf-passbook'` and `'nps-sot'`; `ParsedStatement` now includes
+  `EpfPassbookParsed` + `NpsSotParsed` (each with a HIGH/MEDIUM/LOW
+  confidence band). `pdfjs-dist` already in `serverExternalPackages`
+  per the v1 lesson.
+- **Phase 5.6b — EPF passbook parser.** `src/lib/services/statement-
+  parsers/epf-passbook.ts`: regex-anchored extractor for EPFO member
+  passbook PDFs. Captures UAN, Member ID, employer name, as-of date,
+  employee/employer/pension closing balances, recent transactions, and
+  derives monthly contribution from the avg of the last 3–6 credit
+  rows. Reference layout: EPFO Member_Passbook_Sample.pdf.
+- **Phase 5.6c — NPS Statement of Transactions parser.** `src/lib/
+  services/statement-parsers/nps-sot.ts`: similar regex strategy.
+  Captures PRAN, subscriber, Tier I/II, asset-class breakdown (E /
+  C+G / A), totals, recent contributions, derived monthly contribution
+  with quarterly-deposit date-span normalisation. Reference layout:
+  NSDL Sample SOT.pdf.
+- **Phase 5.6d — Import API.** `POST /api/imports/statement` (multi-
+  part file, 5 MB max) → persists raw PDF under
+  `uploads/statement-imports/<user_id>/<importId>.pdf`, returns
+  `{ importId, kind, confidence, preview, currentValues, diff,
+  warnings }`. `POST /api/imports/statement/confirm` re-reads the
+  persisted file (idempotent — same input → same writes), applies
+  the toggled fields to the matched EPF / NPS account. Match
+  priority: explicit `accountId` > UAN/PRAN > sole account.
+- **Phase 5.6e — Import UI.** Standalone
+  `/investments/import-statement` page (separate from the older
+  `/investments/import` LIC/chit/MF-CAS flow). Upload, preview with
+  confidence badge + warnings, diff table, balance/contribution
+  toggles, confirm. Sidebar gains "Import from statement" under
+  Investments.
+- **Phase 5.6f — Verification.** Real-sample testing is on the user
+  — the parsers were written against the public EPFO + NSDL sample
+  PDFs documented in each parser file. Verified the UNKNOWN path
+  with a minimal-valid PDF returns
+  `{ kind: 'UNKNOWN', confidence: 'LOW', warnings: [...] }`
+  cleanly. Smoke test stays 20/20.
+
+**Sprint 5.5 complete — contribution-aware retirement projections.** Six
+phases.
+
+- **Phase 5.5a — Schema + pure projection lib.** Migration 0028 adds
+  `nps_accounts.monthly_contribution_paisa`,
+  `epf_accounts.monthly_contribution_paisa`,
+  `small_savings_accounts.{periodic_contribution_paisa,
+  contribution_frequency}`. Applied via `psql -f` (migrator drift
+  unresolved — see note below); journal row inserted manually with
+  the SHA-256 of the SQL file. New pure lib
+  `src/lib/finance/asset-projection.ts` with `projectFutureValue(...)`
+  — combines PV compound interest + future-value-of-annuity into one
+  call, returns balance & contribution components separately so UI
+  can show attribution.
+- **Phase 5.5b — `deriveNps` projects forward + new `deriveEpf`.**
+  NPS corpus + monthly contributions projected to retirement at the
+  NPS asset-class rate (default 9%) BEFORE the 60/40 lumpsum/annuity
+  split. New `deriveEpf` emits one `EPF_MATURITY` event per EPF
+  account at retirement (tax-free per sec 10(12) on 5+ yrs service).
+  `EPF_MATURITY` added to `CashflowSourceKind` enum.
+- **Phase 5.5c — `deriveSmallSavings` per-scheme rate + contribution.**
+  Each row projects on its locked instrument rate (PPF 7.1, SSY 8.2,
+  NSC 7.7 etc) with `periodic_contribution_paisa` +
+  `contribution_frequency`. SSY contribution capped at 14 years
+  (approximation — exact rule depends on child DOB); NSC/KVP forced
+  to lumpsum even if a recurring value is recorded.
+- **Phase 5.5d — Central growth-rates helper.**
+  `src/lib/finance/asset-growth-rates.ts` reads `asset_class_returns`
+  per user with `DEFAULT_GROWTH_RATES` fallback. Constants split into
+  `asset-growth-rates-constants.ts` so client components can import
+  `DEFAULT_GROWTH_RATES` without pulling postgres into the browser
+  bundle. `cashflow-derivation` receives `growthRates` as an
+  input — the lib stays pure.
+- **Phase 5.5e — Contribution UI on detail pages.** NPS, EPF (PF),
+  and Small Savings detail pages got the new field with live
+  `projectFutureValue` preview showing balance side + contribution
+  side. EPF page loads `/api/finance/retirement-assumptions` to
+  compute years-to-retirement (EPF has no per-account maturity date
+  the way small-savings does).
+- **Phase 5.5f — Seed extension + verify.** BXDEva now has NPS
+  ₹11,233/mo, EPF ₹15,840/mo, PPF ₹8,333/mo, SSY ₹15,000/mo,
+  NSC 0/mo. After re-derive:
+  - NPS_LUMPSUM at 2056: ₹5.10L → ₹1.56Cr
+  - NPS_ANNUITY at 2056: ₹1,700/mo → ₹52,080/mo
+  - NEW EPF_MATURITY at 2056: ₹3.19Cr
+  - PPF_MATURITY at 2032: ₹6.5L → ₹17.07L
+  - SSY_MATURITY at 2038: ₹1.8L → ₹4.25L
+
+**Migration journal note.** `drizzle.__drizzle_migrations` is one row
+behind the file count (0026 + 0027 + 0028 were applied via
+`psql -v ON_ERROR_STOP=1 -f` due to a stuck orphan row tripping
+`drizzle-kit migrate`). When you add migration 0029, do the same and
+manually `INSERT INTO drizzle.__drizzle_migrations` with the SHA-256
+of the SQL file. Do NOT try to repair the migrator state — last
+attempt corrupted things further.
+
 **Sprint 4 complete.** Tax hardening — six focused phases bringing the
 filing-side of the dashboard to par with the planning side:
 
@@ -435,7 +531,8 @@ Deferred from Sprint 2:
   with deployment infrastructure).
 
 Deferred from Sprint 3 / 3.5:
-- MF CAS PDF parser. Awaiting a sample PDF.
+- MF CAS PDF parser. Awaiting a sample PDF. (EPF passbook + NPS SoT
+  importers closed by Sprint 5.6.)
 - Migration of `timestamp` → `timestamptz` across all 50+ tables. Known
   tech debt — flagged when the per-tenant cron timezone bug surfaced in
   Sprint 2 Phase 5.
