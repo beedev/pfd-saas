@@ -99,6 +99,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
     if (body.schemeName !== undefined) updates.schemeName = body.schemeName;
     if (body.fundType !== undefined) updates.fundType = body.fundType;
+    // Sprint 5.7 — category (rate bucket: EQUITY/DEBT/HYBRID/UNKNOWN).
+    // Validate against the schema's CHECK constraint set so a bogus body
+    // value fails fast at the API layer rather than at the DB layer.
+    if (body.category !== undefined) {
+      const allowed = ['EQUITY', 'DEBT', 'HYBRID', 'UNKNOWN'];
+      if (typeof body.category !== 'string' || !allowed.includes(body.category)) {
+        return NextResponse.json(
+          { error: 'category must be EQUITY | DEBT | HYBRID | UNKNOWN' },
+          { status: 400 },
+        );
+      }
+      updates.category = body.category;
+    }
     if (body.folioNumber !== undefined) updates.folioNumber = body.folioNumber || null;
     if (body.isin !== undefined) updates.isin = body.isin;
     if (body.lastNavDate !== undefined) updates.lastNavDate = body.lastNavDate;

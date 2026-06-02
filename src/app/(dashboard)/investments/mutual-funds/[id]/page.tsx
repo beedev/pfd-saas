@@ -18,12 +18,14 @@ import {
 import { ArrowLeft, Loader2, PiggyBank, Trash2, Pencil, Save, X } from 'lucide-react';
 
 type FundType = 'EQUITY' | 'DEBT' | 'HYBRID' | 'LIQUID' | 'GOLD';
+type Category = 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
 
 interface MutualFund {
   id: number;
   isin: string;
   schemeName: string;
   fundType: FundType;
+  category: Category;
   folioNumber: string | null;
   units: number;
   nav: number; // paisa
@@ -42,6 +44,13 @@ const FUND_TYPE_OPTIONS: Array<{ label: string; value: FundType }> = [
   { label: 'Hybrid', value: 'HYBRID' },
   { label: 'Liquid', value: 'LIQUID' },
   { label: 'Gold', value: 'GOLD' },
+];
+
+const CATEGORY_OPTIONS: Array<{ label: string; value: Category }> = [
+  { label: 'Equity', value: 'EQUITY' },
+  { label: 'Debt', value: 'DEBT' },
+  { label: 'Hybrid', value: 'HYBRID' },
+  { label: 'Unknown', value: 'UNKNOWN' },
 ];
 
 const fundTypeVariant: Record<FundType, 'success' | 'info' | 'warning' | 'default' | 'danger'> = {
@@ -64,6 +73,7 @@ interface FormState {
   amcName: string; // derived from schemeName prefix — not stored separately
   folioNumber: string;
   fundType: FundType;
+  category: Category;
   units: string;
   averageNavRupees: string;
   totalInvestedRupees: string;
@@ -77,6 +87,7 @@ function holdingToForm(h: MutualFund): FormState {
     amcName: '', // AMC not stored separately; user can edit scheme name
     folioNumber: h.folioNumber ?? '',
     fundType: h.fundType,
+    category: h.category ?? 'UNKNOWN',
     units: h.units.toString(),
     averageNavRupees: (h.nav / 100).toString(),
     totalInvestedRupees: (h.totalInvestment / 100).toString(),
@@ -96,6 +107,15 @@ export default function MutualFundDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
+  // Per-category MF growth rates fetched from /settings — used to show
+  // the resolved rate in the inline-edit hint so the user can see the
+  // immediate effect of changing the fund's category.
+  const [mfRates, setMfRates] = useState<{
+    MF_EQUITY: number;
+    MF_DEBT: number;
+    MF_HYBRID: number;
+    MUTUAL_FUNDS: number;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -117,6 +137,42 @@ export default function MutualFundDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Load MF rates once for the resolved-rate hint. Defaults (11/7/9/11)
+  // are used if the fetch fails — keeps the hint usable offline.
+  useEffect(() => {
+    fetch('/api/settings/asset-class-returns')
+      .then((r) => r.json())
+      .then((d) => {
+        const byClass = new Map<string, number>(
+          (d.rates ?? []).map((r: { assetClass: string; returnPct: number }) => [r.assetClass, r.returnPct]),
+        );
+        setMfRates({
+          MF_EQUITY: byClass.get('MF_EQUITY') ?? 11,
+          MF_DEBT: byClass.get('MF_DEBT') ?? 7,
+          MF_HYBRID: byClass.get('MF_HYBRID') ?? 9,
+          MUTUAL_FUNDS: byClass.get('MUTUAL_FUNDS') ?? 11,
+        });
+      })
+      .catch(() => {
+        setMfRates({ MF_EQUITY: 11, MF_DEBT: 7, MF_HYBRID: 9, MUTUAL_FUNDS: 11 });
+      });
+  }, []);
+
+  const resolvedRate = (category: Category): number => {
+    if (!mfRates) return 11;
+    switch (category) {
+      case 'EQUITY':
+        return mfRates.MF_EQUITY;
+      case 'DEBT':
+        return mfRates.MF_DEBT;
+      case 'HYBRID':
+        return mfRates.MF_HYBRID;
+      case 'UNKNOWN':
+      default:
+        return mfRates.MF_EQUITY; // fallback consistent with getMfRate()
+    }
+  };
 
   const onDelete = async () => {
     if (!confirm('Delete this mutual fund holding?')) return;
@@ -140,6 +196,7 @@ export default function MutualFundDetailPage() {
       const body: Record<string, unknown> = {
         schemeName: form.schemeName,
         fundType: form.fundType,
+        category: form.category,
         folioNumber: form.folioNumber || null,
         units: form.units ? Number(form.units) : undefined,
         nav: form.averageNavRupees ? Number(form.averageNavRupees) : undefined, // API expects rupees, converts to paisa
@@ -269,9 +326,18 @@ export default function MutualFundDetailPage() {
         </CardHeader>
         <CardContent>
           {!isEditing ? (
-            <DetailView holding={holding} liveNav={liveNav} navDate={navDate} />
+            <DetailView
+              holding={holding}
+              liveNav={liveNav}
+              navDate={navDate}
+              resolvedRatePct={resolvedRate(holding.category ?? 'UNKNOWN')}
+            />
           ) : (
-            <EditForm form={form} setField={setField} />
+            <EditForm
+              form={form}
+              setField={setField}
+              resolvedRatePct={resolvedRate(form.category)}
+            />
           )}
         </CardContent>
       </Card>
@@ -285,19 +351,28 @@ function DetailView({
   holding,
   liveNav,
   navDate,
+  resolvedRatePct,
 }: {
   holding: MutualFund;
   liveNav: number | null;
   navDate: string | null;
+  resolvedRatePct: number;
 }) {
   const avgNavRupees = (holding.nav / 100).toFixed(2);
   const currentNavDisplay = liveNav !== null
     ? `₹${liveNav.toFixed(2)}`
     : `₹${(holding.nav / 100).toFixed(2)} (stored)`;
 
+  const category = holding.category ?? 'UNKNOWN';
+  const categoryLabel =
+    category === 'UNKNOWN'
+      ? 'Unknown (using fallback)'
+      : `${category[0]}${category.slice(1).toLowerCase()} · ${resolvedRatePct}%/yr growth`;
+
   const fields: Array<[string, string]> = [
     ['Scheme name', holding.schemeName],
     ['Fund type', holding.fundType],
+    ['Category (rate bucket)', categoryLabel],
     ['Folio number', holding.folioNumber ?? '---'],
     ['ISIN', holding.isin && holding.isin !== 'UNKNOWN' ? holding.isin : '---'],
     ['Units', holding.units.toFixed(3)],
@@ -331,14 +406,21 @@ function DetailView({
 function EditForm({
   form,
   setField,
+  resolvedRatePct,
 }: {
   form: FormState;
   setField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  resolvedRatePct: number;
 }) {
   const computedInvestment =
     form.units && form.averageNavRupees
       ? Number(form.units) * Number(form.averageNavRupees)
       : null;
+
+  const categoryHint =
+    form.category === 'UNKNOWN'
+      ? `Using fallback rate of ${resolvedRatePct}% per year (umbrella MF rate). Set a category to use the right MF subclass rate.`
+      : `Using ${form.category[0]}${form.category.slice(1).toLowerCase()} growth rate of ${resolvedRatePct}% per year`;
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -353,6 +435,17 @@ function EditForm({
           options={FUND_TYPE_OPTIONS}
         />
       </Field>
+
+      <div className="sm:col-span-2">
+        <Field label="Category (rate bucket)">
+          <Select
+            value={form.category}
+            onChange={(v) => setField('category', v as Category)}
+            options={CATEGORY_OPTIONS}
+          />
+          <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">{categoryHint}</p>
+        </Field>
+      </div>
 
       <Field label="Folio number">
         <Input

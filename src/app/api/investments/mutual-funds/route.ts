@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
-import { db, mutualFunds, type MutualFundType } from '@/db';
+import { db, mutualFunds, type MutualFundType, type MutualFundCategory } from '@/db';
 import { auth } from '@/auth';
 import { getByIsin, getBySchemeCode } from '@/lib/services/amfi';
 
@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       schemeCode,
       schemeName,
       fundType,
+      category,
       folioNumber,
       units,
       nav,
@@ -48,6 +49,14 @@ export async function POST(request: NextRequest) {
     }
     if (!fundType || !['EQUITY', 'DEBT', 'HYBRID', 'LIQUID', 'GOLD'].includes(fundType)) {
       return NextResponse.json({ error: 'fundType is required (EQUITY|DEBT|HYBRID|LIQUID|GOLD)' }, { status: 400 });
+    }
+    // Category (rate bucket) is optional — defaults to UNKNOWN via DB.
+    // If supplied, validate against the CHECK constraint set.
+    if (category !== undefined && !['EQUITY', 'DEBT', 'HYBRID', 'UNKNOWN'].includes(category)) {
+      return NextResponse.json(
+        { error: 'category must be EQUITY | DEBT | HYBRID | UNKNOWN' },
+        { status: 400 },
+      );
     }
     if (typeof units !== 'number' || units <= 0) {
       return NextResponse.json({ error: 'units must be a positive number' }, { status: 400 });
@@ -102,6 +111,7 @@ export async function POST(request: NextRequest) {
         isin: resolvedIsin,
         schemeName: schemeName.trim(),
         fundType: fundType as MutualFundType,
+        category: (category ?? 'UNKNOWN') as MutualFundCategory,
         folioNumber: folioNumber || null,
         units,
         nav: navPaisa,

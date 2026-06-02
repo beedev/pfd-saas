@@ -12,6 +12,7 @@ import {
   Badge,
   StatsDisplay,
   DataTable,
+  Select,
   type Column,
 } from '@dxp/ui';
 import {
@@ -22,13 +23,18 @@ import {
   PiggyBank,
   TrendingUp,
   TrendingDown,
+  AlertCircle,
+  X,
 } from 'lucide-react';
+
+type Category = 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
 
 interface MutualFund {
   id: number;
   isin: string;
   schemeName: string;
   fundType: 'EQUITY' | 'DEBT' | 'HYBRID' | 'LIQUID' | 'GOLD';
+  category: Category;
   folioNumber: string | null;
   units: number;
   nav: number; // paisa
@@ -39,6 +45,13 @@ interface MutualFund {
   lastNavDate: string | null;
   investmentStartDate: string | null;
 }
+
+const CATEGORY_OPTIONS: Array<{ label: string; value: Category }> = [
+  { label: 'Equity', value: 'EQUITY' },
+  { label: 'Debt', value: 'DEBT' },
+  { label: 'Hybrid', value: 'HYBRID' },
+  { label: 'Unknown', value: 'UNKNOWN' },
+];
 
 const formatINR = (paisa: number) =>
   new Intl.NumberFormat('en-IN', {
@@ -64,6 +77,12 @@ export default function MutualFundsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<MutualFund | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Sprint 5.7c — bulk-categorise modal state. Opens when the user
+  // clicks the amber banner; collects per-row category choices and
+  // commits via POST /api/investments/mutual-funds/bulk-categorise.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDraft, setBulkDraft] = useState<Map<number, Category>>(new Map());
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -123,6 +142,46 @@ export default function MutualFundsPage() {
   const totalGain = totalCurrent - totalInvested;
   const totalGainPct = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
 
+  const uncategorised = funds.filter((f) => (f.category ?? 'UNKNOWN') === 'UNKNOWN');
+
+  const openBulkModal = () => {
+    // Seed every uncategorised fund with UNKNOWN; user picks from there.
+    const seed = new Map<number, Category>();
+    for (const f of uncategorised) seed.set(f.id, 'UNKNOWN');
+    setBulkDraft(seed);
+    setBulkOpen(true);
+  };
+
+  const commitBulk = async () => {
+    // Only push rows the user actually moved off UNKNOWN — leaving a
+    // row UNKNOWN is a no-op, no need to roundtrip it.
+    const updates: Array<{ id: number; category: Category }> = [];
+    for (const [id, cat] of bulkDraft.entries()) {
+      if (cat !== 'UNKNOWN') updates.push({ id, category: cat });
+    }
+    if (updates.length === 0) {
+      toast.info('Nothing to update — pick a category for at least one fund');
+      return;
+    }
+    setIsBulkSaving(true);
+    try {
+      const r = await fetch('/api/investments/mutual-funds/bulk-categorise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Bulk save failed');
+      toast.success(`Categorised ${data.updated} fund${data.updated === 1 ? '' : 's'}`);
+      setBulkOpen(false);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Bulk save failed');
+    } finally {
+      setIsBulkSaving(false);
+    }
+  };
+
   const columns: Column<MutualFund>[] = [
     {
       key: 'schemeName',
@@ -142,6 +201,16 @@ export default function MutualFundsPage() {
       key: 'fundType',
       header: 'Type',
       render: (_v, f) => <Badge variant={fundTypeVariant[f.fundType]}>{f.fundType}</Badge>,
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      render: (_v, f) => {
+        const c = f.category ?? 'UNKNOWN';
+        const variant: 'success' | 'info' | 'warning' | 'default' =
+          c === 'EQUITY' ? 'success' : c === 'DEBT' ? 'info' : c === 'HYBRID' ? 'warning' : 'default';
+        return <Badge variant={variant}>{c}</Badge>;
+      },
     },
     {
       key: 'units',
@@ -244,6 +313,23 @@ export default function MutualFundsPage() {
         </div>
       </div>
 
+      {uncategorised.length > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>
+              <strong>{uncategorised.length}</strong> fund
+              {uncategorised.length === 1 ? '' : 's'} uncategorised — set a
+              category (Equity/Debt/Hybrid) so projections use the right
+              MF subclass growth rate.
+            </span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={openBulkModal}>
+            Categorise now
+          </Button>
+        </div>
+      )}
+
       <StatsDisplay
         currency="INR"
         locale="en-IN"
@@ -289,6 +375,84 @@ export default function MutualFundsPage() {
           )}
         </CardContent>
       </Card>
+
+      {bulkOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => !isBulkSaving && setBulkOpen(false)}
+        >
+          <Card
+            className="w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-[var(--dxp-text)]">
+                  Categorise mutual funds
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => !isBulkSaving && setBulkOpen(false)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-[var(--dxp-text-secondary)]">
+                Pick a rate bucket for each fund. Equity = growth-heavy
+                (~11%), Debt = bonds/liquid (~7%), Hybrid = multi-asset/
+                arbitrage (~9%). Leave a row as Unknown to skip it.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {uncategorised.map((f) => (
+                  <div
+                    key={f.id}
+                    className="grid grid-cols-[1fr_180px] items-center gap-3 rounded border border-[var(--dxp-border)] px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--dxp-text)]">
+                        {f.schemeName}
+                      </p>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">
+                        {f.fundType} ·{' '}
+                        {new Intl.NumberFormat('en-IN', {
+                          style: 'currency',
+                          currency: 'INR',
+                          maximumFractionDigits: 0,
+                        }).format(f.currentValue / 100)}
+                      </p>
+                    </div>
+                    <Select
+                      value={bulkDraft.get(f.id) ?? 'UNKNOWN'}
+                      onChange={(v) => {
+                        const next = new Map(bulkDraft);
+                        next.set(f.id, v as Category);
+                        setBulkDraft(next);
+                      }}
+                      options={CATEGORY_OPTIONS}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => setBulkOpen(false)}
+                  disabled={isBulkSaving}
+                >
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={commitBulk} disabled={isBulkSaving}>
+                  {isBulkSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save all
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {deleteTarget && (
         <div
