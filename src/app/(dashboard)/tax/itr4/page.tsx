@@ -46,6 +46,12 @@ import {
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { ItrResultBanner } from '@/components/forms/itr-result-banner';
+import {
+  ItrEligibilityBanner,
+  type EligibilityFlags,
+  type ExcludedIncomeBlock,
+  type ItrFormCode,
+} from '@/components/forms/itr-eligibility-banner';
 
 interface PresumptiveRow {
   id: number;
@@ -94,6 +100,9 @@ interface Itr4Response {
     exceedsCap: boolean;
     salaryTdsPaisa: number;
   };
+  eligibility: { isEligible: boolean; flags: EligibilityFlags };
+  excludedIncomeBlocks: ExcludedIncomeBlock[];
+  wizardSelectedForm: ItrFormCode | null;
 }
 
 const formatINR = (paisa: number) =>
@@ -210,6 +219,14 @@ export default function Itr4Page() {
         </Card>
       ) : !data ? null : (
         <>
+          {/* Sprint 5.4 — eligibility banner (cap + CG + multi-HP + foreign + director + agri) */}
+          <ItrEligibilityBanner
+            formCode="ITR-4"
+            fy={fy}
+            wizardSelectedForm={data.wizardSelectedForm}
+            excludedIncomeBlocks={data.excludedIncomeBlocks}
+            eligibilityFlags={data.eligibility.flags}
+          />
           {/* Sprint 5.2 (E) — ITR result banner */}
           <ItrResultBanner
             fy={fy}
@@ -247,7 +264,7 @@ export default function Itr4Page() {
             columns={3}
             stats={[
               {
-                label: 'Total income',
+                label: 'ITR-4 eligible income',
                 value: data.summary.grossTotalIncomePaisa / 100,
                 format: 'currency',
               },
@@ -263,6 +280,16 @@ export default function Itr4Page() {
               },
             ]}
           />
+          {data.excludedIncomeBlocks.length > 0 && (
+            <p className="text-xs text-[var(--dxp-text-muted)]">
+              Actual income across all forms: {formatINR(
+                data.summary.grossTotalIncomePaisa +
+                  data.excludedIncomeBlocks.reduce((s, b) => s + b.amountPaisa, 0),
+              )}{' '}
+              — ITR-4 excludes{' '}
+              {data.excludedIncomeBlocks.map((b) => b.label.toLowerCase()).join(' and ')}.
+            </p>
+          )}
 
           {/* Salary */}
           <Card>

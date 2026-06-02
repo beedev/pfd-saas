@@ -24,6 +24,20 @@ import { Loader2, AlertTriangle, ArrowRight, Banknote, Home, Wallet, Calculator,
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { ItrResultBanner } from '@/components/forms/itr-result-banner';
+import {
+  ItrEligibilityBanner,
+  type EligibilityFlags,
+  type ExcludedIncomeBlock,
+  type ItrFormCode,
+} from '@/components/forms/itr-eligibility-banner';
+
+interface HousePropertyRow {
+  id: number;
+  name: string;
+  rentalPaisa: number;
+  sec24bPaisa: number;
+  isSelfOccupied: boolean;
+}
 
 interface Itr1Summary {
   fy: string;
@@ -60,6 +74,10 @@ interface Itr1Summary {
     effectiveRatePct: number;
     exceedsCap: boolean;
   };
+  eligibility: { isEligible: boolean; flags: EligibilityFlags };
+  excludedIncomeBlocks: ExcludedIncomeBlock[];
+  housePropertyRows: HousePropertyRow[];
+  wizardSelectedForm: ItrFormCode | null;
 }
 
 const formatINR = (paisa: number) =>
@@ -157,6 +175,14 @@ export default function Itr1Page() {
         </Card>
       ) : !data ? null : (
         <>
+          {/* Sprint 5.4 — eligibility banner (wizard mismatch + ineligibility) */}
+          <ItrEligibilityBanner
+            formCode="ITR-1"
+            fy={fy}
+            wizardSelectedForm={data.wizardSelectedForm}
+            excludedIncomeBlocks={data.excludedIncomeBlocks}
+            eligibilityFlags={data.eligibility.flags}
+          />
           {/* Sprint 5.2 (E) — ITR result banner */}
           <ItrResultBanner
             fy={fy}
@@ -188,14 +214,15 @@ export default function Itr1Page() {
             </Card>
           )}
 
-          {/* Headline */}
+          {/* Headline — Sprint 5.4: relabel to disambiguate ITR-1's
+              eligible-income from the user's actual cross-form total. */}
           <StatsDisplay
             currency="INR"
             locale="en-IN"
             columns={3}
             stats={[
               {
-                label: 'Total income',
+                label: 'ITR-1 eligible income',
                 value: data.summary.grossTotalIncomePaisa / 100,
                 format: 'currency',
               },
@@ -211,6 +238,16 @@ export default function Itr1Page() {
               },
             ]}
           />
+          {data.excludedIncomeBlocks.length > 0 && (
+            <p className="text-xs text-[var(--dxp-text-muted)]">
+              Actual income across all forms: {formatINR(
+                data.summary.grossTotalIncomePaisa +
+                  data.excludedIncomeBlocks.reduce((s, b) => s + b.amountPaisa, 0),
+              )}{' '}
+              — the ITR-1 number above excludes{' '}
+              {data.excludedIncomeBlocks.map((b) => b.label.toLowerCase()).join(' and ')}.
+            </p>
+          )}
 
           {/* Salary */}
           <Card>
@@ -239,7 +276,10 @@ export default function Itr1Page() {
             </CardContent>
           </Card>
 
-          {/* House Property (single) */}
+          {/* House Property — Sprint 5.4: surface ALL properties when
+              the user has more than one. ITR-1 only computes against the
+              first row; the extra rows render purely for disclosure so
+              the user understands why their other rentals dropped out. */}
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
@@ -250,33 +290,97 @@ export default function Itr1Page() {
               </div>
             </CardHeader>
             <CardContent>
-              {!data.blocks.houseProperty ? (
+              {data.housePropertyRows.length === 0 ? (
                 <p className="text-sm text-[var(--dxp-text-muted)]">
                   No property recorded in /investments/real-estate.
                 </p>
               ) : (
-                <div className="space-y-2 text-sm">
-                  <p className="font-bold text-[var(--dxp-text)]">
-                    {data.blocks.houseProperty.propertyName}
-                  </p>
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                    <Field
-                      label="Annual rent (GAV)"
-                      value={formatINR(data.blocks.houseProperty.annualRentPaisa)}
-                    />
-                    <Field
-                      label="Municipal taxes"
-                      value={formatINR(data.blocks.houseProperty.municipalTaxesPaisa)}
-                    />
-                    <Field
-                      label="Home-loan interest 24(b)"
-                      value={formatINR(data.blocks.houseProperty.homeLoanInterestPaisa)}
-                    />
-                    <Field
-                      label="Net HP income"
-                      value={formatINR(data.blocks.houseProperty.netIncomePaisa)}
-                    />
-                  </div>
+                <div className="space-y-3 text-sm">
+                  {data.housePropertyRows.length > 1 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50/40 px-3 py-2 text-xs text-[var(--dxp-text-secondary)]">
+                      <strong className="text-[var(--dxp-text)]">
+                        ITR-1 allows only one house property.
+                      </strong>{' '}
+                      Only the first property below feeds the tax computation. Your additional{' '}
+                      {formatINR(
+                        data.housePropertyRows
+                          .slice(1)
+                          .filter((r) => !r.isSelfOccupied && r.rentalPaisa > 0)
+                          .reduce((s, r) => s + r.rentalPaisa, 0),
+                      )}{' '}
+                      of rental income won&apos;t fit — file ITR-2 to include all of these.
+                    </div>
+                  )}
+                  {data.blocks.houseProperty && (
+                    <div className="space-y-2">
+                      <p className="font-bold text-[var(--dxp-text)]">
+                        {data.blocks.houseProperty.propertyName}{' '}
+                        <Badge variant="info">In ITR-1</Badge>
+                      </p>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                        <Field
+                          label="Annual rent (GAV)"
+                          value={formatINR(data.blocks.houseProperty.annualRentPaisa)}
+                        />
+                        <Field
+                          label="Municipal taxes"
+                          value={formatINR(data.blocks.houseProperty.municipalTaxesPaisa)}
+                        />
+                        <Field
+                          label="Home-loan interest 24(b)"
+                          value={formatINR(data.blocks.houseProperty.homeLoanInterestPaisa)}
+                        />
+                        <Field
+                          label="Net HP income"
+                          value={formatINR(data.blocks.houseProperty.netIncomePaisa)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {data.housePropertyRows.length > 1 && (
+                    <div className="space-y-2 border-t border-[var(--dxp-border-light)] pt-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-muted)]">
+                        Additional properties (excluded from ITR-1)
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-[var(--dxp-border-light)] text-xs text-[var(--dxp-text-muted)]">
+                              <th className="px-2 py-2 text-left">Property</th>
+                              <th className="px-2 py-2 text-left">Status</th>
+                              <th className="px-2 py-2 text-right">Annual rent</th>
+                              <th className="px-2 py-2 text-right">24(b) interest</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.housePropertyRows.slice(1).map((r) => (
+                              <tr
+                                key={r.id}
+                                className="border-b border-[var(--dxp-border-light)] text-[var(--dxp-text)]"
+                              >
+                                <td className="px-2 py-2 font-bold">{r.name}</td>
+                                <td className="px-2 py-2">
+                                  {r.isSelfOccupied ? (
+                                    <Badge variant="default">Self-occupied</Badge>
+                                  ) : r.rentalPaisa > 0 ? (
+                                    <Badge variant="warning">Let-out</Badge>
+                                  ) : (
+                                    <Badge variant="default">Vacant</Badge>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2 text-right">
+                                  {formatINR(r.rentalPaisa)}
+                                </td>
+                                <td className="px-2 py-2 text-right">
+                                  {formatINR(r.sec24bPaisa)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                   <p className="text-xs text-[var(--dxp-text-muted)]">
                     NAV = GAV − municipal taxes; minus 30% std maintenance; minus loan interest.
                   </p>

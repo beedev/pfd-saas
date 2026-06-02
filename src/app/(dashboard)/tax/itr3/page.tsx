@@ -6,6 +6,12 @@ import Link from 'next/link';
 import { Download, FileText, Plus, AlertCircle, CheckCircle2, Briefcase, Banknote, Receipt, Wallet, Calculator } from 'lucide-react';
 import { toast } from 'sonner';
 import { ItrResultBanner } from '@/components/forms/itr-result-banner';
+import {
+  ItrEligibilityBanner,
+  type EligibilityFlags,
+  type ExcludedIncomeBlock,
+  type ItrFormCode,
+} from '@/components/forms/itr-eligibility-banner';
 
 interface Summary {
   fy: string;
@@ -28,6 +34,9 @@ interface Summary {
     tds: { salaryTds: number; nonSalaryTds: number; tds2Count: number; tds3Count: number };
     advanceTax: { rowCount: number; total: number };
   };
+  eligibility?: { isEligible: boolean; flags: EligibilityFlags };
+  excludedIncomeBlocks?: ExcludedIncomeBlock[];
+  wizardSelectedForm?: ItrFormCode | null;
 }
 
 const formatINR = (paisa: number) =>
@@ -125,6 +134,15 @@ export default function Itr3HubPage() {
         <div className="flex h-32 items-center justify-center text-gray-400">Loading…</div>
       ) : (
         <>
+          {/* Sprint 5.4 — eligibility banner (ITR-3 is the catch-all,
+              so this almost always collapses to a green eligible row). */}
+          <ItrEligibilityBanner
+            formCode="ITR-3"
+            fy={fy}
+            wizardSelectedForm={summary?.wizardSelectedForm ?? null}
+            excludedIncomeBlocks={summary?.excludedIncomeBlocks ?? []}
+            eligibilityFlags={summary?.eligibility?.flags ?? {}}
+          />
           {/* Sprint 5.2 (E) — ITR result banner */}
           <ItrResultBanner
             fy={fy}

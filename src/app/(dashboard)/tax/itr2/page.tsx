@@ -22,6 +22,12 @@ import { Loader2, AlertTriangle, Banknote, Home, Wallet, Calculator, Receipt, Tr
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { ItrResultBanner } from '@/components/forms/itr-result-banner';
+import {
+  ItrEligibilityBanner,
+  type EligibilityFlags,
+  type ExcludedIncomeBlock,
+  type ItrFormCode,
+} from '@/components/forms/itr-eligibility-banner';
 
 interface HouseRow {
   label: string;
@@ -87,6 +93,9 @@ interface Itr2Response {
     totalTaxPaisa: number;
     effectiveRatePct: number;
   };
+  eligibility: { isEligible: boolean; flags: EligibilityFlags };
+  excludedIncomeBlocks: ExcludedIncomeBlock[];
+  wizardSelectedForm: ItrFormCode | null;
 }
 
 const formatINR = (paisa: number) =>
@@ -179,6 +188,14 @@ export default function Itr2Page() {
         </Card>
       ) : !data ? null : (
         <>
+          {/* Sprint 5.4 — eligibility banner (business income would push to ITR-3) */}
+          <ItrEligibilityBanner
+            formCode="ITR-2"
+            fy={fy}
+            wizardSelectedForm={data.wizardSelectedForm}
+            excludedIncomeBlocks={data.excludedIncomeBlocks}
+            eligibilityFlags={data.eligibility.flags}
+          />
           {/* Sprint 5.2 (E) — ITR result banner */}
           <ItrResultBanner
             fy={fy}
