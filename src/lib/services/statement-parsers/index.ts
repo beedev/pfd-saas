@@ -15,6 +15,8 @@ import type { DocType, ParsedStatement } from './types';
 import { detectLic, parseLicStream } from './lic';
 import { detectChit, parseChitStream } from './chit-dsc';
 import { detectMfSip, parseMfSipStream } from './mf-sip';
+import { detectEpfPassbook, parseEpfPassbookStream } from './epf-passbook';
+import { detectNpsSot, parseNpsSotStream } from './nps-sot';
 
 export type { DocType, ParsedStatement } from './types';
 export type {
@@ -24,12 +26,22 @@ export type {
   ChitParsed,
   MfSipParsed,
   MfSipRow,
+  EpfPassbookParsed,
+  EpfPassbookData,
+  NpsSotParsed,
+  NpsSotData,
 } from './types';
 
+// Detection order matters when two detectors might fire on the same
+// document. EPF + NPS detectors use very specific header tokens so
+// false positives are unlikely; keeping them after the originals just
+// preserves test stability.
 const DETECTORS: Array<{ type: Exclude<DocType, 'unknown'>; detect: (s: string) => boolean }> = [
   { type: 'lic', detect: detectLic },
   { type: 'chit', detect: detectChit },
   { type: 'mf-sip', detect: detectMfSip },
+  { type: 'epf-passbook', detect: detectEpfPassbook },
+  { type: 'nps-sot', detect: detectNpsSot },
 ];
 
 export function detectDocType(stream: string): DocType {
@@ -43,6 +55,8 @@ const PARSERS: Record<Exclude<DocType, 'unknown'>, (s: string) => ParsedStatemen
   lic: parseLicStream,
   chit: parseChitStream,
   'mf-sip': parseMfSipStream,
+  'epf-passbook': parseEpfPassbookStream,
+  'nps-sot': parseNpsSotStream,
 };
 
 export interface ParseResult {
@@ -76,7 +90,7 @@ export async function parseStatement(
       parsed: {
         type: 'unknown',
         warnings: [
-          'Could not detect document type. Supported: LIC Premium Statement, Chit Fund Account Copy, Mutual Fund CAS.',
+          'Could not detect document type. Supported: LIC Premium Statement, Chit Fund Account Copy, Mutual Fund CAS, EPF Passbook, NPS Statement of Transactions.',
         ],
       },
     };

@@ -10,7 +10,7 @@
  * + a writer in the commit route.
  */
 
-export type DocType = 'lic' | 'chit' | 'mf-sip' | 'unknown';
+export type DocType = 'lic' | 'chit' | 'mf-sip' | 'epf-passbook' | 'nps-sot' | 'unknown';
 
 /* ─── LIC ────────────────────────────────────────────────────────────── */
 
@@ -90,6 +90,87 @@ export interface MfSipParsed {
   warnings: string[];
 }
 
+/* ─── EPF Passbook (Sprint 5.6) ──────────────────────────────────────── */
+//
+// Source: EPFO member passbook PDF — UAN-based statement aggregating
+// employer-wise balance shares (employee / employer / pension), with
+// year-wise transaction history. EPFO does not vary the layout across
+// employers, but field labels DO differ slightly between Hindi/English
+// dual-script and pure English passbooks. Parsers stay regex-anchored
+// so they fail gracefully on field-level mismatches.
+
+export interface EpfPassbookTransaction {
+  /** YYYY-MM-DD (ISO). Source format is typically DD-MM-YYYY. */
+  date: string;
+  /** Raw description token — e.g. "CR", "DR", "INTEREST", "WITHDRAWAL". */
+  type: string;
+  /** Paisa. 0 if N/A. */
+  debit: number;
+  credit: number;
+}
+
+export interface EpfPassbookData {
+  uan: string | null;
+  memberId: string | null;
+  employerName: string | null;
+  /** Latest date that appears on the passbook — usually the
+   *  "Last Updated" line under the header. */
+  asOfDate: string | null;
+  /** Paisa. Closing employee share. */
+  employeeBalancePaisa: number;
+  /** Paisa. Closing employer share. */
+  employerBalancePaisa: number;
+  /** Paisa. Pension fund share (not part of withdrawable EPF). */
+  pensionBalancePaisa: number;
+  /** Derived from the avg of recent monthly credits if visible.
+   *  Null if we can't see a clean enough series. */
+  monthlyContributionPaisa: number | null;
+  recentTransactions: EpfPassbookTransaction[];
+}
+
+export interface EpfPassbookParsed {
+  type: 'epf-passbook';
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  data: EpfPassbookData;
+  warnings: string[];
+}
+
+/* ─── NPS Statement of Transactions (Sprint 5.6) ─────────────────────── */
+//
+// Source: Protean (NSDL) CRA "Statement of Transactions" — the PRAN
+// holder's official annual statement. PFRDA standardises the layout
+// across the two CRAs (Protean / KFin) at the section level but column
+// orderings differ slightly. Same parser strategy as EPF: regex-anchored.
+
+export interface NpsRecentContribution {
+  date: string; // ISO
+  amountPaisa: number;
+  description: string;
+}
+
+export interface NpsSotData {
+  pran: string | null;
+  subscriberName: string | null;
+  tier: 'TIER1' | 'TIER2' | null;
+  asOfDate: string | null;
+  equityFundValuePaisa: number;
+  debtFundValuePaisa: number;
+  alternativeFundValuePaisa: number;
+  totalValuePaisa: number;
+  totalContributedPaisa: number;
+  /** Derived from the recent contributions list if at least 3 are
+   *  visible. Null otherwise. */
+  monthlyContributionPaisa: number | null;
+  recentContributions: NpsRecentContribution[];
+}
+
+export interface NpsSotParsed {
+  type: 'nps-sot';
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  data: NpsSotData;
+  warnings: string[];
+}
+
 /* ─── Unknown ─────────────────────────────────────────────────────────── */
 
 export interface UnknownParsed {
@@ -97,4 +178,10 @@ export interface UnknownParsed {
   warnings: string[];
 }
 
-export type ParsedStatement = LicParsed | ChitParsed | MfSipParsed | UnknownParsed;
+export type ParsedStatement =
+  | LicParsed
+  | ChitParsed
+  | MfSipParsed
+  | EpfPassbookParsed
+  | NpsSotParsed
+  | UnknownParsed;
