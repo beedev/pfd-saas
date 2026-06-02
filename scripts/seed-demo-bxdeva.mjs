@@ -639,17 +639,22 @@ async function seedAll(tx) {
     const alt = lakh(1.5);
     const total = equity + debt + alt;
     const contrib = rs(50000) + rs(84800);
+    // Sprint 5.5f — ₹50k 80CCD(1B) + ₹84.8k 80CCD(2) per year ÷ 12
+    // = ₹11,235/mo monthly contribution stream.
+    const monthlyContrib = Math.round((rs(50000) + rs(84800)) / 12);
     await tx`
       INSERT INTO nps_accounts
         (user_id, account_number, account_holder, pan, tier, status,
          equity_fund_value, debt_fund_value, alternative_fund_value,
          total_value, total_contributed, employer_contribution,
+         monthly_contribution_paisa,
          gain_loss, opening_date, notes)
       VALUES
         (${TARGET_USER_ID}, 'PRAN110099887766', 'BXDEva Demo', 'XXXXX1234X',
          'TIER1', 'ACTIVE',
          ${equity}, ${debt}, ${alt},
          ${total}, ${contrib * 4}, ${rs(84800)},
+         ${monthlyContrib},
          ${total - contrib * 4}, '2020-04-15',
          ${NOTE('nps-tier1')})
     `;
@@ -662,22 +667,33 @@ async function seedAll(tx) {
     const empr = lakh(3.8);
     const interest = rs(0); // bundled in totals
     const total = emp + empr + interest;
+    // Sprint 5.5f — 24% of ₹6.6L basic+DA ÷ 12 ≈ ₹13,200/mo.
+    // Brief spec called for ₹15,840 (~24% of ₹7.92L). Going with the
+    // spec value so the projection delta on the verify step is
+    // unambiguous.
+    const monthlyContrib = rs(15840);
     await tx`
       INSERT INTO epf_accounts
         (user_id, account_type, account_holder, pan, uan,
          employee_balance, employer_balance, interest_balance,
          total_balance, total_contributed, interest_earned,
+         monthly_contribution_paisa,
          opening_date, is_active, notes)
       VALUES
         (${TARGET_USER_ID}, 'EPF', 'BXDEva Demo', 'XXXXX1234X', 'UAN100200300',
          ${emp}, ${empr}, ${interest},
          ${total}, ${emp + empr}, ${interest},
+         ${monthlyContrib},
          '2018-06-01', true, ${NOTE('epf-heartfulness')})
     `;
     tally('epf_accounts', 1);
   }
 
   // ─── small_savings_accounts — 3 (PPF, SSY, NSC) ──────────────────
+  // Sprint 5.5f — periodic contribution streams:
+  //   PPF: ₹8,333/mo (₹1L/yr ÷ 12) – well under the 1.5L 80C cap
+  //   SSY: ₹15,000/mo
+  //   NSC: 0 (lumpsum scheme — projection lib zeros this out anyway)
   const ssRows = [
     {
       scheme: 'PPF', acct: 'PPF8001100200300', holder: 'BXDEva Demo',
@@ -685,6 +701,7 @@ async function seedAll(tx) {
       open: '2017-04-10', maturity: '2032-04-10', rate: 7.1,
       bal: lakh(6.5), totDep: lakh(7.5), totInt: lakh(0.5),
       bucket: 'ss-ppf',
+      periodicContrib: rs(8333), contribFreq: 'MONTHLY',
     },
     {
       scheme: 'SSY', acct: 'SSY8001234567890', holder: 'Daughter',
@@ -693,6 +710,7 @@ async function seedAll(tx) {
       open: '2018-09-05', maturity: '2038-08-22', rate: 8.2,
       bal: lakh(1.8), totDep: lakh(2.0), totInt: rs(20000),
       bucket: 'ss-ssy',
+      periodicContrib: rs(15000), contribFreq: 'MONTHLY',
     },
     {
       scheme: 'NSC', acct: 'NSC8009988776655', holder: 'BXDEva Demo',
@@ -700,6 +718,7 @@ async function seedAll(tx) {
       open: '2022-10-10', maturity: '2027-10-10', rate: 7.7,
       bal: rs(58000), totDep: rs(50000), totInt: rs(8000),
       bucket: 'ss-nsc',
+      periodicContrib: 0, contribFreq: 'MONTHLY',
     },
   ];
   for (const s of ssRows) {
@@ -711,6 +730,7 @@ async function seedAll(tx) {
          interest_rate_percent, interest_compounding,
          lock_in_end_date,
          total_deposited_paisa, total_interest_paisa,
+         periodic_contribution_paisa, contribution_frequency,
          status, notes)
       VALUES
         (${TARGET_USER_ID}, ${s.scheme}, ${s.acct}, ${s.holder}, ${s.dob ?? null},
@@ -719,6 +739,7 @@ async function seedAll(tx) {
          ${s.rate}, 'YEARLY',
          ${s.maturity},
          ${s.totDep}, ${s.totInt},
+         ${s.periodicContrib}, ${s.contribFreq},
          'ACTIVE', ${NOTE(s.bucket)})
     `;
     tally('small_savings_accounts', 1);
