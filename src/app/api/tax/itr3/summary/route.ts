@@ -10,8 +10,10 @@ import {
   incomeTaxPaid,
   invoices,
   itrFormSelection,
+  liabilities,
 } from '@/db';
 import { auth } from '@/auth';
+import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 
 /**
  * One-shot summary endpoint for the ITR-3 hub. Returns totals & per-section
@@ -104,10 +106,50 @@ export async function GET(request: NextRequest) {
     // Schedule VI-A — Section 80 deductions (already exists)
     const deductionRows = await db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id)));
     // Prefer Phase-6 amountPaisa, else fallback to legacy deductibleAmount
-    const totalDeductions = deductionRows.reduce(
+    const manualTotalDeductions = deductionRows.reduce(
       (s, r) => s + (r.amountPaisa ?? r.deductibleAmount ?? 0),
       0,
     );
+
+    // Sprint 5.9c — loan-derived 80C principal (capped at ₹1.5L) + 24(b)
+    // interest, surfaced for disclosure and added to the deductions
+    // total so the ITR-3 page reflects the same number as regime-compare.
+    const loanRows = await db
+      .select()
+      .from(liabilities)
+      .where(eq(liabilities.userId, session.user.id));
+    const loanAgg = aggregateLoanTaxDeductions(
+      loanRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        status: r.status,
+        currentBalance: r.currentBalance,
+        originalAmount: r.originalAmount,
+        interestRate: r.interestRate,
+        monthlyEmi: r.monthlyEmi,
+        startDate: r.startDate,
+        maturityDate: r.maturityDate,
+        remainingTenor: r.remainingTenor,
+        principalQualifies80c: r.principalQualifies80c,
+        interestQualifies24b: r.interestQualifies24b,
+      })),
+      fy,
+    );
+    const loanDeductions =
+      'error' in loanAgg
+        ? { totalInterestPaisa: 0, totalPrincipalPaisa: 0, perLiability: [] }
+        : loanAgg;
+    const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
+    const manualEightyCPaisa = deductionRows
+      .filter((r) => r.section === '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? r.deductibleAmount ?? 0), 0);
+    const eightyCAppliedPaisa = Math.min(
+      manualEightyCPaisa + loanDeductions.totalPrincipalPaisa,
+      EIGHTY_C_CAP_PAISA,
+    );
+    const manualNon80c = manualTotalDeductions - manualEightyCPaisa;
+    const totalDeductions = manualNon80c + eightyCAppliedPaisa;
 
     // Non-salary TDS
     const tdsRows = await db.select().from(tdsCredits).where(and(eq(tdsCredits.financialYear, fy), eq(tdsCredits.userId, session.user.id)));
@@ -177,6 +219,18 @@ export async function GET(request: NextRequest) {
         deductions: {
           rowCount: deductionRows.length,
           total: totalDeductions,
+          // Sprint 5.9c — 80C breakdown + loan-derived deductions
+          eightyC: {
+            manualPaisa: manualEightyCPaisa,
+            fromLoansPaisa: loanDeductions.totalPrincipalPaisa,
+            appliedPaisa: eightyCAppliedPaisa,
+            capPaisa: EIGHTY_C_CAP_PAISA,
+          },
+          loanDeductions: {
+            totalInterestPaisa: loanDeductions.totalInterestPaisa,
+            totalPrincipalPaisa: loanDeductions.totalPrincipalPaisa,
+            perLiability: loanDeductions.perLiability,
+          },
         },
         tds: {
           salaryTds: totalSalaryTds,

@@ -32,12 +32,14 @@ import {
   capitalGains,
   invoices,
   itrFormSelection,
+  liabilities,
   type TaxRegime,
   type PresumptiveSection,
   type ReceiptMode,
 } from '@/db';
 import { auth } from '@/auth';
 import { computeItr4Summary } from '@/lib/finance/itr4-summary';
+import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 
 function fyDateRange(fy: string): [string, string] {
   const [start] = fy.split('-');
@@ -71,6 +73,7 @@ export async function GET(request: NextRequest) {
       cgRows,
       fyInvoices,
       wizardSelection,
+      loanRows,
     ] = await Promise.all([
       db
         .select()
@@ -140,6 +143,8 @@ export async function GET(request: NextRequest) {
           and(eq(itrFormSelection.userId, userId), eq(itrFormSelection.fy, fy)),
         )
         .limit(1),
+      // Sprint 5.9c — loans for 80C principal
+      db.select().from(liabilities).where(eq(liabilities.userId, userId)),
     ]);
 
     if (slabs.length === 0 || configs.length === 0) {
@@ -173,10 +178,42 @@ export async function GET(request: NextRequest) {
       .filter((r) => !r.isTaxExempt)
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
 
-    const oldDeductionsTotal = deductions.reduce(
-      (s, r) => s + (r.amountPaisa ?? 0),
-      0,
+    // Sprint 5.9c — loan-derived 80C principal flows into deductions
+    // total with the ₹1.5L cap applied to the combined 80C bucket.
+    const loanAgg = aggregateLoanTaxDeductions(
+      loanRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        status: r.status,
+        currentBalance: r.currentBalance,
+        originalAmount: r.originalAmount,
+        interestRate: r.interestRate,
+        monthlyEmi: r.monthlyEmi,
+        startDate: r.startDate,
+        maturityDate: r.maturityDate,
+        remainingTenor: r.remainingTenor,
+        principalQualifies80c: r.principalQualifies80c,
+        interestQualifies24b: r.interestQualifies24b,
+      })),
+      fy,
     );
+    const loanDeductions =
+      'error' in loanAgg
+        ? { totalInterestPaisa: 0, totalPrincipalPaisa: 0, perLiability: [] }
+        : loanAgg;
+    const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
+    const manualEightyCPaisa = deductions
+      .filter((r) => r.section === '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const eightyCAppliedPaisa = Math.min(
+      manualEightyCPaisa + loanDeductions.totalPrincipalPaisa,
+      EIGHTY_C_CAP_PAISA,
+    );
+    const otherDeductionsPaisa = deductions
+      .filter((r) => r.section !== '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const oldDeductionsTotal = otherDeductionsPaisa + eightyCAppliedPaisa;
     const deductionsForRegime = regime === 'OLD' ? oldDeductionsTotal : 0;
 
     // ─── Sprint 5.4 — eligibility detection ──────────────────────────
@@ -322,6 +359,18 @@ export async function GET(request: NextRequest) {
           rowCount: deductions.length,
           oldRegimeTotalPaisa: oldDeductionsTotal,
           appliedPaisa: deductionsForRegime,
+          // Sprint 5.9c — 80C breakdown + loan-derived deductions
+          eightyC: {
+            manualPaisa: manualEightyCPaisa,
+            fromLoansPaisa: loanDeductions.totalPrincipalPaisa,
+            appliedPaisa: eightyCAppliedPaisa,
+            capPaisa: EIGHTY_C_CAP_PAISA,
+          },
+          loanDeductions: {
+            totalInterestPaisa: loanDeductions.totalInterestPaisa,
+            totalPrincipalPaisa: loanDeductions.totalPrincipalPaisa,
+            perLiability: loanDeductions.perLiability,
+          },
         },
       },
       summary: {

@@ -17,7 +17,33 @@ import { Card, CardHeader, CardContent } from '@dxp/ui';
 import { Loader2, Scale } from 'lucide-react';
 
 interface RegimeCompareResp {
-  deductions: { oldRegime: number; newRegime: number };
+  deductions: {
+    oldRegime: number;
+    newRegime: number;
+    // Sprint 5.9c — 80C breakdown after cap + loan auto-counted
+    eightyC?: {
+      manualPaisa: number;
+      fromLoansPaisa: number;
+      combinedRawPaisa: number;
+      appliedPaisa: number;
+      capPaisa: number;
+      overCapPaisa: number;
+    };
+  };
+  loanDeductions?: {
+    totalInterestPaisa: number;
+    totalPrincipalPaisa: number;
+    perLiability: Array<{
+      id: number;
+      name: string;
+      type: string;
+      principalQualifies80c: boolean;
+      interestQualifies24b: boolean;
+      fyMonthsActive: number;
+      fyPrincipalPaisa: number;
+      fyInterestPaisa: number;
+    }>;
+  };
   comparison: {
     old: { totalTaxPaisa: number };
     new: { totalTaxPaisa: number };
@@ -71,6 +97,8 @@ export function Section80RegimeAwareStats({ fy }: Props) {
 
   const oldElig = data.deductions.oldRegime;
   const newElig = data.deductions.newRegime;
+  const eightyC = data.deductions.eightyC;
+  const loanDeductions = data.loanDeductions;
   // Tax delta isolating the deduction effect: NEW total − OLD total
   // (positive = OLD saves you that much extra by virtue of deductions).
   const deltaTax = data.comparison.new.totalTaxPaisa - data.comparison.old.totalTaxPaisa;
@@ -110,6 +138,68 @@ export function Section80RegimeAwareStats({ fy }: Props) {
             </p>
           </div>
         </div>
+
+        {/* Sprint 5.9c — 80C breakdown showing manual + loan principal */}
+        {eightyC && (
+          <div className="mt-3 rounded-md border border-dashed border-[var(--dxp-border)] p-3 text-xs">
+            <p className="font-semibold text-[var(--dxp-text)]">
+              80C — {formatINR(eightyC.combinedRawPaisa)} used of {formatINR(eightyC.capPaisa)} cap
+              {eightyC.overCapPaisa > 0 && (
+                <span className="ml-2 text-amber-700">
+                  ({formatINR(eightyC.overCapPaisa)} over)
+                </span>
+              )}
+            </p>
+            <div className="mt-1 space-y-0.5 text-[var(--dxp-text-secondary)]">
+              {eightyC.fromLoansPaisa > 0 && (
+                <p>
+                  From loan principal:{' '}
+                  <span className="font-mono">{formatINR(eightyC.fromLoansPaisa)}</span>
+                  {loanDeductions?.perLiability && loanDeductions.perLiability.length > 0 && (
+                    <span className="ml-1">
+                      (
+                      {loanDeductions.perLiability
+                        .filter((l) => l.principalQualifies80c)
+                        .map((l) => l.name)
+                        .join(', ')}
+                      )
+                    </span>
+                  )}
+                </p>
+              )}
+              {eightyC.manualPaisa > 0 && (
+                <p>
+                  From your manual entries:{' '}
+                  <span className="font-mono">{formatINR(eightyC.manualPaisa)}</span>
+                </p>
+              )}
+              {eightyC.fromLoansPaisa === 0 && eightyC.manualPaisa === 0 && (
+                <p className="text-[var(--dxp-text-muted)]">
+                  No 80C deductions claimed yet. Add an investment via the deduction wizard, or
+                  flip the &ldquo;Principal qualifies for 80C&rdquo; toggle on a home loan.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sprint 5.9c — 24(b) loan-derived interest disclosure */}
+        {loanDeductions && loanDeductions.totalInterestPaisa > 0 && (
+          <div className="mt-2 rounded-md border border-dashed border-[var(--dxp-border)] p-3 text-xs">
+            <p className="font-semibold text-[var(--dxp-text)]">
+              Section 24(b) — {formatINR(loanDeductions.totalInterestPaisa)} home-loan interest
+              auto-counted
+            </p>
+            <p className="mt-1 text-[var(--dxp-text-secondary)]">
+              From {loanDeductions.perLiability
+                .filter((l) => l.interestQualifies24b)
+                .map((l) => l.name)
+                .join(', ')}
+              . Subject to the ₹2L self-occupied cap (or uncapped if let-out).
+            </p>
+          </div>
+        )}
+
         <p className="mt-3 text-xs text-[var(--dxp-text-secondary)]">
           {deltaTax > 0 ? (
             <>

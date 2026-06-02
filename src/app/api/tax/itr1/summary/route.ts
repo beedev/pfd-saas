@@ -34,11 +34,13 @@ import {
   capitalGains,
   invoices,
   itrFormSelection,
+  liabilities,
   type TaxRegime,
   type OtherIncomeSource,
 } from '@/db';
 import { auth } from '@/auth';
 import { computeItr1Summary } from '@/lib/finance/itr1-summary';
+import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 
 /** FY string "2025-26" → ["2025-04-01", "2026-03-31"]. Used for the
  *  invoice-date range when checking business-income eligibility. */
@@ -84,6 +86,7 @@ export async function GET(request: NextRequest) {
       cgRows,
       fyInvoices,
       wizardSelection,
+      loanRows,
     ] = await Promise.all([
       db
         .select()
@@ -153,6 +156,8 @@ export async function GET(request: NextRequest) {
           and(eq(itrFormSelection.userId, userId), eq(itrFormSelection.fy, fy)),
         )
         .limit(1),
+      // Sprint 5.9c — loan rows for 80C principal + 24(b) interest derivation
+      db.select().from(liabilities).where(eq(liabilities.userId, userId)),
     ]);
     // Keep the original single-property variable so the rest of the
     // file's math stays untouched. ITR-1 still only computes against the
@@ -188,9 +193,40 @@ export async function GET(request: NextRequest) {
 
     // ITR-1 single property — derive 24(b) interest from tax_deductions
     // section '24B' for the FY (caller's accepted Section 24 cap).
-    const interest24b = deductions
+    const manualInterest24b = deductions
       .filter((d) => d.section === '24B')
       .reduce((s, d) => s + (d.amountPaisa ?? 0), 0);
+
+    // Sprint 5.9c — Loan-derived 24(b) interest. The aggregator sums
+    // the FY interest portion across all loans flagged
+    // interest_qualifies_24b=true. We take the LARGER of (manual
+    // entry, loan-derived) so the user can't accidentally
+    // double-count by leaving both the manual deduction row AND the
+    // loan flag in place.
+    const loanAgg = aggregateLoanTaxDeductions(
+      loanRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        status: r.status,
+        currentBalance: r.currentBalance,
+        originalAmount: r.originalAmount,
+        interestRate: r.interestRate,
+        monthlyEmi: r.monthlyEmi,
+        startDate: r.startDate,
+        maturityDate: r.maturityDate,
+        remainingTenor: r.remainingTenor,
+        principalQualifies80c: r.principalQualifies80c,
+        interestQualifies24b: r.interestQualifies24b,
+      })),
+      fy,
+    );
+    const loanDeductions =
+      'error' in loanAgg
+        ? { totalInterestPaisa: 0, totalPrincipalPaisa: 0, perLiability: [] }
+        : loanAgg;
+    const interest24b = Math.max(manualInterest24b, loanDeductions.totalInterestPaisa);
+
     const property = properties[0] ?? null;
     const propertyInput = property
       ? {
@@ -209,10 +245,21 @@ export async function GET(request: NextRequest) {
     // follow the same conservative posture as /api/tax/regime-compare:
     // NEW = 0 deductions, OLD = sum of all rows. The wider per-row
     // regime-eligibility refactor is on the Sprint 4 deferred list.
-    const oldDeductionsTotal = deductions.reduce(
-      (s, r) => s + (r.amountPaisa ?? 0),
-      0,
+    // Sprint 5.9c — loan principal flows into 80C with ₹1.5L cap. The
+    // raw sum may exceed the cap; we clamp the 80C bucket then add the
+    // capped value alongside non-80C rows.
+    const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
+    const manualEightyCPaisa = deductions
+      .filter((r) => r.section === '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const eightyCAppliedPaisa = Math.min(
+      manualEightyCPaisa + loanDeductions.totalPrincipalPaisa,
+      EIGHTY_C_CAP_PAISA,
     );
+    const otherDeductionsPaisa = deductions
+      .filter((r) => r.section !== '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const oldDeductionsTotal = otherDeductionsPaisa + eightyCAppliedPaisa;
     const deductionsForRegime = regime === 'OLD' ? oldDeductionsTotal : 0;
 
     const summary = computeItr1Summary({
@@ -359,6 +406,18 @@ export async function GET(request: NextRequest) {
           rowCount: deductions.length,
           oldRegimeTotalPaisa: oldDeductionsTotal,
           appliedPaisa: deductionsForRegime,
+          // Sprint 5.9c — surface 80C breakdown after cap
+          eightyC: {
+            manualPaisa: manualEightyCPaisa,
+            fromLoansPaisa: loanDeductions.totalPrincipalPaisa,
+            appliedPaisa: eightyCAppliedPaisa,
+            capPaisa: EIGHTY_C_CAP_PAISA,
+          },
+          loanDeductions: {
+            totalInterestPaisa: loanDeductions.totalInterestPaisa,
+            totalPrincipalPaisa: loanDeductions.totalPrincipalPaisa,
+            perLiability: loanDeductions.perLiability,
+          },
         },
       },
       summary,

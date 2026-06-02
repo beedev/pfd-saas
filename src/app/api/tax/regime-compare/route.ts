@@ -52,6 +52,7 @@ import {
   realEstate,
   invoices,
   userPreferences,
+  liabilities,
   type TaxRegime,
 } from '@/db';
 import { compareRegimes } from '@/lib/finance/tax-slabs';
@@ -63,6 +64,7 @@ import {
   computeSection80g,
   type EightyGCategory,
 } from '@/lib/finance/section-80g';
+import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { auth } from '@/auth';
 
 /** Convert FY string "2026-27" → { start: '2026-04-01', end: '2027-03-31' }. */
@@ -123,6 +125,7 @@ export async function GET(request: NextRequest) {
       gstInvoices,
       deductions,
       prefsRows,
+      loanRows,
     ] = await Promise.all([
       db
         .select()
@@ -164,10 +167,41 @@ export async function GET(request: NextRequest) {
         .from(userPreferences)
         .where(eq(userPreferences.userId, userId))
         .limit(1),
+      // Sprint 5.9c — pull liabilities so the qualifying flags can
+      // feed 80C + 24(b) without forcing the user to also create
+      // manual tax_deductions rows.
+      db.select().from(liabilities).where(eq(liabilities.userId, userId)),
     ]);
 
     const prefs = prefsRows[0];
     const isMetro = prefs?.metroCity ?? true;
+
+    // Sprint 5.9c — Loan tax aggregator. Maps loans whose flags are
+    // set into FY-aggregated principal/interest sums. The result also
+    // surfaces per-liability breakdown for the UI's "from your loans"
+    // line.
+    const loanAgg = aggregateLoanTaxDeductions(
+      loanRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        status: r.status,
+        currentBalance: r.currentBalance,
+        originalAmount: r.originalAmount,
+        interestRate: r.interestRate,
+        monthlyEmi: r.monthlyEmi,
+        startDate: r.startDate,
+        maturityDate: r.maturityDate,
+        remainingTenor: r.remainingTenor,
+        principalQualifies80c: r.principalQualifies80c,
+        interestQualifies24b: r.interestQualifies24b,
+      })),
+      fy,
+    );
+    const loanDeductions =
+      'error' in loanAgg
+        ? { totalInterestPaisa: 0, totalPrincipalPaisa: 0, perLiability: [] as Array<unknown> }
+        : loanAgg;
 
     // Salary — Sprint 5.1a. Prefer component-sum when ANY component is
     // populated; fall back to gross_salary_paisa for legacy rows.
@@ -266,6 +300,46 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Sprint 5.9c — Loan-derived 24(b) interest. When a HOME_LOAN has
+    // `interest_qualifies_24b=true`, the FY interest portion from the
+    // amortization schedule is a more accurate source than whatever the
+    // user typed into `real_estate.home_loan_interest_paid_paisa`. We
+    // route the loan interest to the FIRST self-occupied property
+    // (conventional default — if a user has multiple loans on multiple
+    // properties they can disable flags + keep manual entries). The
+    // ₹2L self-occupied cap still applies via the sec24b lib.
+    //
+    // Math: replace the per-property contribution that the loop above
+    // computed for the first self-occupied row with the LARGER of
+    // (loan interest, user-entered interest), capped through the sec24b
+    // lib. Net delta is added to sec24bTotalPaisa.
+    const loanInterestPaisa = loanDeductions.totalInterestPaisa;
+    if (loanInterestPaisa > 0) {
+      const firstSelfOccupied = properties.find((p) => p.isSelfOccupied);
+      if (firstSelfOccupied) {
+        const userInterest = firstSelfOccupied.homeLoanInterestPaidPaisa ?? 0;
+        const post1999 =
+          !firstSelfOccupied.homeLoanDisbursedDate ||
+          firstSelfOccupied.homeLoanDisbursedDate >= SEC_24B_VINTAGE_CUTOFF;
+        const oldContribution = computeSection24bDeduction({
+          homeLoanInterestPaidPaisa: userInterest,
+          isSelfOccupied: true,
+          loanDisbursedAfter1Apr1999: post1999,
+        });
+        const newContribution = computeSection24bDeduction({
+          homeLoanInterestPaidPaisa: Math.max(userInterest, loanInterestPaisa),
+          isSelfOccupied: true,
+          loanDisbursedAfter1Apr1999: post1999,
+        });
+        sec24bTotalPaisa += Math.max(0, newContribution - oldContribution);
+      } else {
+        // No self-occupied property — fall back to attributing the
+        // loan interest at the let-out (uncapped) rate. Stack-add to
+        // 24(b) total.
+        sec24bTotalPaisa += loanInterestPaisa;
+      }
+    }
+
     // OLD house-property head: gross rent − 30% std maint − sec 24(b) − 80EEA.
     // Can go negative (HP loss) — capped at −₹2L of offset against other
     // heads under existing law; we report raw, the lib's clamp at
@@ -329,17 +403,34 @@ export async function GET(request: NextRequest) {
       adjustedGrossPaisa: Math.max(0, oldGrossSlab),
     });
 
-    // Other OLD deductions (not 80D, not 80G) at face value.
-    const otherOldDeductions = deductions
-      .filter((r) => r.section !== '80D' && r.section !== '80G')
-      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
     // 80D un-bucketed (legacy) at face value too.
     const eightyDLegacy = deductions
       .filter((r) => r.section === '80D' && !r.eightyDBucket)
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
 
+    // Sprint 5.9c — Loan-derived 80C principal. We add the FY
+    // principal portion of qualifying loans to OLD-regime deductions
+    // BUT enforce the ₹1.5L 80C ceiling here, since `tax-slabs.ts`
+    // doesn't cap per-section. We sum manual 80C entries (raw) with
+    // loan-derived principal and clamp the combined 80C bucket at
+    // ₹1.5L. Non-80C manual rows (24B, 80D, 80G, 80E, etc.) are
+    // unaffected.
+    const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
+    const manualEightyCPaisa = deductions
+      .filter((r) => r.section === '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const loanPrincipal80cPaisa = loanDeductions.totalPrincipalPaisa;
+    const combinedEightyCRaw = manualEightyCPaisa + loanPrincipal80cPaisa;
+    const eightyCApplied = Math.min(combinedEightyCRaw, EIGHTY_C_CAP_PAISA);
+    // Other non-80C OLD deductions — exclude 80C from `otherOldDeductions`
+    // to avoid double-counting when we add `eightyCApplied`.
+    const otherOldDeductionsExcl80c = deductions
+      .filter((r) => r.section !== '80D' && r.section !== '80G' && r.section !== '80C')
+      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+
     const oldDeductionsPaisa =
-      otherOldDeductions +
+      otherOldDeductionsExcl80c +
+      eightyCApplied +
       eightyDResult.totalDeductionPaisa +
       eightyDLegacy +
       eightyGResult.totalDeductionPaisa +
@@ -401,6 +492,23 @@ export async function GET(request: NextRequest) {
         // Sprint 5.1c — surfaced for transparency
         eightyD: eightyDResult,
         eightyG: eightyGResult,
+        // Sprint 5.9c — 80C breakdown after cap application
+        eightyC: {
+          manualPaisa: manualEightyCPaisa,
+          fromLoansPaisa: loanPrincipal80cPaisa,
+          combinedRawPaisa: combinedEightyCRaw,
+          appliedPaisa: eightyCApplied,
+          capPaisa: EIGHTY_C_CAP_PAISA,
+          overCapPaisa: Math.max(0, combinedEightyCRaw - EIGHTY_C_CAP_PAISA),
+        },
+      },
+      // Sprint 5.9c — loan-derived deductions detail. Surfaces the
+      // per-liability split so the /tax page can show "from your
+      // HDFC home loan: ₹X principal, ₹Y interest".
+      loanDeductions: {
+        totalInterestPaisa: loanDeductions.totalInterestPaisa,
+        totalPrincipalPaisa: loanDeductions.totalPrincipalPaisa,
+        perLiability: loanDeductions.perLiability,
       },
       comparison: {
         old: result.old,

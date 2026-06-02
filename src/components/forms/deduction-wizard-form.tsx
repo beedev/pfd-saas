@@ -143,6 +143,10 @@ export function DeductionWizardForm({
 
   // Cap usage
   const [usageRupees, setUsageRupees] = useState<number>(0);
+  // Sprint 5.9c — loan-derived 80C principal already counted toward the
+  // ₹1.5L 80C cap. Surfaces "₹X already counted from loan principal —
+  // add manual investment on top of this" when section === '80C'.
+  const [loanPrincipalRupees, setLoanPrincipalRupees] = useState<number>(0);
   const [isSaving, setIsSaving] = useState(false);
   const [panError, setPanError] = useState<string | null>(null);
 
@@ -173,6 +177,28 @@ export function DeductionWizardForm({
       cancelled = true;
     };
   }, [section, financialYear, editId]);
+
+  // Sprint 5.9c — for 80C only, also pull the auto-counted loan
+  // principal so the user sees "₹X already counted from your home loan".
+  useEffect(() => {
+    if (section !== '80C') {
+      setLoanPrincipalRupees(0);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/finance/loan-tax-deductions?fy=${encodeURIComponent(financialYear)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setLoanPrincipalRupees((d.totalPrincipalPaisa ?? 0) / 100);
+      })
+      .catch(() => {
+        if (!cancelled) setLoanPrincipalRupees(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, financialYear]);
 
   // Reset sub-type and 80G-derived fields when section changes
   const onSectionChange = useCallback(
@@ -399,26 +425,36 @@ export function DeductionWizardForm({
               <span className="text-[var(--dxp-text-secondary)]">
                 Used in {sectionMeta?.label}:{' '}
                 <span className="font-mono font-bold text-[var(--dxp-text)]">
-                  ₹{Math.round(totalUsed).toLocaleString('en-IN')}
+                  ₹{Math.round(totalUsed + loanPrincipalRupees).toLocaleString('en-IN')}
                 </span>{' '}
                 of ₹{Math.round(capRupees).toLocaleString('en-IN')} cap
               </span>
-              <span className={overCap ? 'text-amber-700' : 'text-[var(--dxp-text-muted)]'}>
-                {Math.round(capUsedPct)}% used
+              <span className={(totalUsed + loanPrincipalRupees) > capRupees ? 'text-amber-700' : 'text-[var(--dxp-text-muted)]'}>
+                {Math.round(Math.min(100, ((totalUsed + loanPrincipalRupees) / capRupees) * 100))}% used
               </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-[var(--dxp-border-light)]">
               <div
                 className={`h-full ${
-                  overCap ? 'bg-amber-500' : capUsedPct >= 90 ? 'bg-rose-500' : capUsedPct >= 60 ? 'bg-amber-400' : 'bg-emerald-500'
+                  (totalUsed + loanPrincipalRupees) > capRupees ? 'bg-amber-500' : ((totalUsed + loanPrincipalRupees) / capRupees) * 100 >= 90 ? 'bg-rose-500' : ((totalUsed + loanPrincipalRupees) / capRupees) * 100 >= 60 ? 'bg-amber-400' : 'bg-emerald-500'
                 }`}
-                style={{ width: `${capUsedPct}%` }}
+                style={{ width: `${Math.min(100, ((totalUsed + loanPrincipalRupees) / capRupees) * 100)}%` }}
               />
             </div>
-            {overCap && (
+            {/* Sprint 5.9c — note the loan-principal contribution. */}
+            {section === '80C' && loanPrincipalRupees > 0 && (
+              <p className="mt-1 text-xs text-[var(--dxp-text-secondary)]">
+                <span className="font-medium">
+                  ₹{Math.round(loanPrincipalRupees).toLocaleString('en-IN')}
+                </span>{' '}
+                already counted from loan principal (auto-derived from your active home loan).
+                Add manual investment on top of this.
+              </p>
+            )}
+            {(totalUsed + loanPrincipalRupees) > capRupees && (
               <p className="mt-1 text-xs text-amber-700">
                 <AlertCircle className="mr-1 inline h-3 w-3" />
-                ₹{Math.round(overageRupees).toLocaleString('en-IN')} above cap won&apos;t be deductible.
+                ₹{Math.round((totalUsed + loanPrincipalRupees) - capRupees).toLocaleString('en-IN')} above cap won&apos;t be deductible.
               </p>
             )}
           </div>
