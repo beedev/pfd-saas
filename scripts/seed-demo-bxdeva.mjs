@@ -68,6 +68,8 @@ const TABLES_WITH_NOTES = [
   'vehicles', 'subscriptions', 'budget_entries',
   // Sprint 5.3 — per-FY historical rental track.
   'rental_history',
+  // Sprint 5.10 — forex deposits asset class.
+  'forex_deposits',
 ];
 /** Tables we seed into that don't have a `notes` column. Guard checks
  *  the row count without the notes filter; cleanup uses a stable
@@ -775,6 +777,30 @@ async function seedAll(tx) {
          ${matAmt}, 'ACTIVE', false, false, ${NOTE('fd-' + f.bank.toLowerCase())})
     `;
     tally('fixed_deposits', 1);
+  }
+
+  // ─── forex_deposits — 3 (Sprint 5.10) ─────────────────────────────
+  // INR equivalents resolve at runtime via Yahoo Finance — the seed
+  // only writes the foreign amount. Two ongoing (no maturity_date) +
+  // one fixed deposit maturing in 2028 so the cashflow-derive layer
+  // emits a FOREX_MATURITY event for it.
+  const forex = [
+    { bank: 'HDFC NRE', acct: 'HDFC-NRE-001', ccy: 'USD', amt: '5000.0000',  rate: 4.0, opening: '2024-09-15', maturity: null,         status: 'ACTIVE', note: 'forex-hdfc-usd' },
+    { bank: 'ICICI NRE Bank', acct: 'ICICI-NRE-002', ccy: 'EUR', amt: '2000.0000', rate: 2.5, opening: '2025-06-01', maturity: '2028-06-01', status: 'ACTIVE', note: 'forex-icici-eur' },
+    { bank: 'ENBD', acct: 'ENBD-DBX-003', ccy: 'AED', amt: '10000.0000', rate: 1.5, opening: '2023-04-12', maturity: null,         status: 'ACTIVE', note: 'forex-enbd-aed' },
+  ];
+  for (const f of forex) {
+    await tx`
+      INSERT INTO forex_deposits
+        (user_id, bank_name, account_number, currency_code,
+         amount_in_currency, interest_rate,
+         opening_date, maturity_date, status, notes)
+      VALUES
+        (${TARGET_USER_ID}, ${f.bank}, ${f.acct}, ${f.ccy},
+         ${f.amt}, ${f.rate},
+         ${f.opening}, ${f.maturity}, ${f.status}, ${NOTE(f.note)})
+    `;
+    tally('forex_deposits', 1);
   }
 
   // ─── liabilities — 2 ─────────────────────────────────────────────
