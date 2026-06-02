@@ -9,44 +9,30 @@
  * The persisted source is the `asset_class_returns` table (per-user,
  * one row per asset class). When a key is missing from the table (e.g.
  * a class the user hasn't touched yet), we fall back to the conservative
- * defaults defined here.
+ * defaults defined in asset-growth-rates-constants.ts.
  *
  * IMPORTANT: the seed defaults in
  * src/app/api/settings/asset-class-returns/route.ts must stay aligned
- * with DEFAULT_GROWTH_RATES here. If you change a default, change both.
+ * with DEFAULT_GROWTH_RATES. If you change a default, change both.
+ *
+ * NOTE: This file imports `db` and is therefore server-only. Client
+ * components that just need the static defaults must import from
+ * './asset-growth-rates-constants' instead to keep `postgres` out of
+ * the client bundle.
  */
 
 import { eq } from 'drizzle-orm';
 import { db, assetClassReturns } from '@/db';
+import {
+  DEFAULT_GROWTH_RATES,
+  type AssetClassKey,
+  type AssetGrowthRates,
+} from './asset-growth-rates-constants';
 
-/**
- * Conservative starting assumptions when nothing's set per-user yet.
- * Values match the seed in settings/asset-class-returns/route.ts. NPS
- * 9 / PF 8.25 reflect long-run historical means (NPS Tier-I aggressive
- * mix; EPFO declared rates 2014-2024). Real estate held intentionally
- * conservative since most users overestimate.
- */
-export const DEFAULT_GROWTH_RATES = {
-  EQUITY: 10,
-  DEBT: 7,
-  GOLD: 8,
-  NPS: 9,
-  PF: 8.25,
-  REAL_ESTATE: 5,
-  CASH: 4,
-  // Below mirror the seed in the settings endpoint — included so the
-  // helper handles every key the seed inserts.
-  STOCKS: 12,
-  MUTUAL_FUNDS: 11,
-  SMALL_SAVINGS: 7.5,
-  FIXED_DEPOSITS: 7,
-  CHIT_FUNDS: 6,
-  INSURANCE_POLICIES: 5,
-} as const;
-
-export type AssetClassKey = keyof typeof DEFAULT_GROWTH_RATES;
-
-export type AssetGrowthRates = Record<AssetClassKey, number>;
+// Re-export so existing server-side imports `from '@/lib/finance/asset-growth-rates'`
+// keep working without churn.
+export { DEFAULT_GROWTH_RATES };
+export type { AssetClassKey, AssetGrowthRates };
 
 /**
  * Load per-user growth rates. Always returns a complete record — any

@@ -14,7 +14,10 @@ import {
   StatsDisplay,
   Input,
 } from '@dxp/ui';
-import { ArrowLeft, Loader2, ShieldCheck, Trash2, Pencil, Save, X } from 'lucide-react';
+import { ArrowLeft, Loader2, ShieldCheck, Trash2, Pencil, Save, X, TrendingUp } from 'lucide-react';
+
+import { projectFutureValue } from '@/lib/finance/asset-projection';
+import { DEFAULT_GROWTH_RATES } from '@/lib/finance/asset-growth-rates-constants';
 
 type PFType = 'EPF' | 'PPF' | 'VPF';
 
@@ -30,6 +33,7 @@ interface PFAccount {
   totalBalance: number;
   totalContributed: number;
   interestEarned: number | null;
+  monthlyContributionPaisa: number | null;
   ppfMaturityDate: string | null;
   openingDate: string;
   notes: string | null;
@@ -50,6 +54,7 @@ interface FormState {
   employerBalanceRupees: string;
   interestBalanceRupees: string;
   totalBalanceRupees: string;
+  monthlyContributionRupees: string;
   ppfMaturityDate: string;
   notes: string;
 }
@@ -63,6 +68,7 @@ function accountToForm(a: PFAccount): FormState {
     employerBalanceRupees: ((a.employerBalance ?? 0) / 100).toString(),
     interestBalanceRupees: ((a.interestBalance ?? 0) / 100).toString(),
     totalBalanceRupees: (a.totalBalance / 100).toString(),
+    monthlyContributionRupees: ((a.monthlyContributionPaisa ?? 0) / 100).toString(),
     ppfMaturityDate: a.ppfMaturityDate ?? '',
     notes: a.notes ?? '',
   };
@@ -77,13 +83,28 @@ export default function PFDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
+  // Sprint 5.5e — load retirement assumption to derive the projection
+  // horizon for EPF (which has no per-account maturity date the way
+  // small-savings PPF does). Falls back to 30 years if the user hasn't
+  // set their retirement target.
+  const [yearsToRetirement, setYearsToRetirement] = useState<number>(30);
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/investments/pf/${params.id}`).then((r) => r.json());
-      if (r.error) throw new Error(r.error);
-      setAccount(r.account);
-      setForm(accountToForm(r.account));
+      const [accountRes, retirementRes] = await Promise.all([
+        fetch(`/api/investments/pf/${params.id}`).then((r) => r.json()),
+        fetch('/api/finance/retirement-assumptions').then((r) => r.json()).catch(() => null),
+      ]);
+      if (accountRes.error) throw new Error(accountRes.error);
+      setAccount(accountRes.account);
+      setForm(accountToForm(accountRes.account));
+      if (retirementRes && typeof retirementRes.currentAge === 'number') {
+        const yrs = Math.max(
+          1,
+          (retirementRes.targetAge ?? 60) - (retirementRes.currentAge ?? 30),
+        );
+        setYearsToRetirement(yrs);
+      }
     } catch (e) {
       console.error(e);
       toast.error('Failed to load PF account');
@@ -123,6 +144,7 @@ export default function PFDetailPage() {
         employerBalanceRupees: Number(form.employerBalanceRupees) || 0,
         interestBalanceRupees: Number(form.interestBalanceRupees) || 0,
         totalBalanceRupees: Number(form.totalBalanceRupees) || 0,
+        monthlyContributionRupees: Number(form.monthlyContributionRupees) || 0,
         ppfMaturityDate: form.ppfMaturityDate || null,
         notes: form.notes || null,
       };
@@ -229,9 +251,13 @@ export default function PFDetailPage() {
         </CardHeader>
         <CardContent>
           {!isEditing ? (
-            <DetailView account={account} />
+            <DetailView account={account} yearsToRetirement={yearsToRetirement} />
           ) : (
-            <EditForm form={form} setField={setField} />
+            <EditForm
+              form={form}
+              setField={setField}
+              yearsToRetirement={yearsToRetirement}
+            />
           )}
         </CardContent>
       </Card>
@@ -241,7 +267,14 @@ export default function PFDetailPage() {
 
 /* --- view mode ----------------------------------------------------------- */
 
-function DetailView({ account }: { account: PFAccount }) {
+function DetailView({
+  account,
+  yearsToRetirement,
+}: {
+  account: PFAccount;
+  yearsToRetirement: number;
+}) {
+  const monthly = account.monthlyContributionPaisa ?? 0;
   const fields: Array<[string, string]> = [
     ['Account holder', account.accountHolder],
     ['Account type', account.accountType],
@@ -249,6 +282,7 @@ function DetailView({ account }: { account: PFAccount }) {
     ['UAN', account.universalAccountNumber ?? '---'],
     ['Opened', account.openingDate],
     ['Interest earned', formatINR(account.interestEarned ?? 0)],
+    ['Monthly contribution', monthly > 0 ? `${formatINR(monthly)}/mo` : 'Not set'],
     ...(account.ppfMaturityDate
       ? [['PPF maturity', account.ppfMaturityDate] as [string, string]]
       : []),
@@ -265,10 +299,51 @@ function DetailView({ account }: { account: PFAccount }) {
           </div>
         ))}
       </dl>
+      <PfProjectionPreview
+        currentBalancePaisa={account.totalBalance}
+        monthlyContributionPaisa={monthly}
+        yearsToRetirement={yearsToRetirement}
+        accountType={account.accountType}
+      />
       {account.notes && (
         <p className="mt-4 text-sm text-[var(--dxp-text-secondary)]">{account.notes}</p>
       )}
     </>
+  );
+}
+
+/* --- projection preview ------------------------------------------------- */
+
+function PfProjectionPreview({
+  currentBalancePaisa,
+  monthlyContributionPaisa,
+  yearsToRetirement,
+  accountType,
+}: {
+  currentBalancePaisa: number;
+  monthlyContributionPaisa: number;
+  yearsToRetirement: number;
+  accountType: PFType;
+}) {
+  const ratePct = DEFAULT_GROWTH_RATES.PF;
+  const result = projectFutureValue({
+    currentBalancePaisa,
+    contributionPerPeriodPaisa: monthlyContributionPaisa,
+    periodsPerYear: 12,
+    annualRatePct: ratePct,
+    yearsToProject: yearsToRetirement,
+  });
+  return (
+    <div className="mt-4 rounded border border-[var(--dxp-border)] bg-[var(--dxp-surface-secondary,var(--dxp-surface))] p-3 text-sm">
+      <p className="flex items-center gap-2 font-medium text-[var(--dxp-text)]">
+        <TrendingUp className="h-4 w-4 text-[var(--dxp-brand)]" />
+        At {ratePct}%/yr, this {accountType} projects to {formatINR(result.totalPaisa)} in {yearsToRetirement.toFixed(0)} years.
+      </p>
+      <p className="mt-1 text-xs text-[var(--dxp-text-secondary)]">
+        Balance side: {formatINR(result.balanceComponentPaisa)} · contribution side:{' '}
+        {formatINR(result.contributionComponentPaisa)} · PF class rate (set per-user under Settings → Asset growth)
+      </p>
+    </div>
   );
 }
 
@@ -277,9 +352,11 @@ function DetailView({ account }: { account: PFAccount }) {
 function EditForm({
   form,
   setField,
+  yearsToRetirement,
 }: {
   form: FormState;
   setField: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  yearsToRetirement: number;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -336,6 +413,15 @@ function EditForm({
         />
       </Field>
 
+      <Field label="Monthly contribution (₹)">
+        <Input
+          type="number"
+          value={form.monthlyContributionRupees}
+          onChange={(e) => setField('monthlyContributionRupees', e.target.value)}
+          placeholder="e.g. 15840"
+        />
+      </Field>
+
       <Field label="PPF maturity date">
         <Input
           type="date"
@@ -343,6 +429,15 @@ function EditForm({
           onChange={(e) => setField('ppfMaturityDate', e.target.value)}
         />
       </Field>
+
+      <div className="sm:col-span-2">
+        <PfProjectionPreview
+          currentBalancePaisa={Math.round((Number(form.totalBalanceRupees) || 0) * 100)}
+          monthlyContributionPaisa={Math.round((Number(form.monthlyContributionRupees) || 0) * 100)}
+          yearsToRetirement={yearsToRetirement}
+          accountType="EPF"
+        />
+      </div>
 
       <div className="sm:col-span-2">
         <Field label="Notes">

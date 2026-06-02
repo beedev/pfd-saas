@@ -64,6 +64,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       typeof body.totalBalanceRupees === 'number'
         ? Math.round(body.totalBalanceRupees * 100)
         : employee + employer + interest;
+    // Sprint 5.5e — monthly EPF contribution (paisa). Drives forward
+    // projection of corpus on the retirement cashflow timeline.
+    const monthlyContributionPaisa =
+      typeof body.monthlyContributionRupees === 'number' && body.monthlyContributionRupees >= 0
+        ? Math.round(body.monthlyContributionRupees * 100)
+        : current.monthlyContributionPaisa;
 
     const result = await db
       .update(providentFund)
@@ -77,6 +83,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         totalBalance: total,
         totalContributed: employee + employer,
         interestEarned: interest,
+        monthlyContributionPaisa,
         ppfMaturityDate: typeof body.ppfMaturityDate === 'string' ? (body.ppfMaturityDate || null) : current.ppfMaturityDate,
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
         updatedAt: new Date(),

@@ -15,7 +15,10 @@ import {
   Input,
   Select,
 } from '@dxp/ui';
-import { ArrowLeft, Loader2, Landmark, Trash2, Pencil, Save, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Landmark, Trash2, Pencil, Save, X, TrendingUp } from 'lucide-react';
+
+import { projectFutureValue } from '@/lib/finance/asset-projection';
+import { DEFAULT_GROWTH_RATES } from '@/lib/finance/asset-growth-rates-constants';
 
 type Tier = 'TIER1' | 'TIER2';
 type NPSStatus = 'ACTIVE' | 'INACTIVE' | 'MATURED';
@@ -33,6 +36,7 @@ interface NPSAccount {
   totalValue: number;
   totalContributed: number;
   employerContribution: number | null;
+  monthlyContributionPaisa: number | null;
   gainLoss: number | null;
   openingDate: string;
   expectedMaturityDate: string | null;
@@ -65,6 +69,7 @@ interface FormState {
   totalValueRupees: string;
   totalContributedRupees: string;
   employerContributionRupees: string;
+  monthlyContributionRupees: string;
   equityValueRupees: string;
   debtValueRupees: string;
   alternativeValueRupees: string;
@@ -81,6 +86,7 @@ function accountToForm(a: NPSAccount): FormState {
     totalValueRupees: (a.totalValue / 100).toString(),
     totalContributedRupees: (a.totalContributed / 100).toString(),
     employerContributionRupees: ((a.employerContribution ?? 0) / 100).toString(),
+    monthlyContributionRupees: ((a.monthlyContributionPaisa ?? 0) / 100).toString(),
     equityValueRupees: ((a.equityFundValue ?? 0) / 100).toString(),
     debtValueRupees: ((a.debtFundValue ?? 0) / 100).toString(),
     alternativeValueRupees: ((a.alternativeFundValue ?? 0) / 100).toString(),
@@ -144,6 +150,7 @@ export default function NPSDetailPage() {
         totalValueRupees: Number(form.totalValueRupees) || 0,
         totalContributedRupees: Number(form.totalContributedRupees) || 0,
         employerContributionRupees: Number(form.employerContributionRupees) || 0,
+        monthlyContributionRupees: Number(form.monthlyContributionRupees) || 0,
         equityValueRupees: Number(form.equityValueRupees) || 0,
         debtValueRupees: Number(form.debtValueRupees) || 0,
         alternativeValueRupees: Number(form.alternativeValueRupees) || 0,
@@ -268,6 +275,7 @@ export default function NPSDetailPage() {
 /* --- view mode ----------------------------------------------------------- */
 
 function DetailView({ account }: { account: NPSAccount }) {
+  const monthly = account.monthlyContributionPaisa ?? 0;
   const fields: Array<[string, string]> = [
     ['Account holder', account.accountHolder],
     ['PAN', account.pan],
@@ -279,6 +287,7 @@ function DetailView({ account }: { account: NPSAccount }) {
     ['Debt', formatINR(account.debtFundValue ?? 0)],
     ['Alternative', formatINR(account.alternativeFundValue ?? 0)],
     ['Employer contribution', formatINR(account.employerContribution ?? 0)],
+    ['Monthly contribution', monthly > 0 ? `${formatINR(monthly)}/mo` : 'Not set'],
   ];
   return (
     <>
@@ -292,10 +301,84 @@ function DetailView({ account }: { account: NPSAccount }) {
           </div>
         ))}
       </dl>
+      <ProjectionPreview
+        currentValuePaisa={account.totalValue}
+        monthlyContributionPaisa={monthly}
+        maturityDate={account.expectedMaturityDate}
+        ratePct={DEFAULT_GROWTH_RATES.NPS}
+        rateLabel="NPS"
+      />
       {account.notes && (
         <p className="mt-4 text-sm text-[var(--dxp-text-secondary)]">{account.notes}</p>
       )}
     </>
+  );
+}
+
+/* --- projection preview ------------------------------------------------- */
+
+/**
+ * Sprint 5.5e — live FV preview using the same projection lib the
+ * cashflow-derivation layer uses server-side. Helps the user see the
+ * impact of their monthly contribution at a glance ("₹11k/mo means
+ * ₹1.5Cr by retirement, not the ₹5L you'd get from balance alone").
+ *
+ * Rate is the per-class default (NPS / PF / SMALL_SAVINGS). For
+ * per-user overrides we'd need to fetch via /api/settings/asset-class-
+ * returns; deferred — the default is good enough for visual feedback.
+ */
+function ProjectionPreview({
+  currentValuePaisa,
+  monthlyContributionPaisa,
+  maturityDate,
+  ratePct,
+  rateLabel,
+  contributionLabel = 'Monthly contribution',
+  periodsPerYear = 12,
+}: {
+  currentValuePaisa: number;
+  monthlyContributionPaisa: number;
+  maturityDate: string | null;
+  ratePct: number;
+  rateLabel: string;
+  contributionLabel?: string;
+  periodsPerYear?: 1 | 12;
+}) {
+  if (!maturityDate) {
+    return (
+      <p className="mt-4 text-xs text-[var(--dxp-text-muted)]">
+        Set a maturity date to see projection.
+      </p>
+    );
+  }
+  const today = new Date();
+  const target = new Date(maturityDate);
+  const years = Math.max(0, (target.getTime() - today.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+  if (years <= 0) {
+    return (
+      <p className="mt-4 text-xs text-[var(--dxp-text-muted)]">
+        Maturity date is in the past.
+      </p>
+    );
+  }
+  const result = projectFutureValue({
+    currentBalancePaisa: currentValuePaisa,
+    contributionPerPeriodPaisa: monthlyContributionPaisa,
+    periodsPerYear,
+    annualRatePct: ratePct,
+    yearsToProject: years,
+  });
+  return (
+    <div className="mt-4 rounded border border-[var(--dxp-border)] bg-[var(--dxp-surface-secondary,var(--dxp-surface))] p-3 text-sm">
+      <p className="flex items-center gap-2 font-medium text-[var(--dxp-text)]">
+        <TrendingUp className="h-4 w-4 text-[var(--dxp-brand)]" />
+        At {ratePct}%/yr, this projects to {formatINR(result.totalPaisa)} by {maturityDate}.
+      </p>
+      <p className="mt-1 text-xs text-[var(--dxp-text-secondary)]">
+        Balance side: {formatINR(result.balanceComponentPaisa)} · {contributionLabel.toLowerCase()} side:{' '}
+        {formatINR(result.contributionComponentPaisa)} · {years.toFixed(1)} years · {rateLabel} class rate
+      </p>
+    </div>
   );
 }
 
@@ -360,6 +443,25 @@ function EditForm({
           onChange={(e) => setField('employerContributionRupees', e.target.value)}
         />
       </Field>
+
+      <Field label="Monthly contribution (₹)">
+        <Input
+          type="number"
+          value={form.monthlyContributionRupees}
+          onChange={(e) => setField('monthlyContributionRupees', e.target.value)}
+          placeholder="e.g. 11235"
+        />
+      </Field>
+
+      <div className="sm:col-span-2">
+        <ProjectionPreview
+          currentValuePaisa={Math.round((Number(form.totalValueRupees) || 0) * 100)}
+          monthlyContributionPaisa={Math.round((Number(form.monthlyContributionRupees) || 0) * 100)}
+          maturityDate={form.expectedMaturityDate || null}
+          ratePct={DEFAULT_GROWTH_RATES.NPS}
+          rateLabel="NPS"
+        />
+      </div>
 
       <Field label="Equity value (₹)">
         <Input

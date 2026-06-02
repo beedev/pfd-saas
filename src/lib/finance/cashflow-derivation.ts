@@ -54,8 +54,13 @@ import type {
 } from '@/db';
 
 import { projectFutureValue } from './asset-projection';
-import type { AssetGrowthRates } from './asset-growth-rates';
-import { DEFAULT_GROWTH_RATES } from './asset-growth-rates';
+// Import constants only — cashflow-derivation is a pure lib (no DB) so
+// the constants module keeps it free of `db` dependencies and unit-
+// testable without a Postgres connection.
+import {
+  DEFAULT_GROWTH_RATES,
+  type AssetGrowthRates,
+} from './asset-growth-rates-constants';
 
 export interface DerivationInput {
   userId: string;

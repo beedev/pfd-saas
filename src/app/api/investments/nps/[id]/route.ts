@@ -75,6 +75,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       typeof body.employerContributionRupees === 'number'
         ? Math.round(body.employerContributionRupees * 100)
         : current.employerContribution;
+    // Sprint 5.5e — monthly contribution stream (paisa). Drives the
+    // contribution-aware retirement projection on the cashflow timeline.
+    const monthlyContributionPaisa =
+      typeof body.monthlyContributionRupees === 'number' && body.monthlyContributionRupees >= 0
+        ? Math.round(body.monthlyContributionRupees * 100)
+        : current.monthlyContributionPaisa;
 
     const result = await db
       .update(npsAccounts)
@@ -89,6 +95,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         alternativeFundValue: alt,
         totalContributed,
         employerContribution,
+        monthlyContributionPaisa,
         gainLoss: totalValue - totalContributed,
         expectedMaturityDate: typeof body.expectedMaturityDate === 'string' ? (body.expectedMaturityDate || null) : current.expectedMaturityDate,
         notes: typeof body.notes === 'string' ? body.notes : current.notes,

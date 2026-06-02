@@ -90,6 +90,12 @@ interface PatchBody {
   totalInterestRupees?: number;
   status?: SmallSavingsStatus;
   notes?: string | null;
+  /** Sprint 5.5e — recurring contribution (paisa per period) used by
+   *  the contribution-aware projection on the cashflow timeline. */
+  periodicContributionRupees?: number;
+  /** MONTHLY or YEARLY. PPF / SSY typically monthly; some users do one
+   *  annual PPF deposit (April 1st) — use YEARLY for those. */
+  contributionFrequency?: 'MONTHLY' | 'YEARLY';
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
@@ -159,6 +165,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (totalInterest !== undefined) update.totalInterestPaisa = totalInterest;
     if (body.status !== undefined) update.status = body.status;
     if (body.notes !== undefined) update.notes = body.notes;
+    const periodic = rupeesToPaisa(body.periodicContributionRupees);
+    if (periodic !== undefined) update.periodicContributionPaisa = periodic;
+    if (body.contributionFrequency === 'MONTHLY' || body.contributionFrequency === 'YEARLY') {
+      update.contributionFrequency = body.contributionFrequency;
+    }
 
     const result = await db
       .update(smallSavingsAccounts)

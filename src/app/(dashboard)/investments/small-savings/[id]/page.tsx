@@ -38,12 +38,16 @@ import {
   Plus,
   Lock,
   TrendingUp,
+  // (TrendingUp already imported above for projection section.)
   History,
 } from 'lucide-react';
+
+import { projectFutureValue } from '@/lib/finance/asset-projection';
 
 type SmallSavingsScheme = 'PPF' | 'VPF' | 'NSC' | 'KVP' | 'SSY' | 'SCSS';
 type SmallSavingsStatus = 'ACTIVE' | 'MATURED' | 'CLOSED' | 'EXTENDED';
 type InterestCompounding = 'YEARLY' | 'HALF_YEARLY' | 'QUARTERLY';
+type ContributionFrequency = 'MONTHLY' | 'YEARLY';
 type SmallSavingsTxnType =
   | 'DEPOSIT'
   | 'INTEREST_CREDIT'
@@ -71,6 +75,9 @@ interface Account {
   totalInterestPaisa: number;
   status: SmallSavingsStatus;
   notes: string | null;
+  /** Sprint 5.5e — recurring contribution (paisa per period). */
+  periodicContributionPaisa: number;
+  contributionFrequency: ContributionFrequency;
 }
 
 interface Transaction {
@@ -109,6 +116,11 @@ const COMPOUNDING_OPTIONS: Array<{ label: string; value: InterestCompounding }> 
   { label: 'Yearly', value: 'YEARLY' },
   { label: 'Half-yearly', value: 'HALF_YEARLY' },
   { label: 'Quarterly', value: 'QUARTERLY' },
+];
+
+const CONTRIB_FREQ_OPTIONS: Array<{ label: string; value: ContributionFrequency }> = [
+  { label: 'Monthly', value: 'MONTHLY' },
+  { label: 'Yearly', value: 'YEARLY' },
 ];
 
 const TXN_TYPE_OPTIONS: Array<{ label: string; value: SmallSavingsTxnType }> = [
@@ -176,6 +188,8 @@ interface FormState {
   totalInterestRupees: string;
   status: SmallSavingsStatus;
   notes: string;
+  periodicContributionRupees: string;
+  contributionFrequency: ContributionFrequency;
 }
 
 function accountToForm(a: Account): FormState {
@@ -197,6 +211,8 @@ function accountToForm(a: Account): FormState {
     totalInterestRupees: (a.totalInterestPaisa / 100).toString(),
     status: a.status,
     notes: a.notes ?? '',
+    periodicContributionRupees: ((a.periodicContributionPaisa ?? 0) / 100).toString(),
+    contributionFrequency: a.contributionFrequency ?? 'MONTHLY',
   };
 }
 
@@ -277,6 +293,8 @@ export default function SmallSavingsDetailPage() {
         totalInterestRupees: Number(form.totalInterestRupees) || 0,
         status: form.status,
         notes: form.notes || null,
+        periodicContributionRupees: Number(form.periodicContributionRupees) || 0,
+        contributionFrequency: form.contributionFrequency,
       };
       const r = await fetch(`/api/investments/small-savings/${accountId}`, {
         method: 'PATCH',
@@ -413,6 +431,10 @@ export default function SmallSavingsDetailPage() {
 /* ─── view mode ───────────────────────────────────────────────────────── */
 
 function AccountDetailView({ account }: { account: Account }) {
+  const periodic = account.periodicContributionPaisa ?? 0;
+  const freq = account.contributionFrequency ?? 'MONTHLY';
+  const contribLabel =
+    periodic > 0 ? `${formatINR(periodic)} / ${freq === 'MONTHLY' ? 'mo' : 'yr'}` : 'Not set';
   const fields: Array<[string, string]> = [
     ['Scheme', account.schemeType],
     ['Status', account.status],
@@ -425,6 +447,7 @@ function AccountDetailView({ account }: { account: Account }) {
     ['Rate', `${account.interestRatePercent.toFixed(2)}%`],
     ['Compounding', account.interestCompounding.replace('_', ' ')],
     ['Regular deposit', formatINR(account.depositAmountPaisa)],
+    ['Periodic contribution', contribLabel],
     ['Extension blocks', (account.extensionBlocksUsed ?? 0).toString()],
   ];
   if (account.schemeType === 'SSY' && account.holderDob) {
@@ -445,12 +468,81 @@ function AccountDetailView({ account }: { account: Account }) {
           </div>
         ))}
       </dl>
+      <SmallSavingsProjectionPreview
+        currentBalancePaisa={account.currentBalancePaisa}
+        periodicContributionPaisa={periodic}
+        contributionFrequency={freq}
+        ratePct={account.interestRatePercent}
+        maturityDate={account.maturityDate}
+        schemeType={account.schemeType}
+      />
       {account.notes && (
         <p className="mt-4 text-sm text-[var(--dxp-text-secondary)] whitespace-pre-wrap">
           {account.notes}
         </p>
       )}
     </>
+  );
+}
+
+/* --- projection preview ------------------------------------------------- */
+
+function SmallSavingsProjectionPreview({
+  currentBalancePaisa,
+  periodicContributionPaisa,
+  contributionFrequency,
+  ratePct,
+  maturityDate,
+  schemeType,
+}: {
+  currentBalancePaisa: number;
+  periodicContributionPaisa: number;
+  contributionFrequency: ContributionFrequency;
+  ratePct: number;
+  maturityDate: string;
+  schemeType: SmallSavingsScheme;
+}) {
+  if (!maturityDate) return null;
+  const today = new Date();
+  const target = new Date(maturityDate);
+  const years = Math.max(0, (target.getTime() - today.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+  if (years <= 0) {
+    return (
+      <p className="mt-4 text-xs text-[var(--dxp-text-muted)]">
+        Maturity date is in the past.
+      </p>
+    );
+  }
+  // NSC / KVP are lumpsum — zero out contribution stream for the
+  // preview so the user sees the same math the server-side derivation
+  // applies. SSY contribution cap at 14 years is more complex; we keep
+  // the preview as a "best case" full-horizon view and the server-side
+  // derivation note explains the actual capping.
+  let effectiveContrib = periodicContributionPaisa;
+  if (schemeType === 'NSC' || schemeType === 'KVP') effectiveContrib = 0;
+  const periodsPerYear: 1 | 12 = contributionFrequency === 'YEARLY' ? 1 : 12;
+  const result = projectFutureValue({
+    currentBalancePaisa,
+    contributionPerPeriodPaisa: effectiveContrib,
+    periodsPerYear,
+    annualRatePct: ratePct,
+    yearsToProject: years,
+  });
+  return (
+    <div className="mt-4 rounded border border-[var(--dxp-border)] bg-[var(--dxp-surface-secondary,var(--dxp-surface))] p-3 text-sm">
+      <p className="flex items-center gap-2 font-medium text-[var(--dxp-text)]">
+        <TrendingUp className="h-4 w-4 text-[var(--dxp-brand)]" />
+        At {ratePct.toFixed(2)}%/yr, this projects to {formatINR(result.totalPaisa)} by {maturityDate}.
+      </p>
+      <p className="mt-1 text-xs text-[var(--dxp-text-secondary)]">
+        Balance side: {formatINR(result.balanceComponentPaisa)} · contribution side:{' '}
+        {formatINR(result.contributionComponentPaisa)} · {years.toFixed(1)} years
+        {schemeType === 'SSY' &&
+          ' · note: server-side projection caps contributions at child age 14'}
+        {(schemeType === 'NSC' || schemeType === 'KVP') &&
+          ' · lumpsum scheme (recurring contribution ignored)'}
+      </p>
+    </div>
   );
 }
 
@@ -570,6 +662,43 @@ function AccountEditForm({
           onChange={(e) => setField('totalInterestRupees', e.target.value)}
         />
       </Field>
+
+      {/* Sprint 5.5e — periodic contribution stream for forward
+       *  projection. NSC / KVP have this hidden because they're
+       *  lumpsum schemes and the projection lib ignores any value
+       *  saved here anyway. */}
+      {schemeType !== 'NSC' && schemeType !== 'KVP' && (
+        <>
+          <Field label="Periodic contribution (₹)">
+            <Input
+              type="number"
+              value={form.periodicContributionRupees}
+              onChange={(e) => setField('periodicContributionRupees', e.target.value)}
+              placeholder={schemeType === 'PPF' ? 'e.g. 8333' : 'e.g. 15000'}
+            />
+          </Field>
+          <Field label="Contribution frequency">
+            <Select
+              value={form.contributionFrequency}
+              onChange={(v) => setField('contributionFrequency', v as ContributionFrequency)}
+              options={CONTRIB_FREQ_OPTIONS}
+            />
+          </Field>
+          <div className="sm:col-span-2">
+            <SmallSavingsProjectionPreview
+              currentBalancePaisa={Math.round((Number(form.currentBalanceRupees) || 0) * 100)}
+              periodicContributionPaisa={Math.round(
+                (Number(form.periodicContributionRupees) || 0) * 100,
+              )}
+              contributionFrequency={form.contributionFrequency}
+              ratePct={Number(form.interestRatePercent) || 0}
+              maturityDate={form.maturityDate}
+              schemeType={schemeType}
+            />
+          </div>
+        </>
+      )}
+
       <div className="sm:col-span-2">
         <Field label="Notes">
           <textarea
