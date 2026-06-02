@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb, numeric } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -1722,6 +1722,42 @@ export const fixedDeposits = pgTable('fixed_deposits', {
 
 export type FixedDeposit = typeof fixedDeposits.$inferSelect;
 export type NewFixedDeposit = typeof fixedDeposits.$inferInsert;
+
+// ─── Forex deposits — Sprint 5.10 ─────────────────────────────────────
+// Foreign-currency holdings (NRE FX accounts, multi-currency wallets,
+// foreign FDs, GIFT-City balances). Amounts kept in the foreign currency
+// as numeric(18,4) — the paisa-as-integer convention only applies to INR.
+// Live conversion to INR happens at read time via the FX rate service
+// (see src/lib/services/yahoo-finance.ts → getFxRatesToInr).
+
+export type ForexDepositStatus = 'ACTIVE' | 'MATURED' | 'CLOSED';
+
+export const forexDeposits = pgTable('forex_deposits', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bankName: text('bank_name').notNull(),
+  accountNumber: text('account_number'),
+  currencyCode: text('currency_code').notNull(), // ISO 4217 — 'USD','EUR','GBP','AED','SGD',…
+  /** Foreign-currency amount. Stored as Postgres numeric(18,4) for FX
+   *  precision (≈4 decimals is plenty for retail FX). Drizzle's
+   *  numeric() returns a string by default — we keep the default so
+   *  callers must parseFloat() at the boundary; this prevents silent
+   *  JS-number drift on round-trip. */
+  amountInCurrency: numeric('amount_in_currency', { precision: 18, scale: 4 }).notNull(),
+  interestRate: real('interest_rate'), // annual %, optional (savings have no fixed rate)
+  openingDate: text('opening_date').notNull(),
+  maturityDate: text('maturity_date'), // null for ongoing savings
+  status: text('status').$type<ForexDepositStatus>().default('ACTIVE').notNull(),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('forex_deposits_user_id_idx').on(table.userId),
+  index('forex_deposits_user_status_idx').on(table.userId, table.status),
+]);
+
+export type ForexDeposit = typeof forexDeposits.$inferSelect;
+export type NewForexDeposit = typeof forexDeposits.$inferInsert;
 
 // 6. EPF accounts (mandatory provident fund, employer-tied).
 // Sprint 3 Phase 5: renamed from `provident_fund` since PPF/VPF/NSC/
