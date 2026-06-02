@@ -24,9 +24,11 @@ import {
   insurancePolicies,
   realEstate,
   smallSavingsAccounts,
+  mutualFunds,
   type RetirementAssetSelection,
 } from '@/db';
 import { auth } from '@/auth';
+import { getGrowthRates, getMfRate } from '@/lib/finance/asset-growth-rates';
 
 const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
 const ANNUITY_FREQ_TO_PER_YEAR: Record<string, number> = {
@@ -58,6 +60,10 @@ interface RetirementItem {
   npsAnnuityRatePct?: number;
   /** REAL_ESTATE in RENTAL mode: user-entered expected monthly rent at retirement (paisa). */
   expectedFutureRentPaisa?: number | null;
+  /** Sprint 5.7 — for MUTUAL_FUNDS items, the resolved category + rate
+   *  used by projection. Other classes leave these undefined. */
+  category?: 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
+  returnPct?: number;
 }
 
 interface AssetClassRow {
@@ -67,11 +73,21 @@ interface AssetClassRow {
     | 'SMALL_SAVINGS'
     | 'ANNUITY_POLICIES'
     | 'INSURANCE_POLICIES'
-    | 'REAL_ESTATE';
+    | 'REAL_ESTATE'
+    | 'MUTUAL_FUNDS';
   label: string;
   /** Short note about how the class contributes (corpus / income / mixed). */
   basis: string;
   items: RetirementItem[];
+  /** Sprint 5.7 — Mutual Funds class row carries per-category breakdown
+   *  rows (EQUITY/DEBT/HYBRID/UNKNOWN) showing the resolved rate used.
+   *  Other classes leave this undefined. */
+  mfBreakdown?: Array<{
+    category: 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
+    valuePaisa: number;
+    returnPct: number;
+    fundCount: number;
+  }>;
 }
 
 function findRow(
@@ -86,13 +102,15 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const [nps, pf, ins, props, smallSavings, selections] = await Promise.all([
+    const [nps, pf, ins, props, smallSavings, mfs, selections, rates] = await Promise.all([
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
       db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
       db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
       db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
+      db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
       db.select().from(retirementAssetSelection).where(eq(retirementAssetSelection.userId, session.user.id)),
+      getGrowthRates(session.user.id),
     ]);
 
     // ─── NPS ────────────────────────────────────────────────────────────
@@ -198,6 +216,52 @@ export async function GET() {
         };
       });
 
+    // ─── MUTUAL_FUNDS (Sprint 5.7 — per-fund category drives growth rate) ─
+    // Each item row carries the resolved category + rate used. The class
+    // row also gets an aggregate `mfBreakdown` so the UI can surface
+    // "EQUITY ₹X @ 11% · DEBT ₹Y @ 7% · …" at a glance.
+    const mfItems: RetirementItem[] = mfs
+      .filter((f) => (f.currentValue ?? 0) > 0)
+      .map((f) => {
+        const category = (f.category ?? 'UNKNOWN') as 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
+        const returnPct = getMfRate(category, rates);
+        const sel = findRow(selections, 'MUTUAL_FUNDS', f.id);
+        return {
+          id: f.id,
+          label: f.schemeName,
+          sublabel: `${category} · ${returnPct}% growth`,
+          valuePaisa: f.currentValue ?? 0,
+          category,
+          returnPct,
+          // Mutual funds default to NOT included in the retirement
+          // corpus — the user might have earmarked them for a nearer
+          // goal (house, education). They toggle in per-fund if they
+          // want a fund to feed retirement specifically.
+          included: sel ? !!sel.included : false,
+        };
+      })
+      .sort((a, b) => b.valuePaisa - a.valuePaisa);
+
+    const mfBreakdownMap = new Map<
+      'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN',
+      { value: number; returnPct: number; count: number }
+    >();
+    for (const it of mfItems) {
+      const cat = it.category!;
+      const prev = mfBreakdownMap.get(cat) ?? { value: 0, returnPct: it.returnPct!, count: 0 };
+      mfBreakdownMap.set(cat, {
+        value: prev.value + it.valuePaisa,
+        returnPct: it.returnPct!, // same for all items in a category
+        count: prev.count + 1,
+      });
+    }
+    const mfBreakdown = Array.from(mfBreakdownMap.entries()).map(([category, agg]) => ({
+      category,
+      valuePaisa: agg.value,
+      returnPct: agg.returnPct,
+      fundCount: agg.count,
+    }));
+
     // ─── REAL_ESTATE ────────────────────────────────────────────────────
     const reItems: RetirementItem[] = props.map((p) => {
       const sel = findRow(selections, 'REAL_ESTATE', p.id);
@@ -251,6 +315,13 @@ export async function GET() {
         label: 'Real Estate',
         basis: 'Sell mode: sale price (or compounded valuation) becomes lumpsum at retirement. Rental mode: monthly rent × 12 grown by inflation becomes retirement income.',
         items: reItems,
+      },
+      {
+        assetClass: 'MUTUAL_FUNDS',
+        label: 'Mutual Funds',
+        basis: 'Per-fund growth rate resolved from category (Equity/Debt/Hybrid). UNKNOWN funds use the umbrella MF rate. Off by default — toggle each fund in if you want it to feed the retirement corpus.',
+        items: mfItems,
+        mfBreakdown,
       },
     ];
 

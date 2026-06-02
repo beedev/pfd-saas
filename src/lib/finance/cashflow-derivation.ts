@@ -659,9 +659,18 @@ function deriveSips(sips: SIP[], mfs: MutualFund[], userId: string): NewCashflow
     .map((s) => {
       const mf = mfById.get(s.mutualFundId);
       const fundLabel = mf?.schemeName ?? `Fund #${s.mutualFundId}`;
+      // Sprint 5.7 — surface the linked MF's category in the event's
+      // notes so timeline consumers can see which subclass-rate bucket
+      // the underlying fund belongs to. The math here is unchanged —
+      // SIPs are flat outflows from the user's pocket; the per-category
+      // growth math runs in goal/retirement projections that consume
+      // the linked MF, not in cashflow events themselves.
+      const category = mf?.category ?? 'UNKNOWN';
+      const categoryLabel =
+        category === 'UNKNOWN' ? '' : ` · ${category[0]}${category.slice(1).toLowerCase()}`;
       return {
         userId,
-        name: `SIP — ${fundLabel}`,
+        name: `SIP — ${fundLabel}${categoryLabel}`,
         sourceKind: 'SIP' satisfies CashflowSourceKind,
         sourceId: s.id,
         startDate: s.startDate,
@@ -678,7 +687,7 @@ function deriveSips(sips: SIP[], mfs: MutualFund[], userId: string): NewCashflow
         // future tax-aware projections don't apply a slab to them.
         taxTreatment: 'TAX_FREE' satisfies CashflowTaxTreatment,
         autoDerived: true,
-        notes: `₹${(s.monthlyAmount / 100).toLocaleString('en-IN')} monthly SIP — auto-counted via MF asset mapping for goals`,
+        notes: `₹${(s.monthlyAmount / 100).toLocaleString('en-IN')} monthly SIP — auto-counted via MF asset mapping for goals (category: ${category})`,
       };
     });
 }

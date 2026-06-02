@@ -39,6 +39,16 @@ export interface CorpusContext {
   }>;
   holdingsTotal: number;
   mfTotal: number;
+  /** Sprint 5.7 — per-MF breakdown so aggregate MUTUAL_FUNDS inclusions
+   *  can resolve a category-weighted return rate. Each fund's resolved
+   *  rate (MF_EQUITY / MF_DEBT / MF_HYBRID / fallback) is computed once
+   *  at load time so projection callers don't re-derive it. */
+  mfs: Array<{
+    id: number;
+    value: number;
+    category: 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
+    returnPct: number;
+  }>;
   npsTotal: number;
   pfTotal: number;
   /** Itemized classes carry their assumed growth rate per row so the
@@ -83,6 +93,12 @@ export interface CorpusContext {
 export const DEFAULT_RETURN_PCT_BY_CLASS: Record<string, number> = {
   STOCKS: 12,
   MUTUAL_FUNDS: 11,
+  // Sprint 5.7 — MF sub-classification rates. Resolved per-fund via
+  // `mutual_funds.category`. Used by weightedReturnForGoal when the
+  // goal's MUTUAL_FUNDS inclusion picks up funds with categories set.
+  MF_EQUITY: 11,
+  MF_DEBT: 7,
+  MF_HYBRID: 9,
   GOLD: 9,
   NPS: 9.5,
   PF: 8.25,
@@ -141,6 +157,29 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
     );
   }
 
+  // Sprint 5.7 — resolve per-MF growth rate from category. The umbrella
+  // MUTUAL_FUNDS rate is the fallback for UNKNOWN-category funds; the
+  // three sub-class keys take precedence when the user has set the
+  // category on the fund's detail page.
+  const mfRows = mfs.map((f) => {
+    const category = (f.category ?? 'UNKNOWN') as 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
+    let returnPct: number;
+    switch (category) {
+      case 'EQUITY':
+        returnPct = defaultReturnPct('MF_EQUITY', classReturnOverrides);
+        break;
+      case 'DEBT':
+        returnPct = defaultReturnPct('MF_DEBT', classReturnOverrides);
+        break;
+      case 'HYBRID':
+        returnPct = defaultReturnPct('MF_HYBRID', classReturnOverrides);
+        break;
+      default:
+        returnPct = defaultReturnPct('MUTUAL_FUNDS', classReturnOverrides);
+    }
+    return { id: f.id, value: f.currentValue || 0, category, returnPct };
+  });
+
   return {
     inclusions: inclusions.map((r) => ({
       assetClass: r.assetClass,
@@ -151,6 +190,7 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
     })),
     holdingsTotal: stocks.reduce((s, h) => s + (h.currentValue || 0), 0),
     mfTotal: mfs.reduce((s, f) => s + (f.currentValue || 0), 0),
+    mfs: mfRows,
     npsTotal: nps.reduce((s, n) => s + (n.totalValue || 0), 0),
     pfTotal: pf.reduce((s, p) => s + (p.totalBalance || 0), 0),
     // Itemized rows include each instrument's own assumed return rate
@@ -299,6 +339,30 @@ export function weightedReturnForGoal(
         if (r.sourceId === null) value = ctx.holdingsTotal;
         break;
       case 'MUTUAL_FUNDS':
+        // Sprint 5.7 — MUTUAL_FUNDS aggregate inclusion now resolves
+        // a per-fund category-weighted rate. Each fund contributes its
+        // own (currentValue × MF_<CATEGORY>_rate) so the resulting
+        // weightedReturn reflects the fund mix. We bypass the generic
+        // accumulation below by aggregating directly into classBands
+        // here.
+        if (r.sourceId === null && ctx.mfs.length > 0) {
+          let mfValue = 0;
+          let mfWeighted = 0;
+          for (const f of ctx.mfs) {
+            if (f.value <= 0) continue;
+            mfValue += f.value * weight;
+            mfWeighted += f.value * weight * f.returnPct;
+          }
+          if (mfValue > 0) {
+            const prev = classBands.get('MUTUAL_FUNDS') ?? { value: 0, weightedSum: 0 };
+            classBands.set('MUTUAL_FUNDS', {
+              value: prev.value + mfValue,
+              weightedSum: prev.weightedSum + mfWeighted,
+            });
+          }
+          // continue — we've already booked the contribution.
+          continue;
+        }
         if (r.sourceId === null) value = ctx.mfTotal;
         break;
       case 'NPS':

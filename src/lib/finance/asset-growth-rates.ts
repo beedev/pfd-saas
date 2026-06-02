@@ -35,6 +35,42 @@ export { DEFAULT_GROWTH_RATES };
 export type { AssetClassKey, AssetGrowthRates };
 
 /**
+ * Resolve the right growth rate for a single MF based on its category.
+ *
+ * EQUITY → MF_EQUITY, DEBT → MF_DEBT, HYBRID → MF_HYBRID. UNKNOWN funds
+ * (default for newly-imported funds before the user categorises them)
+ * fall back to the EQUITY rate — the most common case and conservative
+ * relative to the umbrella MUTUAL_FUNDS rate (which is also 11 by default
+ * but is intended for genuinely uncategorised aggregate reporting). The
+ * fallback chain is documented here so callers don't have to re-derive
+ * it.
+ *
+ * The umbrella `MUTUAL_FUNDS` rate stays in `rates` for code paths that
+ * still aggregate at the class level (e.g. `weightedReturnForGoal` when
+ * the goal has an aggregate MUTUAL_FUNDS inclusion with no per-fund
+ * sourceId). This helper is for the per-fund path where category drives
+ * the bucket.
+ */
+export function getMfRate(
+  category: 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN' | null | undefined,
+  rates: AssetGrowthRates,
+): number {
+  switch (category) {
+    case 'EQUITY':
+      return rates.MF_EQUITY;
+    case 'DEBT':
+      return rates.MF_DEBT;
+    case 'HYBRID':
+      return rates.MF_HYBRID;
+    case 'UNKNOWN':
+    case null:
+    case undefined:
+    default:
+      return rates.MF_EQUITY;
+  }
+}
+
+/**
  * Load per-user growth rates. Always returns a complete record — any
  * keys missing from the DB fall back to DEFAULT_GROWTH_RATES.
  *
