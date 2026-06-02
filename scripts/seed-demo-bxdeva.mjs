@@ -546,16 +546,20 @@ async function seedAll(tx) {
   }
 
   // ─── mutual_funds — 8 funds across categories ────────────────────
-  // fund_type valid set: EQUITY|DEBT|HYBRID|LIQUID|GOLD
+  // fund_type valid set: EQUITY|DEBT|HYBRID|LIQUID|GOLD (AMFI scheme class)
+  // category   valid set: EQUITY|DEBT|HYBRID|UNKNOWN    (rate bucket; Sprint 5.7)
+  // Liquid funds map to DEBT for projection (Indian liquid funds are
+  // short-term debt — typically 6–7% expected return, aligns with DEBT
+  // bucket, not equity-like growth).
   const funds = [
-    { isin: 'INF879O01027', name: 'Parag Parikh Flexi Cap - Direct Growth', type: 'EQUITY', units: 1850.5, nav: rs(82.4), totInv: lakh(1.2), start: '2023-04-10' },
-    { isin: 'INF769K01010', name: 'Mirae Asset Large Cap - Direct Growth',  type: 'EQUITY', units: 1320.0, nav: rs(108.2), totInv: lakh(1.3), start: '2023-05-05' },
-    { isin: 'INF200K01QX4', name: 'SBI Small Cap - Direct Growth',          type: 'EQUITY', units: 720.0,  nav: rs(168.5), totInv: lakh(1.0), start: '2023-08-15' },
-    { isin: 'INF846K01EW2', name: 'Axis Bluechip - Direct Growth',          type: 'EQUITY', units: 2100.0, nav: rs(58.7),  totInv: lakh(1.1), start: '2023-06-20' },
-    { isin: 'INF204KB1FD3', name: 'Nippon India Multi Asset - Direct Growth', type: 'HYBRID', units: 4500.0, nav: rs(18.9), totInv: lakh(0.8), start: '2023-09-10' },
-    { isin: 'INF966L01A35', name: 'Quant ELSS Tax Saver - Direct Growth',   type: 'EQUITY', units: 1100.0, nav: rs(412.3), totInv: lakh(4.0), start: '2022-12-05' },
-    { isin: 'INF179K01OC6', name: 'HDFC Corporate Bond - Direct Growth',    type: 'DEBT',   units: 12000.0, nav: rs(31.5),  totInv: lakh(3.5), start: '2022-04-15' },
-    { isin: 'INF109K01F18', name: 'ICICI Pru Liquid - Direct Growth',       type: 'LIQUID', units: 450.0,  nav: rs(356.0), totInv: lakh(1.5), start: '2024-01-08' },
+    { isin: 'INF879O01027', name: 'Parag Parikh Flexi Cap - Direct Growth', type: 'EQUITY', cat: 'EQUITY', units: 1850.5, nav: rs(82.4), totInv: lakh(1.2), start: '2023-04-10' },
+    { isin: 'INF769K01010', name: 'Mirae Asset Large Cap - Direct Growth',  type: 'EQUITY', cat: 'EQUITY', units: 1320.0, nav: rs(108.2), totInv: lakh(1.3), start: '2023-05-05' },
+    { isin: 'INF200K01QX4', name: 'SBI Small Cap - Direct Growth',          type: 'EQUITY', cat: 'EQUITY', units: 720.0,  nav: rs(168.5), totInv: lakh(1.0), start: '2023-08-15' },
+    { isin: 'INF846K01EW2', name: 'Axis Bluechip - Direct Growth',          type: 'EQUITY', cat: 'EQUITY', units: 2100.0, nav: rs(58.7),  totInv: lakh(1.1), start: '2023-06-20' },
+    { isin: 'INF204KB1FD3', name: 'Nippon India Multi Asset - Direct Growth', type: 'HYBRID', cat: 'HYBRID', units: 4500.0, nav: rs(18.9), totInv: lakh(0.8), start: '2023-09-10' },
+    { isin: 'INF966L01A35', name: 'Quant ELSS Tax Saver - Direct Growth',   type: 'EQUITY', cat: 'EQUITY', units: 1100.0, nav: rs(412.3), totInv: lakh(4.0), start: '2022-12-05' },
+    { isin: 'INF179K01OC6', name: 'HDFC Corporate Bond - Direct Growth',    type: 'DEBT',   cat: 'DEBT',   units: 12000.0, nav: rs(31.5),  totInv: lakh(3.5), start: '2022-04-15' },
+    { isin: 'INF109K01F18', name: 'ICICI Pru Liquid - Direct Growth',       type: 'LIQUID', cat: 'DEBT',   units: 450.0,  nav: rs(356.0), totInv: lakh(1.5), start: '2024-01-08' },
   ];
   for (const f of funds) {
     const curVal = Math.round(f.units * f.nav);
@@ -563,11 +567,11 @@ async function seedAll(tx) {
     const gainPct = f.totInv === 0 ? 0 : (gain / f.totInv) * 100;
     await tx`
       INSERT INTO mutual_funds
-        (user_id, isin, scheme_name, fund_type, units, nav,
+        (user_id, isin, scheme_name, fund_type, category, units, nav,
          total_investment, current_value, gain_loss, gain_loss_percent,
          last_nav_date, investment_start_date, notes)
       VALUES
-        (${TARGET_USER_ID}, ${f.isin}, ${f.name}, ${f.type},
+        (${TARGET_USER_ID}, ${f.isin}, ${f.name}, ${f.type}, ${f.cat},
          ${f.units}, ${f.nav},
          ${f.totInv}, ${curVal}, ${gain}, ${gainPct},
          '2026-06-01', ${f.start}, ${NOTE('mf-' + f.isin.toLowerCase())})
