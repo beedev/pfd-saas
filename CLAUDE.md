@@ -64,6 +64,43 @@ sprint lands.
   Next.js Ready), confirmed second-run path (skip initdb, fast
   start), confirmed /api/health 200 and /login 200. Verified
   \`docker stop && docker start\` preserves data.
+- **Phase 6.1.9 — Built-in Demo/Personal account switcher.** Docker
+  self-host now ships with a two-account model instead of the
+  magic-link round-trip. Gated by \`DEMO_PERSONAL_SWITCH=true\`
+  (default for the self-host image; production SaaS sets it to
+  \`false\` to restore the magic-link path).
+    - **9a — Stable IDs + provisioning helper.** Hard-coded UUIDs in
+      \`src/lib/dev/account-switcher.ts\` (\`DEMO_USER_ID\`,
+      \`PERSONAL_USER_ID\`). \`ensureAccountExists(target)\` lazily
+      inserts the user + user_preferences row and, for demo, runs
+      the BXDEva seed when the portfolio is empty. The BXDEva seed
+      body was extracted to \`src/lib/dev/seed-demo-data.ts\`
+      (\`seedDemoDataForUser(userId, name)\`) so the route and the
+      switcher share it.
+    - **9b — Switch endpoint.** \`POST /api/auth/switch-account?to=…\`
+      mints a fresh Auth.js session row + sets the same
+      \`authjs.session-token\` cookie NextAuth would. Returns 303 →
+      \`/\` for HTML form posts, JSON for fetch callers. AUTH_URL
+      is honored so the redirect points back at the public host:port,
+      not the internal 0.0.0.0.
+    - **9c — Login page.** \`/login\` became a server component that
+      dispatches between \`<AccountChooser/>\` (two-card chooser) and
+      \`<MagicLinkForm/>\` (extracted verbatim from the old client
+      page) based on the env flag. \`export const dynamic =
+      'force-dynamic'\` keeps the env read at request time — without
+      it Next.js prerenders the page at build, before the entrypoint
+      has set the flag.
+    - **9d — Sidebar.** Server layout bridges
+      \`DEMO_PERSONAL_SWITCH\` + \`session.user.email\` into the
+      Sidebar (client) as props. When enabled, a new account row
+      above the nav shows \`👤 Demo · Switch to Personal\` (or the
+      mirror) and POSTs to /api/auth/switch-account on click.
+    - **9e — Entrypoint default.** \`docker-entrypoint.sh\` exports
+      \`DEMO_PERSONAL_SWITCH=${DEMO_PERSONAL_SWITCH:-true}\`.
+    - **9f — Docs.** README-DOCKER.md rewrote the first-run narrative
+      and added a "Security caveat for self-host" section. The
+      switcher is single-machine localhost only; multi-user
+      deployments must set \`-e DEMO_PERSONAL_SWITCH=false\`.
 
 **Distribution note**: \`docker push pfd-saas:latest\` to Docker Hub
 is a manual step. Image tag at smoke time was \`pfd-saas:smoke\`.
