@@ -155,6 +155,14 @@ export AUTH_URL=${AUTH_URL:-http://localhost:3000}
 # (server component) and passed as a prop to the Sidebar. No bridge
 # needed; the entrypoint's environment is already inherited by the
 # Next.js process.
+# Sprint 6.1.9 — built-in Demo/Personal account switcher. Defaults to
+# ON for the Docker self-host (click-to-sign-in, no email needed).
+# Production SaaS deployments should pass `-e DEMO_PERSONAL_SWITCH=false`
+# to restore the magic-link flow. Consumed by:
+#   - src/app/login/page.tsx (chooses AccountChooser vs MagicLinkForm)
+#   - src/app/api/auth/switch-account/route.ts (404s when disabled)
+#   - src/app/(dashboard)/layout.tsx (bridges to Sidebar prop)
+export DEMO_PERSONAL_SWITCH=${DEMO_PERSONAL_SWITCH:-true}
 
 # ─── Start Next.js in foreground ─────────────────────────────────────
 echo "[entrypoint] Starting Next.js on http://0.0.0.0:3000..."
