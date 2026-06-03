@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { LogOut, Menu, X } from 'lucide-react';
+import { LogOut, Menu, X, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -173,6 +173,11 @@ type SidebarProps = {
    *  modules (Transformation tracker, etc.). Off by default — pfd-saas
    *  is finance-first. Hide the "Personal" section when false. */
   habitsEnabled: boolean;
+  /** Sprint 6.1.6 — destination for the sidebar "Send feedback" link.
+   *  Read from the FEEDBACK_URL env var on the server (so runtime
+   *  overrides work without rebuilding the image); defaults to a
+   *  mailto: when unset. */
+  feedbackUrl: string;
 };
 
 /**
@@ -181,7 +186,7 @@ type SidebarProps = {
  * Tailwind responsive classes — both elements exist in the DOM but
  * only one is visible at any width. Drawer state lives here.
  */
-export function Sidebar({ hasBusinessProfile, habitsEnabled }: SidebarProps) {
+export function Sidebar({ hasBusinessProfile, habitsEnabled, feedbackUrl }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const visibleNav = navigation.filter((s) => {
@@ -238,7 +243,17 @@ export function Sidebar({ hasBusinessProfile, habitsEnabled }: SidebarProps) {
   );
 
   const footer = (
-    <div className="border-t border-gray-800 p-4 space-y-3">
+    <div className="border-t border-gray-800 p-4 space-y-1">
+      <a
+        href={feedbackUrl}
+        target={feedbackUrl.startsWith('http') ? '_blank' : undefined}
+        rel={feedbackUrl.startsWith('http') ? 'noopener noreferrer' : undefined}
+        title="This is a preview build. Bug reports and feature requests welcome."
+        className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+      >
+        <MessageSquare className="mr-3 h-5 w-5 text-gray-400" />
+        Send feedback
+      </a>
       <button
         type="button"
         onClick={() => signOut({ callbackUrl: '/login' })}
@@ -247,7 +262,7 @@ export function Sidebar({ hasBusinessProfile, habitsEnabled }: SidebarProps) {
         <LogOut className="mr-3 h-5 w-5 text-gray-400" />
         Sign out
       </button>
-      <p className="text-xs text-gray-500">pfd-saas · v0.1</p>
+      <p className="pt-2 text-xs text-gray-500">pfd-saas · v0.1</p>
     </div>
   );
 

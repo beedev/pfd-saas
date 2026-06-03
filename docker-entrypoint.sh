@@ -128,6 +128,10 @@ export NEXT_TELEMETRY_DISABLED=1
 #   both  — surface in UI AND send via SMTP
 export MAGIC_LINK_DISPLAY=${MAGIC_LINK_DISPLAY:-ui}
 export AUTH_URL=${AUTH_URL:-http://localhost:3000}
+# Sprint 6.1.6 — FEEDBACK_URL is consumed in (dashboard)/layout.tsx
+# (server component) and passed as a prop to the Sidebar. No bridge
+# needed; the entrypoint's environment is already inherited by the
+# Next.js process.
 
 # ─── Start Next.js in foreground ─────────────────────────────────────
 echo "[entrypoint] Starting Next.js on http://0.0.0.0:3000..."

@@ -62,6 +62,13 @@ export default async function DashboardLayout({
       <Sidebar
         hasBusinessProfile={hasBusinessProfile}
         habitsEnabled={habitsEnabled}
+        feedbackUrl={
+          // Sprint 6.1.6 — runtime-resolvable feedback link. Defaults
+          // to mailto so the link always works; testers/deployers
+          // override via `-e FEEDBACK_URL=https://github.com/.../issues/new`.
+          process.env.FEEDBACK_URL ||
+          'mailto:bharath.devanathan@htcinc.com?subject=pfd-saas%20feedback'
+        }
       />
       {/* On mobile the sidebar is replaced by a fixed top bar (h-14);
           pt-14 keeps the page content out from under it. md+ has the

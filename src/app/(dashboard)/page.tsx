@@ -16,6 +16,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Sparkles,
 } from 'lucide-react';
 import { LineChart as ReLineChart, Line, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
@@ -94,6 +95,24 @@ export default function NetWorthDashboard() {
   // Sprint 5.9d — net worth transparency: collapsible asset/liability
   // breakdown directly under the hero tile.
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  // Sprint 6.1.6 — demo data CTA on empty home state.
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+
+  async function loadDemoData() {
+    setIsLoadingDemo(true);
+    try {
+      const r = await fetch('/api/dev/load-demo-data', { method: 'POST' });
+      if (!r.ok) throw new Error('Failed');
+      toast.success('Demo data loaded — explore freely');
+      // Hard reload so every component picks up the new rows. Cheaper
+      // than re-running every parallel fetch on this page.
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to load demo data');
+      setIsLoadingDemo(false);
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -242,6 +261,19 @@ export default function NetWorthDashboard() {
   const topGainers = sorted.slice(0, 3);
   const topLosers = sorted.slice(-3).reverse().filter((h) => h.gainLoss < 0);
 
+  // Sprint 6.1.6 — show demo-data CTA when the user has nothing yet.
+  // Zero rows across the seven primary asset/insurance/liability tables
+  // is the cleanest "first-time user" signal.
+  const isEmptyAccount =
+    !isLoading &&
+    holdings.length === 0 &&
+    funds.length === 0 &&
+    nps.length === 0 &&
+    pf.length === 0 &&
+    properties.length === 0 &&
+    policies.length === 0 &&
+    debts.length === 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -269,6 +301,39 @@ export default function NetWorthDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Sprint 6.1.6 — empty-state demo CTA. Visible only on first-run
+          accounts (Docker self-host testers, fresh installs). */}
+      {isEmptyAccount && (
+        <Card className="border-l-4 border-l-amber-500 bg-amber-50">
+          <CardContent>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <h2 className="text-lg font-semibold text-amber-900">
+                  Welcome to pfd-saas! Your dashboard is empty.
+                </h2>
+                <p className="text-sm text-amber-800 mt-1">
+                  Pre-populate a realistic INR portfolio (salary, deductions,
+                  stocks, MF, insurance, home loan) so you can explore every
+                  screen. You can wipe demo data anytime from Settings.
+                </p>
+              </div>
+              <Button
+                variant="primary"
+                onClick={loadDemoData}
+                disabled={isLoadingDemo}
+              >
+                {isLoadingDemo ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-2 h-4 w-4" />
+                )}
+                Load demo data
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {sparkline.length > 1 && (
         <Card>
