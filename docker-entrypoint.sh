@@ -88,12 +88,24 @@ fi
 export AUTH_SECRET=$(cat "$SECRETS/auth_secret")
 
 # ─── Start postgres in background ────────────────────────────────────
+# `-l /dev/stdout` fails on Alpine because postgres can't open /dev/stdout
+# with the permissions it wants. Use a regular log file under /data
+# instead; entrypoint tails it to the container stdout after start so
+# `docker logs` still surfaces postgres output.
+PG_LOG=$DATA_DIR/postgres.log
+touch "$PG_LOG"
+chown postgres:postgres "$PG_LOG"
+
 echo "[entrypoint] Starting postgres..."
 su-exec postgres pg_ctl \
   -D "$PGDATA" \
-  -l /dev/stdout \
+  -l "$PG_LOG" \
   -o "-c listen_addresses=127.0.0.1 -c unix_socket_directories=$PGSOCKET" \
   -w start
+
+# Stream postgres logs to the container stdout in the background. tail
+# -F handles log rotation; the process exits when the container does.
+tail -F "$PG_LOG" &
 
 # ─── Ensure database exists ──────────────────────────────────────────
 PG_PASS=$(cat "$SECRETS/postgres_password")

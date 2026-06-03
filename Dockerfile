@@ -53,10 +53,12 @@ RUN npm run build
 # ------------------------------------------------------------------------
 FROM postgres:17-alpine AS runner
 
-# Install Node 24, tini (PID 1 zombie reaper), and su-exec (drop to
-# postgres uid without spawning a real shell). The postgres alpine image
-# already has openssl + busybox utilities we need in the entrypoint.
-RUN apk add --no-cache nodejs npm tini su-exec
+# Install Node 24, tini (PID 1 zombie reaper), su-exec (drop to
+# postgres uid without spawning a real shell), openssl (entrypoint
+# uses it for random-password + AUTH_SECRET generation), and wget
+# (HEALTHCHECK uses it to probe /api/health). postgres:17-alpine is
+# distroless-ish so we have to add each tool explicitly.
+RUN apk add --no-cache nodejs npm tini su-exec openssl wget
 
 # App directory owned by the postgres user; postgres user already exists
 # from the base image (uid 70 on Alpine).
@@ -91,6 +93,20 @@ COPY --from=builder --chown=postgres:postgres /app/node_modules/postgres ./node_
 # entrypoint exports DATABASE_URL directly so the file lookups no-op
 # gracefully, but the module still has to resolve.
 COPY --from=builder --chown=postgres:postgres /app/node_modules/dotenv ./node_modules/dotenv
+
+# drizzle-kit's dependency tree we need at runtime — it transpiles
+# drizzle.config.ts on every invocation via esbuild + esbuild-register.
+# The @esbuild/<platform> binary is matched to the build platform by
+# `npm ci` in the deps stage.
+COPY --from=builder --chown=postgres:postgres /app/node_modules/esbuild ./node_modules/esbuild
+COPY --from=builder --chown=postgres:postgres /app/node_modules/esbuild-register ./node_modules/esbuild-register
+COPY --from=builder --chown=postgres:postgres /app/node_modules/@esbuild ./node_modules/@esbuild
+COPY --from=builder --chown=postgres:postgres /app/node_modules/@esbuild-kit ./node_modules/@esbuild-kit
+COPY --from=builder --chown=postgres:postgres /app/node_modules/@drizzle-team ./node_modules/@drizzle-team
+# drizzle-kit's reading-time check for drizzle-orm version. The
+# standalone Next.js bundle already ships drizzle-orm inside its
+# .next bundle, so the top-level node_modules tree is missing it.
+COPY --from=builder --chown=postgres:postgres /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 
 # Custom entrypoint orchestrates postgres + Next.js.
 COPY --chown=postgres:postgres docker-entrypoint.sh /usr/local/bin/pfd-entrypoint.sh
