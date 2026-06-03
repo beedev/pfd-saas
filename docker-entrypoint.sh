@@ -139,6 +139,17 @@ export NEXT_TELEMETRY_DISABLED=1
 #   email — send via SMTP (requires EMAIL_SERVER)
 #   both  — surface in UI AND send via SMTP
 export MAGIC_LINK_DISPLAY=${MAGIC_LINK_DISPLAY:-ui}
+# Auth.js URL construction:
+# - Next.js standalone server binds to HOSTNAME=0.0.0.0, so Auth.js's
+#   "use the request URL" path produces URLs like `http://0.0.0.0:3000/…`
+#   — unreachable from the user's browser.
+# - The fix: set AUTH_URL to the host:port the user's browser will use.
+#   deploy.sh passes `-e AUTH_URL=http://localhost:<host_port>` so the
+#   port matches whatever the deployer mapped with `-p`. Manual
+#   `docker run` users should pass it themselves.
+# - Default falls back to localhost:3000, matching the most common
+#   `-p 3000:3000` mapping. If the deployer maps differently and
+#   doesn't pass AUTH_URL, post-login redirects break.
 export AUTH_URL=${AUTH_URL:-http://localhost:3000}
 # Sprint 6.1.6 — FEEDBACK_URL is consumed in (dashboard)/layout.tsx
 # (server component) and passed as a prop to the Sidebar. No bridge

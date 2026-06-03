@@ -63,8 +63,44 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'no_pending_link' }, { status: 404 });
   }
 
+  // ─── Host rewrite ───────────────────────────────────────────────────
+  // Auth.js's sendVerificationRequest receives a URL built from the
+  // Next.js standalone server's own bind address (HOSTNAME=0.0.0.0
+  // PORT=3000), so cached URLs look like `http://0.0.0.0:3000/…` —
+  // unreachable from the user's browser.
+  //
+  // The fix: rewrite the cached URL's host using the `Host` header
+  // from the *current* request, which is the host the user's browser
+  // is actually using (e.g. `localhost:3001` if the deployer mapped
+  // -p 3001:3000). `req.url` itself has the wrong host for the same
+  // bind-address reason, so we go to the header directly.
+  //
+  // Safe because auth.config.ts has `trustHost: true` — Auth.js
+  // accepts callbacks at any host then verifies the cryptographic
+  // token. Host rewrite doesn't widen the attack surface; it just
+  // routes the same token through a host the browser can reach.
+  const host = req.headers.get('host') ?? req.headers.get('x-forwarded-host');
+  const proto = req.headers.get('x-forwarded-proto') ??
+                (host?.includes('localhost') || host?.includes('127.0.0.1') ? 'http' : 'https');
+  const rewritten = new URL(link.url);
+  if (host) {
+    rewritten.protocol = `${proto}:`;
+    rewritten.host = host;
+    const cbRaw = rewritten.searchParams.get('callbackUrl');
+    if (cbRaw) {
+      try {
+        const cb = new URL(cbRaw);
+        cb.protocol = `${proto}:`;
+        cb.host = host;
+        rewritten.searchParams.set('callbackUrl', cb.toString());
+      } catch {
+        // callbackUrl wasn't absolute — leave it alone.
+      }
+    }
+  }
+
   return NextResponse.json({
-    url: link.url,
+    url: rewritten.toString(),
     email: link.email,
     expiresAt: new Date(link.expiresAt).toISOString(),
   });

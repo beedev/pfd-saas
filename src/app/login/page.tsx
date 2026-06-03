@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 
 /**
@@ -8,12 +9,19 @@ import { signIn } from 'next-auth/react';
  *
  * The submit POSTs through next-auth/react -> /api/auth/signin/nodemailer.
  * Auth.js generates a verification token, stores it in verification_token,
- * and calls our sendVerificationRequest stub (see src/auth.ts) which logs
- * the URL to the dev console + tmp/magic-links.log instead of emailing.
+ * and calls our sendVerificationRequest hook (see src/auth.ts) which —
+ * when MAGIC_LINK_DISPLAY=ui — stashes the URL in an in-memory cache
+ * for /api/auth/pending-link to surface on the next page.
  *
- * After submit we land on /login/check-email (the verifyRequest page).
+ * Why we override the redirect manually:
+ * NextAuth's default behaviour is to redirect to `pages.verifyRequest`
+ * but WITHOUT passing the email forward. Our check-email page needs
+ * the email in the query to poll /api/auth/pending-link?email=…, so we
+ * call signIn({ redirect: false }), then router.push to the
+ * check-email URL ourselves with ?email= baked in.
  */
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,18 +31,21 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      // Sprint 6.1.5 — point Auth.js at our check-email page with the
-      // email pre-filled in the query. The page polls
-      // /api/auth/pending-link?email=... to surface the magic-link button
-      // when MAGIC_LINK_DISPLAY=ui (Docker self-host default).
-      const target = `/login/check-email?email=${encodeURIComponent(email)}`;
-      await signIn('nodemailer', {
+      const result = await signIn('nodemailer', {
         email,
-        callbackUrl: '/',
-        redirectTo: target,
+        redirect: false,
       });
-    } catch {
-      setError('Could not send sign-in link');
+      if (result?.error) {
+        setError(result.error);
+        setLoading(false);
+        return;
+      }
+      // signIn succeeded — Auth.js has stashed the magic-link URL in
+      // the pendingLinks cache. Navigate to check-email with the email
+      // in the query so the page can poll for it.
+      router.push(`/login/check-email?email=${encodeURIComponent(email)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send sign-in link');
       setLoading(false);
     }
   }

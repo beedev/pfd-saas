@@ -87,6 +87,7 @@ step "5/6" "Starting $CONTAINER_NAME..."
 CONTAINER_ID=$(docker run -d \
   -v "$VOLUME_NAME:/data" \
   -p "$PORT:3000" \
+  -e "AUTH_URL=http://localhost:$PORT" \
   --name "$CONTAINER_NAME" \
   "$IMAGE_TAG")
 success "Container started (id: ${CONTAINER_ID:0:12})"
