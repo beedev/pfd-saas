@@ -120,9 +120,9 @@ printf "  Restart:  docker start %s\n" "$CONTAINER_NAME"
 printf "  Backup:   docker exec %s pg_dump -U pfd_saas pfd_saas > pfd-saas-\$(date +%%Y-%%m-%%d).sql\n" "$CONTAINER_NAME"
 printf "  Wipe:     docker stop %s && docker rm %s && docker volume rm %s\n" "$CONTAINER_NAME" "$CONTAINER_NAME" "$VOLUME_NAME"
 printf "\n"
-printf "  First-time setup: enter any email on the login page, click the\n"
-printf "  ${YELLOW}Sign in${NC} link that appears in the UI (no email setup needed —\n"
-printf "  the magic link is surfaced directly).\n"
+printf "  First-time setup: pick ${YELLOW}Try the demo${NC} or ${YELLOW}Use my own data${NC}\n"
+printf "  from the login screen. Switch between accounts anytime via the\n"
+printf "  sidebar's ⇆ Switch button.\n"
 printf "\n"
 
 # macOS: auto-open the browser

@@ -35,31 +35,38 @@ open http://localhost:3000
 
 ## Two ways to use this
 
-**For a quick tour** — click **Explore with sample data** on first login. Every
-screen populates with a realistic INR portfolio (salary, deductions, stocks,
-MF, insurance, home loan) in 30 seconds. Wipe anytime from Settings.
+The Docker self-host image ships with a built-in two-account model — no email,
+no magic links, no SMTP. The login screen shows two cards and one click signs
+you in:
 
-**For personal use** — click **Enter my own data**. Lands you on the salary
-entry page; add investments, loans, insurance at your own pace. The container
-persists everything in its named volume — survives container restarts and image
-upgrades. Back up regularly (see [Backups](#backups)).
+**Try the demo** — pre-loaded BXDEva-style portfolio (~₹2.76 Cr) across every
+screen. Stocks, mutual funds, NPS, EPF, real estate, FDs, forex, insurance,
+loans, deductions — all populated so you can explore without entering data.
+
+**Use my own data** — empty dashboard. Enter your own salary, investments,
+insurance, taxes. Everything you add lives in the Docker volume and survives
+container restarts and image upgrades.
+
+Switch between them anytime from the **⇆ Switch** button at the top of the
+sidebar. Both accounts persist independently — the demo dataset stays demo,
+your personal data stays personal.
+
+For multi-user production deployments, set `-e DEMO_PERSONAL_SWITCH=false`
+to disable the switcher and fall back to the email magic-link flow (see
+[Configuration](#configuration)).
 
 ---
 
 ## First-run experience
 
-1. Browse to <http://localhost:3000>. The login screen asks for an email
-   address. **No SMTP server is required** — any email works.
-2. Submit. You land on a "Preparing your sign-in…" page.
-3. Within ~1 second the page swaps to a big "Sign in as you@example.com →"
-   button. Click it.
-4. You're in. The empty dashboard shows two cards: **Explore with sample
-   data** (loads BXDEva-style portfolio) and **Enter my own data** (starts
-   with salary entry).
-5. Pick one. Wipe sample data anytime from Settings.
-
-If you'd rather use a real email and skip the in-UI link surface, set
-`MAGIC_LINK_DISPLAY=email` and `EMAIL_SERVER=...` (see Configuration).
+1. Browse to <http://localhost:3000>. You'll see two cards: **Try the demo**
+   and **Use my own data**.
+2. Click one — you're signed in immediately. No email, no waiting.
+3. From the sidebar, hit **⇆ Switch to <other>** to flip accounts at any
+   time. The demo seed lazily provisions on first click, so the very first
+   "Open Demo" takes a few extra seconds; subsequent switches are instant.
+4. Both accounts live in the Docker volume. They survive container
+   restarts and image rebuilds (the IDs are stable constants in the code).
 
 ---
 
@@ -78,12 +85,33 @@ If you're using pfd-saas with your real financial data, three things matter:
 
 2. **Keep port 3000 local.** The default `-p 3000:3000` binds to all interfaces.
    If your machine is on a shared LAN or has a public IP, switch to
-   `-p 127.0.0.1:3000:3000` so only your machine can reach it. The magic-link-
-   in-UI flow is intentional convenience for trusted single-machine use; it's
-   not safe to expose to the open internet.
+   `-p 127.0.0.1:3000:3000` so only your machine can reach it. (See the
+   [Security caveat for self-host](#security-caveat-for-self-host) section
+   below.)
 
 3. **Wipe sample data doesn't touch real data.** The wipe button filters on
    `notes LIKE 'DEMO-SEED:%'` — anything you entered manually is untouched.
+
+---
+
+## Security caveat for self-host
+
+The default Docker mode replaces real authentication with click-to-sign-in.
+That's appropriate for **localhost-only personal use** — the trust boundary
+is the machine itself. Do **not** expose port 3000 to the open internet under
+`DEMO_PERSONAL_SWITCH=true`: anyone who can reach the port can sign in as
+either account with one click.
+
+If you need to share the instance over a network:
+
+- **Single user, remote access** — put it behind Tailscale, a VPN, or
+  Cloudflare Access. The switcher is fine inside a trusted overlay network.
+- **Multiple users** — disable the switcher entirely:
+  ```bash
+  docker run ... -e DEMO_PERSONAL_SWITCH=false -e EMAIL_SERVER=... pfd-saas:latest
+  ```
+  This restores the email magic-link flow (requires `EMAIL_SERVER` to actually
+  send anywhere — see [Configuration](#configuration)).
 
 ---
 
@@ -94,8 +122,9 @@ All env vars are optional. Set with `-e KEY=value` on `docker run`.
 | Env var | Default | Effect |
 |---|---|---|
 | `AUTH_URL` | `http://localhost:3000` | Public URL of your instance. Set this when running behind a proxy or on a non-default port — Auth.js uses it to build callback URLs. |
+| `DEMO_PERSONAL_SWITCH` | `true` (Docker self-host) | When `true`, the login page shows the two-card Demo/Personal chooser and the sidebar exposes a Switch button. When `false`, falls back to the email magic-link flow. Set `false` for multi-user / production deployments. |
 | `FEEDBACK_URL` | `mailto:bharath.devanathan@htcinc.com?subject=pfd-saas%20feedback` | Where the sidebar "Send feedback" link points. Override with a GitHub issues URL or your own intake form. |
-| `MAGIC_LINK_DISPLAY` | `ui` | `ui` — surface the magic link in the browser (default, no SMTP needed). `email` — send via SMTP (requires `EMAIL_SERVER`). `both` — do both. |
+| `MAGIC_LINK_DISPLAY` | `ui` | Only consulted when `DEMO_PERSONAL_SWITCH=false`. `ui` — surface the magic link in the browser (default, no SMTP needed). `email` — send via SMTP (requires `EMAIL_SERVER`). `both` — do both. |
 | `EMAIL_SERVER` | unset | SMTP URL, e.g. `smtps://user:pass@smtp.gmail.com:465`. Required when `MAGIC_LINK_DISPLAY=email`. |
 | `EMAIL_FROM` | `noreply@pfd-saas.local` | From-address used in outbound magic-link emails. |
 | `TELEGRAM_BOT_TOKEN` | unset | Optional. When set, the `/daily-digest` and `/alerts` features can push messages to Telegram. Without it the features still render — they just don't send. |
@@ -238,9 +267,14 @@ Confirm outbound HTTPS works: `docker exec pfd-saas wget -O- https://query1.fina
 **MF NAVs show stale.** AMFI's NAVAll.txt is fetched on demand; the cache
 TTL is 30 min. Wait or restart the container.
 
-**Magic link doesn't appear.** Open `docker logs pfd-saas` — the URL is
-always logged. The in-browser polling tries for 10 s, then falls back to
-the inbox message; the link itself is valid for 5 min either way.
+**Magic link doesn't appear.** Only relevant when running with
+`DEMO_PERSONAL_SWITCH=false`. Open `docker logs pfd-saas` — the URL is always
+logged. The in-browser polling tries for 10 s, then falls back to the inbox
+message; the link itself is valid for 5 min either way.
+
+**"Open Demo" takes 10–20 s the first time.** Expected — the BXDEva seed runs
+once and inserts ~150 rows across 23 tables inside a single transaction.
+Subsequent switches are instant.
 
 **Container marks itself unhealthy.** Healthcheck probes
 `http://127.0.0.1:3000/api/health` every 30 s. If unhealthy, check
@@ -252,13 +286,16 @@ container restart.
 
 ## Security note
 
-This image is built for **personal/local self-host**. The in-UI magic-link
-delivery means anyone who can reach `/api/auth/pending-link` AND knows the
-target email can claim that session. That's exactly the right tradeoff for
-single-user localhost. **Do not expose port 3000 directly to the internet**
-without putting a real auth layer (Cloudflare Access, Tailscale, an nginx
-basic-auth, etc.) in front. For multi-tenant production, switch to
-`MAGIC_LINK_DISPLAY=email` and configure a real SMTP server.
+This image is built for **personal/local self-host**. By default
+(`DEMO_PERSONAL_SWITCH=true`), authentication is click-to-sign-in — anyone
+reaching port 3000 can claim either account with one POST. That's the right
+tradeoff for single-user localhost; it's not safe to expose to the open
+internet.
+
+See [Security caveat for self-host](#security-caveat-for-self-host) above for
+the full breakdown. For multi-tenant production, set
+`-e DEMO_PERSONAL_SWITCH=false -e EMAIL_SERVER=...` to switch to the real
+email magic-link flow.
 
 ---
 
