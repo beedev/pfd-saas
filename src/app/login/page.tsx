@@ -20,6 +20,14 @@
 import { AccountChooser } from './account-chooser';
 import { MagicLinkForm } from './magic-link-form';
 
+// Force runtime evaluation. Without this, Next.js statically prerenders
+// /login at build time — and since DEMO_PERSONAL_SWITCH is set by the
+// Docker entrypoint (not at build time), the build always sees the
+// magic-link branch and bakes it into a static HTML file. The runtime
+// env var would then be ignored. Forcing dynamic re-evaluates the
+// process.env read on every request.
+export const dynamic = 'force-dynamic';
+
 export default function LoginPage() {
   if (process.env.DEMO_PERSONAL_SWITCH === 'true') {
     return <AccountChooser />;

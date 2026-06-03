@@ -97,7 +97,13 @@ export async function POST(req: NextRequest) {
   // is navigating, JSON means script.
   const accept = req.headers.get('accept') ?? '';
   if (accept.includes('text/html')) {
-    return NextResponse.redirect(new URL('/', req.url), { status: 303 });
+    // Use AUTH_URL when available so the redirect points at the
+    // external host:port the browser is on (e.g. localhost:3001),
+    // not the internal HOSTNAME=0.0.0.0:3000 that Next.js's standalone
+    // server binds to. Falls back to req.url for dev where AUTH_URL
+    // is typically unset.
+    const baseUrl = process.env.AUTH_URL || req.url;
+    return NextResponse.redirect(new URL('/', baseUrl), { status: 303 });
   }
   return NextResponse.json({ ok: true, account: target, isNew });
 }
