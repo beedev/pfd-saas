@@ -17,6 +17,8 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
+  Briefcase,
+  ArrowRight,
 } from 'lucide-react';
 import { LineChart as ReLineChart, Line, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
@@ -302,37 +304,69 @@ export default function NetWorthDashboard() {
         </div>
       </div>
 
-      {/* Sprint 6.1.6 — empty-state demo CTA. Visible only on first-run
-          accounts (Docker self-host testers, fresh installs). */}
+      {/* Sprint 6.1.7 — empty-state two-card fork. Visible only on
+          first-run accounts. Left = quick exploration with demo data.
+          Right = personal use with own data, dropped into salary entry
+          as a focused starting point. */}
       {isEmptyAccount && (
-        <Card className="border-l-4 border-l-amber-500 bg-amber-50">
-          <CardContent>
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <h2 className="text-lg font-semibold text-amber-900">
-                  Welcome to pfd-saas! Your dashboard is empty.
-                </h2>
-                <p className="text-sm text-amber-800 mt-1">
-                  Pre-populate a realistic INR portfolio (salary, deductions,
-                  stocks, MF, insurance, home loan) so you can explore every
-                  screen. You can wipe demo data anytime from Settings.
-                </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          {/* Left: explore with demo */}
+          <Card className="border-l-4 border-l-amber-500 bg-amber-50/40">
+            <CardContent>
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-8 w-8 shrink-0 text-amber-600" />
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold text-[var(--dxp-text)]">
+                    Explore with sample data
+                  </h3>
+                  <p className="mt-1 text-sm text-[var(--dxp-text-secondary)]">
+                    Pre-populates a realistic INR portfolio — salary, deductions,
+                    stocks, mutual funds, insurance, home loan. Click through every
+                    screen in 30 seconds. Wipe anytime from Settings.
+                  </p>
+                  <Button
+                    variant="primary"
+                    onClick={loadDemoData}
+                    disabled={isLoadingDemo}
+                    className="mt-3"
+                  >
+                    {isLoadingDemo ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="mr-2 h-4 w-4" />
+                    )}
+                    Load sample data
+                  </Button>
+                </div>
               </div>
-              <Button
-                variant="primary"
-                onClick={loadDemoData}
-                disabled={isLoadingDemo}
-              >
-                {isLoadingDemo ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-4 w-4" />
-                )}
-                Load demo data
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          {/* Right: start with own data */}
+          <Card className="border-l-4 border-l-emerald-500 bg-emerald-50/40">
+            <CardContent>
+              <div className="flex items-start gap-3">
+                <Briefcase className="h-8 w-8 shrink-0 text-emerald-600" />
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold text-[var(--dxp-text)]">
+                    Enter my own data
+                  </h3>
+                  <p className="mt-1 text-sm text-[var(--dxp-text-secondary)]">
+                    Start with your salary, then add investments, loans, and
+                    insurance at your own pace. The container persists everything
+                    in its volume — survives restarts and updates.
+                  </p>
+                  <Link href="/income">
+                    <Button variant="primary" className="mt-3 bg-emerald-600 hover:bg-emerald-700">
+                      Start with my salary
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {sparkline.length > 1 && (

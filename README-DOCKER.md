@@ -7,7 +7,19 @@ run`.
 
 ---
 
-## Quick start
+## Quick start (one command)
+
+Only prerequisite: Docker Desktop running.
+
+```bash
+./scripts/deploy.sh
+```
+
+The script builds the image, sets up a persistent volume, starts the container,
+polls `/api/health` until ready, then opens your browser to <http://localhost:3000>.
+First run takes ~5–10 minutes for the image build; subsequent runs are seconds.
+
+### Or run docker directly
 
 ```bash
 docker run -d \
@@ -19,8 +31,18 @@ docker run -d \
 open http://localhost:3000
 ```
 
-That's it. First boot takes ~15 s while postgres initialises and migrations
-run; subsequent restarts come up in 3-5 s.
+---
+
+## Two ways to use this
+
+**For a quick tour** — click **Explore with sample data** on first login. Every
+screen populates with a realistic INR portfolio (salary, deductions, stocks,
+MF, insurance, home loan) in 30 seconds. Wipe anytime from Settings.
+
+**For personal use** — click **Enter my own data**. Lands you on the salary
+entry page; add investments, loans, insurance at your own pace. The container
+persists everything in its named volume — survives container restarts and image
+upgrades. Back up regularly (see [Backups](#backups)).
 
 ---
 
@@ -31,15 +53,37 @@ run; subsequent restarts come up in 3-5 s.
 2. Submit. You land on a "Preparing your sign-in…" page.
 3. Within ~1 second the page swaps to a big "Sign in as you@example.com →"
    button. Click it.
-4. You're in. The dashboard is empty.
-5. An amber banner reads *"Welcome to pfd-saas! Your dashboard is empty.
-   [Load demo data]"*. Click the button.
-6. The page reloads with a realistic ₹24L-salary portfolio: salary,
-   deductions, stocks, MF, insurance, home loan. Explore freely.
-7. When done, **Settings → Wipe demo data** removes everything.
+4. You're in. The empty dashboard shows two cards: **Explore with sample
+   data** (loads BXDEva-style portfolio) and **Enter my own data** (starts
+   with salary entry).
+5. Pick one. Wipe sample data anytime from Settings.
 
 If you'd rather use a real email and skip the in-UI link surface, set
 `MAGIC_LINK_DISPLAY=email` and `EMAIL_SERVER=...` (see Configuration).
+
+---
+
+## Data safety for personal use
+
+If you're using pfd-saas with your real financial data, three things matter:
+
+1. **Back up the volume.** All your data lives in the `pfd_data` Docker volume.
+   The simplest backup is a `pg_dump`:
+
+   ```bash
+   docker exec pfd-saas pg_dump -U pfd_saas pfd_saas > pfd-saas-$(date +%Y-%m-%d).sql
+   ```
+
+   Run weekly (or after big updates). Restore via `psql` (see [Restore](#restore)).
+
+2. **Keep port 3000 local.** The default `-p 3000:3000` binds to all interfaces.
+   If your machine is on a shared LAN or has a public IP, switch to
+   `-p 127.0.0.1:3000:3000` so only your machine can reach it. The magic-link-
+   in-UI flow is intentional convenience for trusted single-machine use; it's
+   not safe to expose to the open internet.
+
+3. **Wipe sample data doesn't touch real data.** The wipe button filters on
+   `notes LIKE 'DEMO-SEED:%'` — anything you entered manually is untouched.
 
 ---
 
