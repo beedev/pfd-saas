@@ -23,9 +23,16 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      // Auth.js takes over navigation — it redirects to verifyRequest on
-      // success or to /login?error=... on failure.
-      await signIn('nodemailer', { email, callbackUrl: '/' });
+      // Sprint 6.1.5 — point Auth.js at our check-email page with the
+      // email pre-filled in the query. The page polls
+      // /api/auth/pending-link?email=... to surface the magic-link button
+      // when MAGIC_LINK_DISPLAY=ui (Docker self-host default).
+      const target = `/login/check-email?email=${encodeURIComponent(email)}`;
+      await signIn('nodemailer', {
+        email,
+        callbackUrl: '/',
+        redirectTo: target,
+      });
     } catch {
       setError('Could not send sign-in link');
       setLoading(false);

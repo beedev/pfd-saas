@@ -29,6 +29,43 @@ import authConfig from './auth.config';
 
 const STUB_LOG = path.join(process.cwd(), 'tmp', 'magic-links.log');
 
+// ─── Sprint 6.1.5 — In-memory cache for pending magic links ──────────
+// Lives only inside the Node process. Single-instance only, which is
+// exactly the topology of the Docker self-host: one container, one
+// Node process, one cache. 5-minute TTL matches the typical magic-link
+// freshness window. Single-use: consumePendingLink() removes the entry.
+//
+// Production SaaS (multi-instance) should set MAGIC_LINK_DISPLAY=email
+// so this cache path is bypassed entirely.
+interface PendingLink {
+  url: string;
+  email: string;
+  expiresAt: number;
+}
+const pendingLinks = new Map<string, PendingLink>();
+
+function pruneExpiredLinks() {
+  const now = Date.now();
+  for (const [key, link] of pendingLinks) {
+    if (link.expiresAt < now) pendingLinks.delete(key);
+  }
+}
+
+/**
+ * Pull (and consume) a recently-issued magic link out of the in-memory
+ * cache. Returns null if none is pending for that email or it has
+ * expired. Single-use — the caller is the only legitimate consumer.
+ *
+ * Called by the /api/auth/pending-link route handler.
+ */
+export function consumePendingLink(email: string): PendingLink | null {
+  pruneExpiredLinks();
+  const link = pendingLinks.get(email);
+  if (!link) return null;
+  pendingLinks.delete(email);
+  return link;
+}
+
 const _nextAuth = NextAuth({
   ...authConfig,
   adapter: DrizzleAdapter(db, {
@@ -95,49 +132,96 @@ export const auth = (async (...args: unknown[]) => {
 }) as typeof _realAuth;
 
 /**
- * EmailProvider builder. Two modes:
+ * EmailProvider builder.
  *
- *   - EMAIL_SERVER set  →  real SMTP. Pass the env var straight through
- *                          to Nodemailer; Auth.js's default
- *                          sendVerificationRequest formats + sends a
- *                          real email. Tested with Gmail SMTP (see
- *                          README for app-password setup).
- *   - EMAIL_SERVER empty → stub. jsonTransport keeps Nodemailer happy;
- *                          our override logs the link to stdout and
- *                          tmp/magic-links.log.
+ * MAGIC_LINK_DISPLAY env var selects the delivery mode (Sprint 6.1.5):
  *
- * The mode flips at boot, not per-request — restart the dev/prod server
- * after toggling the env var.
+ *   - 'ui'    → stash the URL in the in-memory pendingLinks cache so
+ *               the /login/check-email page can surface it via
+ *               /api/auth/pending-link. Also log to stdout and
+ *               tmp/magic-links.log so testers can grab it from
+ *               `docker logs`. Default for the Docker self-host image.
+ *   - 'email' → real SMTP via Nodemailer (requires EMAIL_SERVER set).
+ *               Production SaaS path. Identical behaviour to the
+ *               pre-6.1.5 code.
+ *   - 'both'  → UI surfacing AND SMTP. Useful for demos where the
+ *               tester also wants the email-flow muscle memory.
+ *
+ * If EMAIL_SERVER is unset, mode falls back to 'ui' even when 'email'
+ * is requested — there is nothing to send to.
+ *
+ * The mode flips at boot, not per-request — restart the server after
+ * toggling.
  */
+type MagicLinkDisplay = 'ui' | 'email' | 'both';
+
 function buildEmailProvider() {
   const emailServer = process.env.EMAIL_SERVER?.trim();
   const from = process.env.EMAIL_FROM ?? 'noreply@pfd-saas.local';
+  const requestedMode = (process.env.MAGIC_LINK_DISPLAY ?? 'ui').toLowerCase() as MagicLinkDisplay;
+  const hasEmailServer = !!emailServer;
 
-  if (emailServer) {
-    // Real SMTP path. Auth.js handles the send with its default
-    // sendVerificationRequest (sensible-looking HTML body + plain-text
-    // fallback). No stub.
+  // Resolve effective mode. 'email' without EMAIL_SERVER → fall back to
+  // 'ui' so the user isn't silently dropped. 'both' without
+  // EMAIL_SERVER → just 'ui'.
+  const effectiveMode: MagicLinkDisplay =
+    (requestedMode === 'email' || requestedMode === 'both') && !hasEmailServer
+      ? 'ui'
+      : requestedMode;
+
+  // Pure 'email' mode: delegate entirely to Auth.js's default
+  // sendVerificationRequest (real SMTP send, no UI surfacing, no stub
+  // log). This preserves the pre-6.1.5 production behaviour exactly.
+  if (effectiveMode === 'email') {
     return Nodemailer({ server: emailServer, from });
   }
 
-  // Stub path — log instead of send. Override sendVerificationRequest
-  // entirely so Nodemailer's transport machinery never runs.
+  // 'ui' or 'both' — override sendVerificationRequest so we can stash
+  // the URL in the pendingLinks cache and (optionally) chain to Auth.js's
+  // default for the SMTP send.
   return Nodemailer({
-    server: { jsonTransport: true },
+    // jsonTransport keeps Nodemailer happy without ever actually
+    // sending when we're not delegating to the default below.
+    server: effectiveMode === 'both' && emailServer ? emailServer : { jsonTransport: true },
     from,
-    async sendVerificationRequest({ identifier, url }) {
+    async sendVerificationRequest(params) {
+      const { identifier, url } = params;
+      const normalizedEmail = identifier.toLowerCase().trim();
+
+      // Stash for /api/auth/pending-link to surface in the UI.
+      const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min TTL
+      pendingLinks.set(normalizedEmail, { url, email: normalizedEmail, expiresAt });
+
+      // Console + tmp/magic-links.log (always, for debuggability).
       const ts = new Date().toISOString();
       const banner = '═'.repeat(72);
       console.log(`\n${banner}`);
-      console.log(`🔑  MAGIC LINK (stub — no email sent)`);
+      console.log(`🔑  MAGIC LINK (mode: ${effectiveMode})`);
       console.log(`    to:  ${identifier}`);
       console.log(`    url: ${url}`);
       console.log(`${banner}\n`);
       try {
         fs.mkdirSync(path.dirname(STUB_LOG), { recursive: true });
-        fs.appendFileSync(STUB_LOG, JSON.stringify({ ts, identifier, url }) + '\n');
+        fs.appendFileSync(STUB_LOG, JSON.stringify({ ts, identifier, url, mode: effectiveMode }) + '\n');
       } catch (err) {
-        console.error('[auth-stub] could not write magic-links.log:', err);
+        console.error('[auth] could not write magic-links.log:', err);
+      }
+
+      // 'both' — also fire the real SMTP send. We construct a one-off
+      // Nodemailer provider just to borrow Auth.js's default
+      // sendVerificationRequest implementation. Less code than
+      // reimplementing the email body here, and stays in sync with
+      // upstream changes to the email template.
+      if (effectiveMode === 'both' && hasEmailServer) {
+        const defaultProvider = Nodemailer({ server: emailServer, from });
+        const defaultSend = defaultProvider.sendVerificationRequest;
+        if (typeof defaultSend === 'function') {
+          try {
+            await defaultSend(params);
+          } catch (err) {
+            console.error('[auth] SMTP send failed (mode=both):', err);
+          }
+        }
       }
     },
   });
