@@ -16,7 +16,59 @@ countries later.
 
 ## Status
 
-**Sprint 5.8 + 5.9 + 5.11 complete — loan accounting + retirement tax brackets + corpus breakdown.**
+**Sprint 6.1 complete — Docker self-host preview shipped.**
+
+### Sprint 6.1 — Single-container Docker self-host (seven phases)
+
+Goal: produce a single \`docker run\` command that gives a tester a
+working pfd-saas instance with zero email/SMTP config. Distribution to
+Docker Hub is a manual \`docker push\` step Bharath does after this
+sprint lands.
+
+- **Phase 6.1a — Standalone build.** \`output:'standalone'\` in
+  next.config.ts emits \`.next/standalone/server.js\`. Added \`.dockerignore\`.
+- **Phase 6.1b — Multi-stage Dockerfile.** deps → builder → runner.
+  Runner stage is postgres:17-alpine + Node 24 + tini + su-exec +
+  openssl + wget. Promoted \`drizzle-kit\` and \`dotenv\` from
+  devDependencies to dependencies so migrations can run inside the
+  container. Image size: 746MB.
+- **Phase 6.1c — docker-entrypoint.sh.** POSIX-sh entrypoint. First
+  run: initdb + openssl-generate postgres password + AUTH_SECRET,
+  stash under /data/.secrets. Always: start postgres bound to
+  127.0.0.1 (no TCP exposure), ensure DB exists, drizzle-kit migrate,
+  exec node server.js. Postgres logs redirected to /data/postgres.log
+  and \`tail -F\`'d in the background to keep \`docker logs\` complete.
+- **Phase 6.1d — /api/health.** Returns 200 + {ok,db,uptimeMs} when
+  \`SELECT 1\` succeeds, 503 on failure. No auth. Used by Docker
+  HEALTHCHECK directive (30s interval, 30s start-period).
+  Path added to \`PUBLIC_PATHS\` in proxy.ts.
+- **Phase 6.1.5 — Magic-link-in-UI.** \`MAGIC_LINK_DISPLAY\` env
+  selects \`ui\` (default — surface via /api/auth/pending-link),
+  \`email\` (real SMTP, identical to pre-6.1.5 production), or
+  \`both\`. In-memory \`pendingLinks\` cache with 5-min TTL,
+  single-use. New /login/check-email page polls
+  /api/auth/pending-link every 800 ms for up to 10 s; shows a
+  "Sign in as you@example.com →" button when the link is found.
+- **Phase 6.1.6 — Demo data + feedback.** \`POST /api/dev/load-demo-data\`
+  (MINIMAL version — salary, 4 deductions, 2 stocks, 1 MF, 1 term
+  policy, 1 home loan, all marked \`notes LIKE 'DEMO-SEED:%'\`).
+  \`POST /api/dev/wipe-demo-data\` mirrors for cleanup. Empty-state
+  CTA on the Net Worth home page; "Wipe demo data" card on Settings.
+  Sidebar "Send feedback" link above Sign out, defaults to mailto,
+  overridable via \`FEEDBACK_URL\` env (consumed server-side in
+  \`(dashboard)/layout.tsx\`, passed as prop to Sidebar).
+- **Phase 6.1f — README-DOCKER.md.** Tester-facing install + run
+  + backup + restore + upgrade + troubleshoot guide.
+- **Phase 6.1g — End-to-end smoke.** Built image, ran with named
+  volume, confirmed first-run path (initdb → migrations →
+  Next.js Ready), confirmed second-run path (skip initdb, fast
+  start), confirmed /api/health 200 and /login 200. Verified
+  \`docker stop && docker start\` preserves data.
+
+**Distribution note**: \`docker push pfd-saas:latest\` to Docker Hub
+is a manual step. Image tag at smoke time was \`pfd-saas:smoke\`.
+
+### Sprint 5.9 — Loan accounting + 80C principal flag (six phases)
 
 ### Sprint 5.9 — Loan accounting + 80C principal flag (six phases)
 
