@@ -99,6 +99,12 @@ export default function NetWorthDashboard() {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   // Sprint 6.1.6 — demo data CTA on empty home state.
   const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+  // Sprint 6.1.9 — when the Demo/Personal account switcher is enabled,
+  // the empty-state "Explore with sample data" CTA is redundant (the
+  // user already chose at login; if they want demo data they should
+  // switch to the Demo account, not pollute Personal). Fetched once
+  // from /api/auth/config and cached for the page lifetime.
+  const [accountSwitcherEnabled, setAccountSwitcherEnabled] = useState<boolean | null>(null);
 
   async function loadDemoData() {
     setIsLoadingDemo(true);
@@ -115,6 +121,16 @@ export default function NetWorthDashboard() {
       setIsLoadingDemo(false);
     }
   }
+
+  // Sprint 6.1.9 — fetch the account-switcher flag once on mount.
+  // Fire-and-forget; failures degrade gracefully (left card stays
+  // visible, matching pre-6.1.9 behaviour).
+  useEffect(() => {
+    fetch('/api/auth/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setAccountSwitcherEnabled(d?.accountSwitcherEnabled ?? false))
+      .catch(() => setAccountSwitcherEnabled(false));
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -304,11 +320,19 @@ export default function NetWorthDashboard() {
         </div>
       </div>
 
-      {/* Sprint 6.1.7 — empty-state two-card fork. Visible only on
-          first-run accounts. Left = quick exploration with demo data.
-          Right = personal use with own data, dropped into salary entry
-          as a focused starting point. */}
-      {isEmptyAccount && (
+      {/* Sprint 6.1.7 — empty-state two-card fork.
+          Sprint 6.1.9 refinement — when the account switcher is on
+          (Docker self-host), the "Explore with sample data" card is
+          REDUNDANT: the user already chose Personal at the login screen,
+          and clicking "Load sample data" here would pollute Personal
+          with demo rows instead of letting them keep them isolated under
+          the Demo account. We hide the left card in that mode and let
+          the right card take the full width with a hint pointing at the
+          sidebar Switch.
+          The accountSwitcherEnabled === null check keeps the empty state
+          from flashing the wrong layout while the config endpoint is
+          in flight; we render nothing for that one tick. */}
+      {isEmptyAccount && accountSwitcherEnabled === false && (
         <div className="grid gap-4 md:grid-cols-2">
           {/* Left: explore with demo */}
           <Card className="border-l-4 border-l-amber-500 bg-amber-50/40">
@@ -367,6 +391,38 @@ export default function NetWorthDashboard() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {/* Sprint 6.1.9 — account switcher mode: single CTA, no
+          conflicting "Load sample data" since the user can switch
+          to the Demo account from the sidebar for that. */}
+      {isEmptyAccount && accountSwitcherEnabled === true && (
+        <Card className="border-l-4 border-l-emerald-500 bg-emerald-50/40">
+          <CardContent>
+            <div className="flex items-start gap-3">
+              <Briefcase className="h-8 w-8 shrink-0 text-emerald-600" />
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-[var(--dxp-text)]">
+                  Your Personal account is empty. Let&rsquo;s start with your salary.
+                </h3>
+                <p className="mt-1 text-sm text-[var(--dxp-text-secondary)]">
+                  Add your income first, then investments, loans, and insurance at
+                  your own pace. Everything persists in the Docker volume.{' '}
+                  <span className="text-[var(--dxp-text-muted)]">
+                    Want to see the app populated with demo data instead? Hit
+                    <span className="font-medium"> ⇆ Switch to Demo</span> at the top of the sidebar.
+                  </span>
+                </p>
+                <Link href="/income">
+                  <Button variant="primary" className="mt-3 bg-emerald-600 hover:bg-emerald-700">
+                    Start with my salary
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {sparkline.length > 1 && (
