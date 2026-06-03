@@ -33,6 +33,14 @@ export default function LoginPage() {
     try {
       const result = await signIn('nodemailer', {
         email,
+        // callbackUrl is the URL Auth.js redirects to after the user
+        // clicks the magic link and the token is verified. Without an
+        // explicit value, NextAuth defaults it to the CURRENT page URL
+        // (/login) — which means signed-in users land back on the login
+        // form and think it failed. Send them home instead; the
+        // (dashboard)/layout.tsx onboarding gate handles new users from
+        // there.
+        callbackUrl: '/',
         redirect: false,
       });
       if (result?.error) {
