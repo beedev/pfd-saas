@@ -69,6 +69,12 @@ export default async function DashboardLayout({
           process.env.FEEDBACK_URL ||
           'mailto:bharath.devanathan@htcinc.com?subject=pfd-saas%20feedback'
         }
+        // Sprint 6.1.9d — built-in account switcher (Docker self-host).
+        // The env flag lives on the server; bridge it via prop so the
+        // client sidebar can render conditionally without leaking the
+        // var into the client bundle.
+        accountSwitcherEnabled={process.env.DEMO_PERSONAL_SWITCH === 'true'}
+        userEmail={session.user.email ?? null}
       />
       {/* On mobile the sidebar is replaced by a fixed top bar (h-14);
           pt-14 keeps the page content out from under it. md+ has the

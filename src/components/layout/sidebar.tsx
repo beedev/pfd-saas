@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { LogOut, Menu, X, MessageSquare } from 'lucide-react';
+import { LogOut, Menu, X, MessageSquare, UserCircle, ArrowLeftRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -178,6 +178,15 @@ type SidebarProps = {
    *  overrides work without rebuilding the image); defaults to a
    *  mailto: when unset. */
   feedbackUrl: string;
+  /** Sprint 6.1.9d — Docker self-host built-in account switcher.
+   *  When true (DEMO_PERSONAL_SWITCH=true on the server), the sidebar
+   *  surfaces the current account label + a Switch button that flips
+   *  to the other account via /api/auth/switch-account. Off in
+   *  production SaaS — magic-link sessions hide the row. */
+  accountSwitcherEnabled: boolean;
+  /** Email of the signed-in user. Used by the switcher row to label
+   *  the current account. */
+  userEmail: string | null;
 };
 
 /**
@@ -186,18 +195,84 @@ type SidebarProps = {
  * Tailwind responsive classes — both elements exist in the DOM but
  * only one is visible at any width. Drawer state lives here.
  */
-export function Sidebar({ hasBusinessProfile, habitsEnabled, feedbackUrl }: SidebarProps) {
+export function Sidebar({
+  hasBusinessProfile,
+  habitsEnabled,
+  feedbackUrl,
+  accountSwitcherEnabled,
+  userEmail,
+}: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const visibleNav = navigation.filter((s) => {
     if (s.section === 'GST' && !hasBusinessProfile) return false;
     if (s.section === 'Personal' && !habitsEnabled) return false;
     return true;
   });
 
+  // ─── Account-switcher state (Docker self-host only) ─────────────
+  // Email → display label mapping. The Demo well-known account uses
+  // demo@pfd-saas.local; anything else falls into the Personal bucket
+  // (matches the spec at the route handler — only 'demo' vs 'personal'
+  // exist as switch targets, no third state).
+  const isDemo = userEmail === 'demo@pfd-saas.local';
+  const currentLabel = isDemo ? 'Demo' : 'Personal';
+  const switchTarget: 'demo' | 'personal' = isDemo ? 'personal' : 'demo';
+  const switchTargetLabel = isDemo ? 'Personal' : 'Demo';
+
+  async function handleSwitch() {
+    if (switching) return;
+    setSwitching(true);
+    try {
+      const res = await fetch(`/api/auth/switch-account?to=${switchTarget}`, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
+      if (res.ok) {
+        // Force a hard reload so server components re-fetch with the
+        // new session cookie. router.refresh() alone keeps the stale
+        // session in flight on some routes.
+        window.location.href = '/';
+        return;
+      }
+      console.error('[sidebar] switch failed:', await res.text());
+    } catch (err) {
+      console.error('[sidebar] switch threw:', err);
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   // Close drawer when navigating to a new page. usePathname triggers a
   // re-render on navigation, so this side-effect runs naturally.
   // (No useEffect needed — the close happens via onClick on each Link.)
+
+  // ─── Account-switcher row — Docker self-host only ───────────────
+  // Sits above the nav. Hidden in production SaaS deployments because
+  // the only paths to a session there are the magic-link or onboarding
+  // flow — there is no other account to switch to.
+  const accountSwitcherRow = accountSwitcherEnabled ? (
+    <div className="border-b border-gray-800 px-3 py-3 space-y-1">
+      <div className="flex items-center px-1 text-xs text-gray-300">
+        <UserCircle className="mr-2 h-4 w-4 text-gray-400" />
+        <span className="font-medium text-white">{currentLabel}</span>
+        <span className="ml-auto text-[10px] uppercase tracking-wider text-gray-500">
+          Account
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={handleSwitch}
+        disabled={switching}
+        className="flex w-full items-center rounded-md px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-wait"
+        title={`Switch to the ${switchTargetLabel} account`}
+      >
+        <ArrowLeftRight className="mr-2 h-3.5 w-3.5 text-gray-400" />
+        {switching ? 'Switching…' : `Switch to ${switchTargetLabel}`}
+      </button>
+    </div>
+  ) : null;
 
   const navBody = (
     <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
@@ -277,6 +352,7 @@ export function Sidebar({ hasBusinessProfile, habitsEnabled, feedbackUrl }: Side
             Dashboard
           </h1>
         </div>
+        {accountSwitcherRow}
         {navBody}
         {footer}
       </div>
@@ -324,6 +400,7 @@ export function Sidebar({ hasBusinessProfile, habitsEnabled, feedbackUrl }: Side
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {accountSwitcherRow}
             {navBody}
             {footer}
           </div>
