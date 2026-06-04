@@ -15,7 +15,7 @@
  *     which JSON handles natively.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, asc, getTableColumns } from 'drizzle-orm';
 import { db } from '@/db';
 import { MANIFEST } from './table-manifest';
 import { EXPORT_VERSION } from './constants';
@@ -39,11 +39,21 @@ export async function buildExport(userId: string): Promise<ExportPayload> {
   for (const spec of MANIFEST) {
     // Every table in MANIFEST is user-scoped — `userId` column is part
     // of the row shape, so the cast is safe.
+    const cols = getTableColumns(
+      spec.drizzleTable as unknown as Parameters<typeof getTableColumns>[0],
+    );
     const tbl = spec.drizzleTable as unknown as { userId: unknown };
+    // Deterministic ordering — sort by `id` when present (covers all
+    // serial-PK tables), else by `userId` (covers userPreferences which
+    // is the only single-row table whose PK is userId). The point is to
+    // make export → import → re-export a byte-identical round trip
+    // ignoring exportedAt.
+    const orderCol = ('id' in cols ? cols.id : cols.userId) as never;
     const rows = (await db
       .select()
       .from(spec.drizzleTable)
-      .where(eq(tbl.userId as never, userId))) as Record<string, unknown>[];
+      .where(eq(tbl.userId as never, userId))
+      .orderBy(asc(orderCol))) as Record<string, unknown>[];
 
     data.push({ table: spec.tableName, rows });
   }
