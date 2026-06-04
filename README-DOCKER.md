@@ -134,57 +134,32 @@ and persisted in `/data/.secrets/`. You never see them; you never need them.
 
 ---
 
-## Backups
+## Backups & restore
 
-The whole instance is one volume. Two recipes:
+Use `./scripts/pfd-backup.sh` and `./scripts/pfd-restore.sh`. See
+[docs/backup-restore.md](docs/backup-restore.md) for retention,
+scheduling, off-host recipes, and cross-major Postgres notes.
 
-**Volume snapshot (simplest):**
+**Volume snapshot (stop-the-world alternative):**
+
+For a simple full-volume copy that doesn't require the container to be
+running (or a `pg_restore`-compatible target), stop everything and
+`tar` the volume directly:
 
 ```bash
+docker stop pfd-saas
 docker run --rm \
   -v pfd_data:/data \
   -v "$PWD":/backup \
   alpine \
   tar czf /backup/pfd-snapshot-$(date +%F).tar.gz -C /data .
+docker start pfd-saas
 ```
 
-**Logical pg_dump (smaller, portable):**
-
-```bash
-docker exec pfd-saas \
-  sh -c 'PGPASSWORD=$(cat /data/.secrets/postgres_password) \
-         pg_dump -h 127.0.0.1 -U pfd_saas -d pfd_saas' \
-  > pfd-saas-$(date +%F).sql
-```
-
----
-
-## Restore
-
-**From a volume snapshot:**
-
-```bash
-docker stop pfd-saas && docker rm pfd-saas
-docker volume rm pfd_data
-docker volume create pfd_data
-docker run --rm \
-  -v pfd_data:/data \
-  -v "$PWD":/backup \
-  alpine \
-  tar xzf /backup/pfd-snapshot-YYYY-MM-DD.tar.gz -C /data
-# then re-run the Quick Start docker run
-```
-
-**From a pg_dump:**
-
-Start a fresh container, wait for migrations to complete, then:
-
-```bash
-docker exec -i pfd-saas \
-  sh -c 'PGPASSWORD=$(cat /data/.secrets/postgres_password) \
-         psql -h 127.0.0.1 -U pfd_saas -d pfd_saas' \
-  < pfd-saas-YYYY-MM-DD.sql
-```
+Restore is the reverse: stop, remove the container, recreate the
+volume, untar back into it, then re-run the Quick Start `docker run`.
+This is simplest but has no cross-major Postgres tolerance and locks
+the app for the duration.
 
 ---
 
