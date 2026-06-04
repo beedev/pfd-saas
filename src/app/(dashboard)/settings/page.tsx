@@ -5,6 +5,7 @@ import { AssetClassReturnsForm } from '@/components/forms/asset-class-returns-fo
 import { TaxSetupForm } from '@/components/forms/tax-setup-form';
 import { RetirementTaxBracketsForm } from '@/components/forms/retirement-tax-brackets-form';
 import { WipeDemoDataCard } from '@/components/forms/wipe-demo-data-card';
+import { DataPortabilityCard } from '@/components/forms/data-portability-card';
 
 export default function SettingsPage() {
   return (
@@ -25,6 +26,10 @@ export default function SettingsPage() {
       {/* Sprint 6.1.6 — wipe demo data CTA. Visible to everyone; harmless
           when no demo rows exist (the endpoint is idempotent). */}
       <WipeDemoDataCard />
+      {/* Sprint 6.4e — export everything as JSON, or replace everything
+          from a saved JSON. Replace mode is destructive and gated behind
+          a typed "REPLACE" confirmation in the modal. */}
+      <DataPortabilityCard />
     </div>
   );
 }
