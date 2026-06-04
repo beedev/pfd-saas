@@ -570,22 +570,74 @@ function deriveSmallSavings(
   return out;
 }
 
+/**
+ * Sprint 5.12 — compute the ISO end-date for a rental stream given the
+ * property's retirement intent. Returns null when the stream runs
+ * open-ended (no end date stored on the event row).
+ *
+ *   • self_occupied — caller skips emission entirely (no event)
+ *   • sell          — rental terminates at the retirement year; the
+ *                     property is liquidated then so income stops too
+ *   • rental_only   — open-ended (null) — kept forever, generates
+ *                     income post-retirement
+ *
+ * Helper exists so the caller's loop stays focused on the per-row
+ * decision; expressed as a small pure function for trivial unit
+ * testability if/when we add tests for this lib.
+ */
+function rentalEndDate(
+  treatment: RealEstate['retirementTreatment'],
+  retirementDate: string | null,
+): string | null {
+  if (treatment === 'rental_only') return null;
+  if (treatment === 'sell') return retirementDate;
+  // self_occupied is filtered before this is called; defensive null
+  // makes the function total.
+  return null;
+}
+
 function deriveRentalIncome(
   properties: RealEstate[],
   today: string,
   userId: string,
+  retirement: RetirementAssumptions | null,
 ): NewCashflowEvent[] {
   const out: NewCashflowEvent[] = [];
+
+  // Sprint 5.12 — rental stream lifecycle is keyed off the property's
+  // retirement_treatment. We compute the retirement-year cutoff once
+  // for sell-mode properties (rental_only uses null = open-ended;
+  // self_occupied is skipped before we reach this point).
+  const retirementDate = retirement
+    ? addYears(today, Math.max(0, retirement.targetAge - retirement.currentAge))
+    : null;
+
   for (const p of properties) {
     if (p.status !== 'OWNED' && p.status !== 'RENTED') continue;
     if (!p.monthlyRent || p.monthlyRent <= 0) continue;
+    const treatment = p.retirementTreatment ?? 'sell';
+    // self_occupied — no rental event regardless of monthly_rent. The
+    // user has signalled "I live here," so any stale monthly_rent
+    // value should not surface as income on the cashflow timeline.
+    if (treatment === 'self_occupied') continue;
+
+    const endDate = rentalEndDate(treatment, retirementDate);
+    const lifecycleNote =
+      treatment === 'sell'
+        ? '(ends at retirement — property is sold then)'
+        : '(kept indefinitely — rental_only)';
+    const tenantNote = p.rentTenantName ? `Tenant: ${p.rentTenantName}` : '';
+    const combinedNote = tenantNote
+      ? `${tenantNote}. ${lifecycleNote}`
+      : lifecycleNote;
+
     out.push({
       userId,
       name: `Rental — ${p.propertyName}`,
       sourceKind: 'RENTAL' satisfies CashflowSourceKind,
       sourceId: p.id,
       startDate: p.rentStartDate || today,
-      endDate: null,
+      endDate,
       amountPaisa: p.monthlyRent,
       frequency: 'MONTHLY' satisfies CashflowFrequency,
       // TODO: a real_estate.rent_escalation_pct column would be the
@@ -594,7 +646,7 @@ function deriveRentalIncome(
       growthPctPerYear: 5,
       taxTreatment: 'TAXABLE' satisfies CashflowTaxTreatment,
       autoDerived: true,
-      notes: p.rentTenantName ? `Tenant: ${p.rentTenantName}` : null,
+      notes: combinedNote,
     });
   }
   return out;
@@ -799,7 +851,7 @@ export function deriveCashflowEvents(input: DerivationInput): NewCashflowEvent[]
     ...deriveNps(npsAccounts, retirement, today, userId, rates),
     ...deriveEpf(epfAccounts ?? [], retirement, today, userId, rates),
     ...deriveSmallSavings(smallSavings, retirement, today, userId, rates),
-    ...deriveRentalIncome(realEstate, today, userId),
+    ...deriveRentalIncome(realEstate, today, userId, retirement),
     ...deriveSalary(salaryIncome, retirement, today, userId),
     ...deriveSips(sips, mutualFunds, userId),
     ...deriveForexDeposits(forexDeposits ?? [], today, userId, fxRates ?? {}),
