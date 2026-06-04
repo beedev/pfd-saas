@@ -107,6 +107,8 @@ export const DEFAULT_RETURN_PCT_BY_CLASS: Record<string, number> = {
   CHIT_FUNDS: 6,
   REAL_ESTATE: 6,
   INSURANCE_POLICIES: 5,
+  // Sprint 5.10 — forex deposits.
+  FOREX: 5,
 };
 
 export function defaultReturnPct(
