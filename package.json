@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:9999": "next dev --turbopack -p 9999",
+    "prebuild": "node scripts/compute-schema-hash.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
