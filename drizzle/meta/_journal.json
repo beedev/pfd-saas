@@ -232,6 +232,13 @@
 			"when": 1780617604000,
 			"tag": "0032_retirement_tax_brackets",
 			"breakpoints": true
+		},
+		{
+			"idx": 33,
+			"version": "7",
+			"when": 1780617605000,
+			"tag": "0033_retirement_treatment",
+			"breakpoints": true
 		}
 	]
 }

@@ -1928,6 +1928,26 @@ export type NewSmallSavingsTransaction = typeof smallSavingsTransactions.$inferI
 // 7. Real Estate
 export type PropertyType = 'RESIDENTIAL' | 'COMMERCIAL' | 'LAND' | 'PLOT';
 export type PropertyStatus = 'OWNED' | 'MORTGAGED' | 'UNDER_CONSTRUCTION' | 'RENTED';
+/**
+ * Sprint 5.12 — retirement intent for a property, decoupled from `status`
+ * (which is the tenancy/legal state). Drives every retirement/cashflow
+ * surface:
+ *
+ *   • 'sell'           — liquidate at retirement; full appreciated value
+ *                        enters the corpus. Rental income (if any) STOPS
+ *                        at the retirement year.
+ *   • 'rental_only'    — keep forever; value EXCLUDED from corpus. Rental
+ *                        annuity continues post-retirement.
+ *   • 'self_occupied'  — keep forever; value EXCLUDED from corpus. No
+ *                        rental stream emitted regardless of monthly_rent.
+ *
+ * Independent of the existing `isSelfOccupied` tax flag — that field
+ * controls the sec 24(b) interest cap (₹2L vs uncapped). The
+ * `retirementTreatment` column models the user's long-term *strategic
+ * intent* (sell vs hold). Both can coexist and may legitimately
+ * disagree on a given property.
+ */
+export type RetirementTreatment = 'sell' | 'rental_only' | 'self_occupied';
 
 export const realEstate = pgTable('real_estate', {
   id: serial('id').primaryKey(),
@@ -1985,6 +2005,15 @@ export const realEstate = pgTable('real_estate', {
    *  Yeswanth template enforces the 968-sqft cap as the conservative
    *  default. NULL means not captured. */
   carpetAreaSqft: real('carpet_area_sqft'),
+  // ─── Sprint 5.12 — retirement_treatment ──────────────────────────
+  /** See `RetirementTreatment` type for semantics. Defaults to 'sell'
+   *  (legacy behaviour: properties enter the retirement corpus at
+   *  appreciated value, with rental income terminating at retirement).
+   *  Orthogonal to `isSelfOccupied` (tax flag) — both columns coexist. */
+  retirementTreatment: text('retirement_treatment')
+    .$type<RetirementTreatment>()
+    .notNull()
+    .default('sell'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
