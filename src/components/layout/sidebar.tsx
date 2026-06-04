@@ -157,6 +157,16 @@ const navigation: NavSection[] = [
     ],
   },
   {
+    // Sprint 6.2h — Reports hub. 10th sidebar section between
+    // Analytics and Settings. Single entry; the hub itself groups
+    // the 9 reports into three category cards (tax / wealth /
+    // planning) so the sidebar stays clean.
+    section: 'Reports',
+    items: [
+      { name: 'Reports', href: '/reports', icon: FileText },
+    ],
+  },
+  {
     section: 'Settings',
     items: [
       { name: 'Settings', href: '/settings', icon: Settings },
