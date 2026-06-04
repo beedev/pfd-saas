@@ -139,6 +139,8 @@ export async function GET() {
           amountPaisa: e.amountPaisa,
           frequency: e.frequency,
           goalId: e.goalId ?? null,
+          sourceKind: e.sourceKind ?? null,
+          autoDerived: e.autoDerived ?? false,
         })),
       );
 

@@ -435,11 +435,24 @@ export function weightedReturnForGoal(
  *   • aggregate MUTUAL_FUNDS inclusion → all active SIPs annualised
  *   • per-MF inclusion → that MF's SIP × 12
  *   • plus MONTHLY/YEARLY cashflow events earmarked to this goal
+ *
+ * IMPORTANT: auto-derived events that mirror an already-counted asset
+ * (e.g. SIP cashflow events derived from the `sips` table) are skipped
+ * to avoid double counting. Branch 1 above already sums those SIPs via
+ * `ctx.mfSipYearly` / `ctx.sipPerMfId`; the cashflow_events table just
+ * carries shadows of the same SIPs for cashflow visualisation. Manual
+ * (user-entered) events are not auto-derived and are counted normally.
  */
 export function yearlyContributionForGoal(
   ctx: CorpusContext,
   goalId: number,
-  recurringEvents: Array<{ amountPaisa: number; frequency: string; goalId: number | null }>,
+  recurringEvents: Array<{
+    amountPaisa: number;
+    frequency: string;
+    goalId: number | null;
+    sourceKind?: string | null;
+    autoDerived?: boolean;
+  }>,
 ): number {
   const incs = ctx.inclusions.filter((r) => r.goalId === goalId && r.included);
   let total = 0;
@@ -455,6 +468,9 @@ export function yearlyContributionForGoal(
   }
   for (const ev of recurringEvents) {
     if (ev.goalId !== goalId) continue;
+    // Skip auto-derived SIP shadows — the underlying SIPs are already
+    // counted above through MUTUAL_FUNDS inclusion. See doc-comment.
+    if (ev.autoDerived && ev.sourceKind === 'SIP') continue;
     if (ev.frequency === 'MONTHLY') total += ev.amountPaisa * 12;
     else if (ev.frequency === 'YEARLY') total += ev.amountPaisa;
   }

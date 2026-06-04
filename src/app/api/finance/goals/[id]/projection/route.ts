@@ -91,6 +91,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
         amountPaisa: e.amountPaisa,
         frequency: e.frequency,
         goalId: e.goalId ?? null,
+        sourceKind: e.sourceKind ?? null,
+        autoDerived: e.autoDerived ?? false,
       })),
     );
 
