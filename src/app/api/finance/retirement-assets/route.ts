@@ -263,17 +263,36 @@ export async function GET() {
     }));
 
     // ─── REAL_ESTATE ────────────────────────────────────────────────────
+    // Sprint 5.12 — retirement_treatment on the source row is now the
+    // canonical default for included / mode:
+    //
+    //   • 'sell'           → included=true, mode=SELL (enters corpus)
+    //   • 'rental_only'    → included=true, mode=RENTAL (income stream
+    //                        only; no liquidation, value stays out of
+    //                        the corpus column on /retirement)
+    //   • 'self_occupied'  → included=false (no corpus, no rental)
+    //
+    // The per-user retirement_asset_selection row still wins when it
+    // has an explicit value — that lets the user override the default
+    // from the /retirement asset-picker without changing the property's
+    // strategic intent on the real-estate detail page.
     const reItems: RetirementItem[] = props.map((p) => {
       const sel = findRow(selections, 'REAL_ESTATE', p.id);
       const monthlyRent = p.monthlyRent ?? 0;
+      const treatment = (p.retirementTreatment ?? 'sell') as
+        | 'sell'
+        | 'rental_only'
+        | 'self_occupied';
+      const defaultIncluded = treatment !== 'self_occupied';
+      const defaultMode: Mode = treatment === 'rental_only' ? 'RENTAL' : 'SELL';
       return {
         id: p.id,
         label: p.propertyName,
         sublabel: `${p.type} · ${p.city}`,
         valuePaisa: p.currentValuation || 0,
         annualIncomePaisa: monthlyRent * 12,
-        included: sel ? !!sel.included : true,
-        mode: ((sel?.mode as Mode | null) ?? (monthlyRent > 0 ? 'RENTAL' : 'SELL')) as Mode,
+        included: sel ? !!sel.included : defaultIncluded,
+        mode: ((sel?.mode as Mode | null) ?? defaultMode) as Mode,
         salePriceOverridePaisa: sel?.salePriceOverridePaisa ?? null,
         expectedFutureRentPaisa: sel?.expectedFutureRentPaisa ?? null,
       };

@@ -81,7 +81,7 @@ interface AssetClassBreakdown {
 interface ExcludedFromCorpus {
   realEstate: Array<{
     itemName: string;
-    treatment: 'rental_only';
+    treatment: 'rental_only' | 'self_occupied';
     todayPaisa: number;
     note: string;
   }>;
@@ -231,18 +231,23 @@ export async function GET(_request: NextRequest) {
       }
     }
 
-    /* ─── REAL ESTATE (sell-mode only, picker-selected) ───────────────
-     * Top tile math:
-     *   if (it.mode === 'RENTAL') { rental income; no corpus }
-     *   else {
-     *     base = salePriceOverridePaisa > 0 ? salePriceOverridePaisa
-     *                                       : compound(valuePaisa, r, yrs);
-     *     cCorpus += base;
-     *   }
-     * Saas has no retirement_treatment column, so retirement-assets.ts
-     * defaults: included=true; mode = RENTAL when monthlyRent > 0 else
-     * SELL. We restrict to mode=SELL + included=true for corpus
-     * contribution. Rental properties surface in excludedFromCorpus. */
+    /* ─── REAL ESTATE — split by retirement_treatment ─────────────────
+     *
+     * Sprint 5.12 — the per-row `retirement_treatment` column is now
+     * the canonical signal for whether a property contributes to the
+     * corpus. The `retirement_asset_selection` picker override still
+     * wins when present (lets the user temporarily flip a property's
+     * inclusion from the /retirement asset-picker without changing
+     * its strategic intent on the real-estate detail page).
+     *
+     * Treatment → default behaviour:
+     *   • 'sell'           → included=true, mode=SELL  → enters corpus
+     *   • 'rental_only'    → included=true, mode=RENTAL → income stream
+     *                        only; surfaced in excludedFromCorpus
+     *   • 'self_occupied'  → included=false (no corpus, no rental);
+     *                        also surfaced in excludedFromCorpus so the
+     *                        user can reconcile their net worth vs.
+     *                        corpus tile drop. */
     const sellProps: Array<{
       prop: typeof props[number];
       salePriceOverridePaisa: number | null;
@@ -250,9 +255,13 @@ export async function GET(_request: NextRequest) {
     const heldOutsideCorpus: ExcludedFromCorpus['realEstate'] = [];
     for (const p of props) {
       const sel = findSelection(selections, 'REAL_ESTATE', p.id);
-      const monthlyRent = p.monthlyRent ?? 0;
-      const defaultIncluded = true;
-      const defaultMode: 'SELL' | 'RENTAL' = monthlyRent > 0 ? 'RENTAL' : 'SELL';
+      const treatment = (p.retirementTreatment ?? 'sell') as
+        | 'sell'
+        | 'rental_only'
+        | 'self_occupied';
+      const defaultIncluded = treatment !== 'self_occupied';
+      const defaultMode: 'SELL' | 'RENTAL' =
+        treatment === 'rental_only' ? 'RENTAL' : 'SELL';
       const included = sel ? !!sel.included : defaultIncluded;
       const mode: 'SELL' | 'RENTAL' =
         ((sel?.mode as 'SELL' | 'RENTAL' | null) ?? defaultMode);
@@ -271,6 +280,15 @@ export async function GET(_request: NextRequest) {
           treatment: 'rental_only',
           todayPaisa: p.currentValuation,
           note: 'Rental income flows through cashflow separately',
+        });
+      } else if (treatment === 'self_occupied') {
+        // Self-occupied properties — kept forever, no income, no
+        // liquidation. Surface as a disclosure too.
+        heldOutsideCorpus.push({
+          itemName: p.propertyName,
+          treatment: 'self_occupied',
+          todayPaisa: p.currentValuation,
+          note: 'Self-occupied — no rental, no liquidation',
         });
       }
       // else: excluded entirely from the retirement story (user

@@ -40,11 +40,26 @@ interface AssetClassRow {
   components: Component[];
 }
 
+interface ExcludedRealEstateItem {
+  itemName: string;
+  treatment: 'rental_only' | 'self_occupied';
+  todayPaisa: number;
+  note: string;
+}
+
 interface BreakdownResp {
   totalCorpusAtRetirementPaisa: number;
   retirementYear: number;
   yearsToRetire: number;
   byAssetClass: AssetClassRow[];
+  /** Sprint 5.12 — properties the user has flagged as 'rental_only' or
+   *  'self_occupied' are intentionally excluded from the corpus
+   *  projection. Always emitted (empty array when all properties are
+   *  sell-mode); older deployments missing this field are tolerated
+   *  via the optional marker. */
+  excludedFromCorpus?: {
+    realEstate: ExcludedRealEstateItem[];
+  };
 }
 
 const formatINR = (paisa: number) =>
@@ -275,6 +290,43 @@ export function RetirementCorpusBreakdownCard() {
                 </tr>
               </tfoot>
             </table>
+            {/* Sprint 5.12 — properties flagged rental_only / self_occupied
+                are intentionally held outside the corpus. Surface them as a
+                subtle "here's what we excluded" disclosure so the user can
+                reconcile the corpus number against their net-worth view. */}
+            {data.excludedFromCorpus &&
+              data.excludedFromCorpus.realEstate.length > 0 && (
+                <div className="mt-4 rounded border border-[var(--dxp-border)]/60 bg-[var(--dxp-surface-alt)]/40 p-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">
+                    Held outside corpus
+                  </p>
+                  <table className="mt-2 w-full text-xs">
+                    <tbody>
+                      {data.excludedFromCorpus.realEstate.map((p, idx) => (
+                        <tr
+                          key={`excluded-${idx}`}
+                          className="border-b border-[var(--dxp-border)]/30 last:border-b-0"
+                        >
+                          <td className="px-2 py-1.5 italic text-[var(--dxp-text-muted)]">
+                            {p.itemName}{' '}
+                            <span className="not-italic">
+                              ({p.treatment === 'rental_only'
+                                ? 'rental_only'
+                                : 'self_occupied'})
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-mono text-[var(--dxp-text-muted)]">
+                            {formatINRShort(p.todayPaisa)}
+                          </td>
+                          <td className="px-2 py-1.5 italic text-[var(--dxp-text-muted)]">
+                            {p.note}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             <p className="mt-2 text-xs text-[var(--dxp-text-muted)]">
               This breakdown mirrors the &ldquo;Corpus selected → grows
               to&rdquo; KPI tile above — same item-level selection, same
