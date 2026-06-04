@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { formatCompact } from '@/lib/finance/amount';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import {
   TrendingUp,
   TrendingDown,
@@ -141,11 +143,17 @@ export default function AnalyticsPage() {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Budget Analytics</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Track your budget and spending patterns
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Budget Analytics</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Track your budget and spending patterns
+          </p>
+        </div>
+        {/* Sprint 6.2g — annual cashflow report (PDF/Excel/CSV) scoped
+            to the current FY. The 12-month grid is the print companion
+            to this dashboard. */}
+        <ScreenReportButton reportId="cashflow" fy={getCurrentFinancialYear()} />
       </div>
 
       {/* Summary Cards */}

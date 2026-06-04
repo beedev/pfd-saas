@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, StatsDisplay, Badge, Select } from '@dxp/ui';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
 
 /** ±2 years around current FY — same window as the /tax page so the
  *  two pages stay navigable in lockstep. */
@@ -127,10 +128,15 @@ export default function IncomePage() {
             Click any row to edit at the source.
           </p>
         </div>
-        <div className="w-40">
-          {/* FY selector — mirrors the /tax page pattern so users can
-              walk historical FYs without two different mental models. */}
-          <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+        <div className="flex items-center gap-2">
+          <div className="w-40">
+            {/* FY selector — mirrors the /tax page pattern so users can
+                walk historical FYs without two different mental models. */}
+            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+          </div>
+          {/* Sprint 6.2g — income summary report (PDF/Excel/CSV) for
+              the selected FY. */}
+          <ScreenReportButton reportId="income-summary" fy={fy} />
         </div>
       </header>
 

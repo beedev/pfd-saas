@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Button, Card, CardHeader, CardContent, Select, Input, Badge } from '@dxp/ui';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
 import {
   Plus,
   Loader2,
@@ -227,8 +228,14 @@ export default function TaxDashboardPage() {
             Recommendation, deductions, and filing pack — for FY {fy}
           </p>
         </div>
-        <div className="w-full sm:w-40">
-          <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+        <div className="flex items-center gap-2 sm:w-auto">
+          <div className="w-full sm:w-40">
+            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+          </div>
+          {/* Sprint 6.2g — Section 80 + Capital Gains reports per the
+              currently-selected FY. PDF/Excel/CSV for both. */}
+          <ScreenReportButton reportId="section80" fy={fy} label="Section 80" />
+          <ScreenReportButton reportId="capital-gains" fy={fy} label="Capital Gains" />
         </div>
       </div>
 

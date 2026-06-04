@@ -23,6 +23,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Button, Card, CardHeader, CardContent, Badge, Select } from '@dxp/ui';
 import { Plus, Loader2, Gift, Pencil, Trash2 } from 'lucide-react';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
@@ -225,6 +226,8 @@ export default function Section80GPage() {
           <div className="w-40">
             <Select options={generateFyOptions()} value={fy} onChange={setFy} />
           </div>
+          {/* Sprint 6.2g — 80G donation log report (PDF + Excel). */}
+          <ScreenReportButton reportId="form80g" fy={fy} />
           <Link href="/tax/new?section=80G">
             <Button variant="primary">
               <Plus className="mr-2 h-4 w-4" /> Add 80G donation

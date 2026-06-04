@@ -11,6 +11,7 @@ import {
   DataTable,
   type Column,
 } from '@dxp/ui';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
 import { Camera, Loader2, TrendingUp } from 'lucide-react';
 import {
   LineChart,
@@ -166,10 +167,14 @@ export default function NetWorthHistoryPage() {
             Time-series snapshots of your total net worth
           </p>
         </div>
-        <Button variant="primary" onClick={() => capture(false)} disabled={isCapturing}>
-          {isCapturing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
-          Capture snapshot
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Sprint 6.2g — net-worth report dropdown. PDF/Excel/CSV. */}
+          <ScreenReportButton reportId="networth" />
+          <Button variant="primary" onClick={() => capture(false)} disabled={isCapturing}>
+            {isCapturing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
+            Capture snapshot
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

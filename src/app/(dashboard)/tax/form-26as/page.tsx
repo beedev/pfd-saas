@@ -19,6 +19,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Button, Card, CardHeader, CardContent, Badge, Select, Input } from '@dxp/ui';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
 import {
   Loader2,
   Upload,
@@ -214,8 +215,12 @@ export default function Form26asPage() {
             Match the TDS credits you logged against what the IT department&apos;s 26AS PDF shows
           </p>
         </div>
-        <div className="w-40">
-          <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+        <div className="flex items-center gap-2">
+          <div className="w-40">
+            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
+          </div>
+          {/* Sprint 6.2g — 26AS reconciliation report (PDF + CSV). */}
+          <ScreenReportButton reportId="form26as-recon" fy={fy} />
         </div>
       </div>
 

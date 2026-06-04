@@ -51,6 +51,7 @@ import {
 
 import { CashflowTimeline } from '@/components/cashflow-timeline';
 import { RetirementCorpusBreakdownCard } from '@/components/retirement-corpus-breakdown-card';
+import { ScreenReportButton } from '@/components/reports/screen-report-button';
 import {
   applyRetirementTaxBrackets,
   DEFAULT_RETIREMENT_TAX_BRACKETS,
@@ -999,11 +1000,15 @@ export default function RetirementPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Retirement Projection</h1>
-        <p className="text-sm text-[var(--dxp-text-secondary)]">
-          Pick which assets fund retirement and how each contributes.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Retirement Projection</h1>
+          <p className="text-sm text-[var(--dxp-text-secondary)]">
+            Pick which assets fund retirement and how each contributes.
+          </p>
+        </div>
+        {/* Sprint 6.2g — retirement report dropdown. PDF + Excel. */}
+        <ScreenReportButton reportId="retirement" />
       </div>
 
       {/* Retirement assets section */}
