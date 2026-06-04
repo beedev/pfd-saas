@@ -1,60 +1,64 @@
 /**
  * GET /api/finance/retirement-corpus-breakdown
  *
- * Returns the per-asset-class + per-component projection of the user's
- * net worth to retirement age. Powers the expandable "Corpus selected
- * → Grows to" card on /retirement (Sprint 5.11b).
+ * Per-asset-class breakdown of the user's retirement corpus, matched
+ * line-by-line to the "Corpus selected → grows to" KPI tile on
+ * /retirement so the two surfaces always reconcile.
  *
- * Each component row exposes the two-leg projectFutureValue() result
- * (balance leg + contribution leg) so the UI can drill into "₹X comes
- * from your current balance compounding, ₹Y comes from your ongoing
- * SIP/contribution stream".
+ * Source of truth: the tile is computed client-side in
+ * `src/app/(dashboard)/retirement/page.tsx` from the asset-picker rows
+ * returned by `/api/finance/retirement-assets`. The asset-picker has
+ * `retirement_asset_selection.included=true|false` per item; the
+ * projection iterates ONLY the corpus-contributing classes:
  *
- * Asset classes covered:
- *   • STOCKS                 — `holdings`
- *   • MF_EQUITY/DEBT/HYBRID  — `mutual_funds` split by category
- *   • NPS                    — `nps_accounts` (balance + monthly contribution)
- *   • EPF                    — `provident_fund` / `epf_accounts`
- *   • SMALL_SAVINGS          — `small_savings_accounts`
- *   • REAL_ESTATE            — `real_estate` (appreciation @ class rate)
- *   • FOREX                  — `forex_deposits` (live INR value × class rate)
- *   • GOLD                   — `gold_holdings`
- *   • INSURANCE              — `insurance_policies` cash value
- *   • FD                     — `fixed_deposits` principal
+ *   • NPS               → lumpsum % of (current balance compounded at
+ *                         `retirement_assumptions.expected_return_pct`)
+ *   • PF                → full balance compounded at 8.25% (hardcoded)
+ *   • REAL_ESTATE       → only mode=SELL + included; salePrice override
+ *                         wins, else compound at expected rate
+ *   • INSURANCE_POLICIES → only pre-retirement maturing endowment/whole-
+ *                         life/ULIP/money-back policies with
+ *                         annuityAmount=0; payout = maturityBenefit ||
+ *                         sumAssured; compounded for the post-maturity
+ *                         years using expected_return_pct
  *
- * Growth rates per class come from `getGrowthRates(userId)` — the same
- * helper the retirement-assets endpoint uses, so the two surfaces
- * stay in lockstep.
+ * Classes the top tile does NOT contribute corpus from (STOCKS, MFs,
+ * SIPs, SMALL_SAVINGS, GOLD, FOREX, FD, ANNUITY_POLICIES, post-
+ * retirement INSURANCE_POLICIES) are intentionally excluded from this
+ * endpoint as well — anything else would re-introduce the mismatch
+ * between the tile and this card.
  *
- * Math is intentionally simple: PV growing at the class rate over
- * (retirementYear − currentYear) years. Where the schema carries a
- * recurring contribution (NPS, EPF, small savings), we add the
- * contribution-leg using projectFutureValue's annuity arm.
+ * Per-item selection defaults (read once from retirement_asset_selection;
+ * fall back to the same defaults retirement-assets.ts uses):
  *
- * Auth-gated, user-scoped. Pure read.
+ *   • NPS / PF                  → default included=true
+ *   • REAL_ESTATE               → default included=true; default mode is
+ *                                 RENTAL when monthlyRent > 0, else SELL
+ *                                 (saas has no retirement_treatment column)
+ *   • INSURANCE_POLICIES        → default included=true
+ *
+ * Auth-gated, user-scoped.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import {
   db,
-  holdings,
-  mutualFunds,
+  insurancePolicies,
   npsAccounts,
   providentFund,
   realEstate,
-  smallSavingsAccounts,
-  insurancePolicies,
-  forexDeposits,
-  goldHoldings,
-  fixedDeposits,
+  retirementAssetSelection,
   retirementAssumptions,
+  type RetirementAssetSelection,
 } from '@/db';
 import { auth } from '@/auth';
-import { projectFutureValue } from '@/lib/finance/asset-projection';
-import { getGrowthRates, getMfRate } from '@/lib/finance/asset-growth-rates';
 
-const CASH_VALUE_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP'];
+/** Same set the asset-picker exposes for corpus contribution. */
+const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
+
+/** PF compound rate — matches the hardcoded `pfRate=0.0825` the top tile uses. */
+const PF_RATE_PCT = 8.25;
 
 interface Component {
   itemName: string;
@@ -74,26 +78,42 @@ interface AssetClassBreakdown {
   components: Component[];
 }
 
-/** Helper to project a single PV/PMT pair at a given annual rate for N years. */
-function project(
-  pvPaisa: number,
-  monthlyContribPaisa: number,
-  ratePct: number,
-  years: number,
-) {
-  const result = projectFutureValue({
-    currentBalancePaisa: pvPaisa,
-    contributionPerPeriodPaisa: monthlyContribPaisa,
-    periodsPerYear: monthlyContribPaisa > 0 ? 12 : 1,
-    annualRatePct: ratePct,
-    yearsToProject: years,
-    contributionTiming: 'END',
-  });
-  return {
-    balanceComponentPaisa: result.balanceComponentPaisa,
-    contributionComponentPaisa: result.contributionComponentPaisa,
-    totalPaisa: result.totalPaisa,
-  };
+interface ExcludedFromCorpus {
+  realEstate: Array<{
+    itemName: string;
+    treatment: 'rental_only';
+    todayPaisa: number;
+    note: string;
+  }>;
+}
+
+function findSelection(
+  rows: RetirementAssetSelection[],
+  assetClass: string,
+  sourceId: number,
+): RetirementAssetSelection | undefined {
+  return rows.find((r) => r.assetClass === assetClass && r.sourceId === sourceId);
+}
+
+/** Compound a single principal at an annual rate for N years (no contribution leg).
+ *  Mirrors the top tile's `Math.pow(1+r, yrs)` exactly — float arithmetic,
+ *  no per-item rounding, so the final sum agrees with the browser-side
+ *  reduction byte-for-byte. */
+function compound(pvPaisa: number, ratePct: number, years: number): number {
+  if (years <= 0) return pvPaisa;
+  return pvPaisa * Math.pow(1 + ratePct / 100, years);
+}
+
+/** Calendar-year difference between two ISO dates, rounded down. Mirrors
+ *  the helper of the same name in /retirement/page.tsx. */
+function yearsBetween(from: string, to: string): number {
+  const a = new Date(from);
+  const b = new Date(to);
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+  let y = b.getUTCFullYear() - a.getUTCFullYear();
+  const moDiff = b.getUTCMonth() - a.getUTCMonth();
+  if (moDiff < 0 || (moDiff === 0 && b.getUTCDate() < a.getUTCDate())) y -= 1;
+  return Math.max(0, y);
 }
 
 export async function GET(_request: NextRequest) {
@@ -104,220 +124,66 @@ export async function GET(_request: NextRequest) {
 
   try {
     const userId = session.user.id;
-    const [
-      stocks,
-      mfs,
-      nps,
-      pf,
-      props,
-      smallSavings,
-      policies,
-      forex,
-      gold,
-      fds,
-      assRows,
-      rates,
-    ] = await Promise.all([
-      db.select().from(holdings).where(eq(holdings.userId, userId)),
-      db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
+    const [nps, pf, props, policies, selections, assRows] = await Promise.all([
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
       db.select().from(providentFund).where(eq(providentFund.userId, userId)),
       db.select().from(realEstate).where(eq(realEstate.userId, userId)),
+      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
       db
         .select()
-        .from(smallSavingsAccounts)
-        .where(eq(smallSavingsAccounts.userId, userId)),
-      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
-      db.select().from(forexDeposits).where(eq(forexDeposits.userId, userId)),
-      db.select().from(goldHoldings).where(eq(goldHoldings.userId, userId)),
-      db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, userId)),
+        .from(retirementAssetSelection)
+        .where(eq(retirementAssetSelection.userId, userId)),
       db
         .select()
         .from(retirementAssumptions)
         .where(eq(retirementAssumptions.userId, userId))
         .limit(1),
-      getGrowthRates(userId),
     ]);
 
     const ass = assRows[0];
     const currentAge = ass?.currentAge ?? 30;
     const targetAge = ass?.targetAge ?? 60;
+    const expectedReturnPct = ass?.expectedReturnPct ?? 10;
     const yearsToRetire = Math.max(0, targetAge - currentAge);
     const retirementYear = new Date().getFullYear() + yearsToRetire;
+    const todayISO = new Date().toISOString().slice(0, 10);
 
     const breakdowns: AssetClassBreakdown[] = [];
 
-    // ── STOCKS ──────────────────────────────────────────────────────
-    if (stocks.length > 0) {
-      const ratePct = rates.STOCKS;
-      const components: Component[] = stocks.map((h) => {
-        const r = project(h.currentValue, 0, ratePct, yearsToRetire);
-        return {
-          itemName: h.symbol,
-          todayPaisa: h.currentValue,
-          atRetirementPaisa: r.totalPaisa,
-          growthRatePct: ratePct,
-          balanceComponentPaisa: r.balanceComponentPaisa,
-          contributionComponentPaisa: 0,
-          monthlyContributionPaisa: 0,
-        };
-      });
-      const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-      const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
-      breakdowns.push({
-        assetClass: 'STOCKS',
-        todayPaisa: today,
-        atRetirementPaisa: future,
-        growthMultiple: today > 0 ? future / today : 0,
-        components,
-      });
-    }
-
-    // ── MUTUAL FUNDS by category ────────────────────────────────────
-    if (mfs.length > 0) {
-      const byCategory = new Map<
-        'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN',
-        Component[]
-      >();
-      for (const m of mfs) {
-        const cat = (m.category ?? 'UNKNOWN') as
-          | 'EQUITY'
-          | 'DEBT'
-          | 'HYBRID'
-          | 'UNKNOWN';
-        const ratePct = getMfRate(cat, rates);
-        const r = project(m.currentValue ?? 0, 0, ratePct, yearsToRetire);
-        const list = byCategory.get(cat) ?? [];
-        list.push({
-          itemName: m.schemeName,
-          todayPaisa: m.currentValue ?? 0,
-          atRetirementPaisa: r.totalPaisa,
-          growthRatePct: ratePct,
-          balanceComponentPaisa: r.balanceComponentPaisa,
+    /* ─── NPS ─────────────────────────────────────────────────────────
+     * Top tile math (page.tsx):
+     *   const lumpPct = (it.npsLumpsumPct ?? 60) / 100;
+     *   const grown   = compound(it.valuePaisa, expectedReturn, yrs);
+     *   cCorpus      += grown * lumpPct;
+     * Only the lumpsum portion contributes to corpus; the annuity
+     * portion is an income stream, not corpus. */
+    {
+      const components: Component[] = [];
+      for (const a of nps) {
+        const sel = findSelection(selections, 'NPS', a.id);
+        const included = sel ? !!sel.included : true;
+        if (!included) continue;
+        const lumpPct = (sel?.npsLumpsumPct ?? 60) / 100;
+        const grown = compound(a.totalValue, expectedReturnPct, yearsToRetire);
+        // Keep unrounded floats so the final sum matches the browser's
+        // float reduction byte-for-byte.
+        const corpusToday = a.totalValue * lumpPct;
+        const corpusAtRetirement = grown * lumpPct;
+        components.push({
+          itemName: `NPS ${a.tier === 'TIER1' ? 'Tier I' : 'Tier II'} · ${a.accountNumber ?? a.pan ?? '—'} (${Math.round(lumpPct * 100)}% lumpsum)`,
+          todayPaisa: corpusToday,
+          atRetirementPaisa: corpusAtRetirement,
+          growthRatePct: expectedReturnPct,
+          balanceComponentPaisa: corpusAtRetirement,
           contributionComponentPaisa: 0,
           monthlyContributionPaisa: 0,
         });
-        byCategory.set(cat, list);
       }
-      for (const [cat, comps] of byCategory.entries()) {
-        if (comps.length === 0) continue;
-        const today = comps.reduce((s, c) => s + c.todayPaisa, 0);
-        const future = comps.reduce((s, c) => s + c.atRetirementPaisa, 0);
-        const assetClass =
-          cat === 'EQUITY'
-            ? 'MF_EQUITY'
-            : cat === 'DEBT'
-              ? 'MF_DEBT'
-              : cat === 'HYBRID'
-                ? 'MF_HYBRID'
-                : 'MUTUAL_FUNDS';
-        breakdowns.push({
-          assetClass,
-          todayPaisa: today,
-          atRetirementPaisa: future,
-          growthMultiple: today > 0 ? future / today : 0,
-          components: comps,
-        });
-      }
-    }
-
-    // ── NPS ──────────────────────────────────────────────────────────
-    if (nps.length > 0) {
-      const ratePct = rates.NPS;
-      const components: Component[] = nps.map((a) => {
-        const r = project(
-          a.totalValue,
-          a.monthlyContributionPaisa ?? 0,
-          ratePct,
-          yearsToRetire,
-        );
-        return {
-          itemName: `NPS ${a.tier === 'TIER1' ? 'Tier I' : 'Tier II'} · ${a.accountNumber ?? a.pan ?? '—'}`,
-          todayPaisa: a.totalValue,
-          atRetirementPaisa: r.totalPaisa,
-          growthRatePct: ratePct,
-          balanceComponentPaisa: r.balanceComponentPaisa,
-          contributionComponentPaisa: r.contributionComponentPaisa,
-          monthlyContributionPaisa: a.monthlyContributionPaisa ?? 0,
-        };
-      });
-      const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-      const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
-      breakdowns.push({
-        assetClass: 'NPS',
-        todayPaisa: today,
-        atRetirementPaisa: future,
-        growthMultiple: today > 0 ? future / today : 0,
-        components,
-      });
-    }
-
-    // ── EPF (provident_fund) ────────────────────────────────────────
-    if (pf.length > 0) {
-      const ratePct = rates.PF;
-      const components: Component[] = pf.map((a) => {
-        const r = project(
-          a.totalBalance,
-          a.monthlyContributionPaisa ?? 0,
-          ratePct,
-          yearsToRetire,
-        );
-        return {
-          itemName: `${a.accountType} · ${a.accountHolder}`,
-          todayPaisa: a.totalBalance,
-          atRetirementPaisa: r.totalPaisa,
-          growthRatePct: ratePct,
-          balanceComponentPaisa: r.balanceComponentPaisa,
-          contributionComponentPaisa: r.contributionComponentPaisa,
-          monthlyContributionPaisa: a.monthlyContributionPaisa ?? 0,
-        };
-      });
-      const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-      const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
-      breakdowns.push({
-        assetClass: 'EPF',
-        todayPaisa: today,
-        atRetirementPaisa: future,
-        growthMultiple: today > 0 ? future / today : 0,
-        components,
-      });
-    }
-
-    // ── SMALL SAVINGS ──────────────────────────────────────────────
-    if (smallSavings.length > 0) {
-      const ratePct = rates.SMALL_SAVINGS;
-      const components: Component[] = smallSavings
-        .filter((a) => a.status === 'ACTIVE' || a.status === 'EXTENDED')
-        .map((a) => {
-          // Periodic contribution + frequency. If frequency is YEARLY,
-          // approximate by /12 to fit the monthly-period model — the
-          // total FV is mathematically the same to within rounding.
-          const contribFreq = a.contributionFrequency ?? 'MONTHLY';
-          const monthlyContrib =
-            contribFreq === 'YEARLY'
-              ? Math.round((a.periodicContributionPaisa ?? 0) / 12)
-              : a.periodicContributionPaisa ?? 0;
-          const r = project(
-            a.currentBalancePaisa,
-            monthlyContrib,
-            ratePct,
-            yearsToRetire,
-          );
-          return {
-            itemName: `${a.schemeType} · ${a.holderName}`,
-            todayPaisa: a.currentBalancePaisa,
-            atRetirementPaisa: r.totalPaisa,
-            growthRatePct: ratePct,
-            balanceComponentPaisa: r.balanceComponentPaisa,
-            contributionComponentPaisa: r.contributionComponentPaisa,
-            monthlyContributionPaisa: monthlyContrib,
-          };
-        });
-      const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-      const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
       if (components.length > 0) {
+        const today = components.reduce((s, c) => s + c.todayPaisa, 0);
+        const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
         breakdowns.push({
-          assetClass: 'SMALL_SAVINGS',
+          assetClass: 'NPS',
           todayPaisa: today,
           atRetirementPaisa: future,
           growthMultiple: today > 0 ? future / today : 0,
@@ -326,17 +192,108 @@ export async function GET(_request: NextRequest) {
       }
     }
 
-    // ── REAL ESTATE (sell-mode appreciation, no rental income leg) ──
-    if (props.length > 0) {
-      const ratePct = rates.REAL_ESTATE;
-      const components: Component[] = props.map((p) => {
-        const r = project(p.currentValuation, 0, ratePct, yearsToRetire);
-        return {
+    /* ─── PF (EPF) ────────────────────────────────────────────────────
+     * Top tile math:
+     *   cCorpus += compound(it.valuePaisa, pfRate, yrs);  // pfRate = 0.0825 hardcoded
+     * Full balance, hardcoded 8.25%. No contribution leg (top tile
+     * doesn't fold in monthlyContributionPaisa). */
+    {
+      const components: Component[] = [];
+      for (const a of pf) {
+        const sel = findSelection(selections, 'PF', a.id);
+        const included = sel ? !!sel.included : true;
+        if (!included) continue;
+        const corpusAtRetirement = compound(
+          a.totalBalance,
+          PF_RATE_PCT,
+          yearsToRetire,
+        );
+        components.push({
+          itemName: `${a.accountType} · ${a.accountHolder}`,
+          todayPaisa: a.totalBalance,
+          atRetirementPaisa: corpusAtRetirement,
+          growthRatePct: PF_RATE_PCT,
+          balanceComponentPaisa: corpusAtRetirement,
+          contributionComponentPaisa: 0,
+          monthlyContributionPaisa: 0,
+        });
+      }
+      if (components.length > 0) {
+        const today = components.reduce((s, c) => s + c.todayPaisa, 0);
+        const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
+        breakdowns.push({
+          assetClass: 'EPF',
+          todayPaisa: today,
+          atRetirementPaisa: future,
+          growthMultiple: today > 0 ? future / today : 0,
+          components,
+        });
+      }
+    }
+
+    /* ─── REAL ESTATE (sell-mode only, picker-selected) ───────────────
+     * Top tile math:
+     *   if (it.mode === 'RENTAL') { rental income; no corpus }
+     *   else {
+     *     base = salePriceOverridePaisa > 0 ? salePriceOverridePaisa
+     *                                       : compound(valuePaisa, r, yrs);
+     *     cCorpus += base;
+     *   }
+     * Saas has no retirement_treatment column, so retirement-assets.ts
+     * defaults: included=true; mode = RENTAL when monthlyRent > 0 else
+     * SELL. We restrict to mode=SELL + included=true for corpus
+     * contribution. Rental properties surface in excludedFromCorpus. */
+    const sellProps: Array<{
+      prop: typeof props[number];
+      salePriceOverridePaisa: number | null;
+    }> = [];
+    const heldOutsideCorpus: ExcludedFromCorpus['realEstate'] = [];
+    for (const p of props) {
+      const sel = findSelection(selections, 'REAL_ESTATE', p.id);
+      const monthlyRent = p.monthlyRent ?? 0;
+      const defaultIncluded = true;
+      const defaultMode: 'SELL' | 'RENTAL' = monthlyRent > 0 ? 'RENTAL' : 'SELL';
+      const included = sel ? !!sel.included : defaultIncluded;
+      const mode: 'SELL' | 'RENTAL' =
+        ((sel?.mode as 'SELL' | 'RENTAL' | null) ?? defaultMode);
+
+      if (included && mode === 'SELL') {
+        sellProps.push({
+          prop: p,
+          salePriceOverridePaisa: sel?.salePriceOverridePaisa ?? null,
+        });
+      } else if (included && mode === 'RENTAL') {
+        // Rental properties are intentionally held outside the
+        // corpus (income stream, not liquidation). Surface as a
+        // disclosure so the corpus drop vs. net worth is explainable.
+        heldOutsideCorpus.push({
           itemName: p.propertyName,
+          treatment: 'rental_only',
           todayPaisa: p.currentValuation,
-          atRetirementPaisa: r.totalPaisa,
-          growthRatePct: ratePct,
-          balanceComponentPaisa: r.balanceComponentPaisa,
+          note: 'Rental income flows through cashflow separately',
+        });
+      }
+      // else: excluded entirely from the retirement story (user
+      // toggled off in the picker). Not surfaced here — belongs on
+      // whichever other goal the user earmarked it for.
+    }
+
+    if (sellProps.length > 0) {
+      const components: Component[] = sellProps.map(({ prop: p, salePriceOverridePaisa }) => {
+        const corpusAtRetirement =
+          salePriceOverridePaisa && salePriceOverridePaisa > 0
+            ? salePriceOverridePaisa
+            : compound(p.currentValuation, expectedReturnPct, yearsToRetire);
+        return {
+          itemName:
+            salePriceOverridePaisa && salePriceOverridePaisa > 0
+              ? `${p.propertyName} (sale price override)`
+              : p.propertyName,
+          todayPaisa: p.currentValuation,
+          atRetirementPaisa: corpusAtRetirement,
+          growthRatePct:
+            salePriceOverridePaisa && salePriceOverridePaisa > 0 ? 0 : expectedReturnPct,
+          balanceComponentPaisa: corpusAtRetirement,
           contributionComponentPaisa: 0,
           monthlyContributionPaisa: 0,
         };
@@ -352,100 +309,55 @@ export async function GET(_request: NextRequest) {
       });
     }
 
-    // ── FOREX (live INR equivalent × class rate over years) ─────────
-    if (forex.length > 0) {
-      const ratePct = rates.FOREX;
-      const activeForex = forex.filter((f) => f.status === 'ACTIVE');
-      // The forex table stores amount_in_currency (NOT paisa). We use
-      // a flat USD/INR estimate of ₹83 for projection-only purposes;
-      // accurate live valuation belongs to the live FX endpoint. Same
-      // approximation the home dashboard uses on stale-rate days.
-      const SPOT_INR_PER_USD = 83;
-      const components: Component[] = activeForex.map((f) => {
-        // amountInCurrency is numeric(18,4) returned as string by the
-        // postgres driver — parseFloat at the boundary.
-        const amt = typeof f.amountInCurrency === 'string'
-          ? parseFloat(f.amountInCurrency)
-          : (f.amountInCurrency as number);
-        const todayPaisa = Math.round(amt * SPOT_INR_PER_USD * 100);
-        const r = project(todayPaisa, 0, ratePct, yearsToRetire);
-        return {
-          itemName: `${f.currencyCode} · ${f.bankName}`,
-          todayPaisa,
-          atRetirementPaisa: r.totalPaisa,
-          growthRatePct: ratePct,
-          balanceComponentPaisa: r.balanceComponentPaisa,
+    /* ─── INSURANCE_POLICIES (pre-retirement maturing only) ──────────
+     * Top tile math:
+     *   - Only WHOLE_LIFE/ENDOWMENT/ULIP/MONEY_BACK with annuityAmount=0
+     *   - Payout = maturityBenefit || sumAssured (the asset-picker's
+     *     fallback resolution)
+     *   - If maturity is BEFORE retirement: compound the payout for
+     *     `yrsAfterMaturity = max(0, yrs - matYrs)` at expected return,
+     *     contribute to corpus.
+     *   - If maturity is AFTER retirement OR undated: enters the ladder
+     *     (income stream), NOT corpus → excluded from this breakdown.
+     */
+    {
+      const components: Component[] = [];
+      for (const p of policies) {
+        if (p.status !== 'ACTIVE') continue;
+        if (!MATURING_POLICY_TYPES.includes(p.policyType)) continue;
+        if ((p.annuityAmount ?? 0) !== 0) continue;
+        const payoutPaisa =
+          p.maturityBenefit && p.maturityBenefit > 0
+            ? p.maturityBenefit
+            : p.sumAssured || 0;
+        if (payoutPaisa <= 0) continue;
+
+        const sel = findSelection(selections, 'INSURANCE_POLICIES', p.id);
+        const included = sel ? !!sel.included : true;
+        if (!included) continue;
+
+        // Ladder model: undated or post-retirement maturities are
+        // income (ladder), not corpus. Skip them here.
+        if (!p.maturityDate) continue;
+        const matYrs = yearsBetween(todayISO, p.maturityDate);
+        if (matYrs >= yearsToRetire) continue; // post-retirement → ladder, not corpus
+
+        const yrsAfterMaturity = Math.max(0, yearsToRetire - matYrs);
+        const corpusAtRetirement = compound(
+          payoutPaisa,
+          expectedReturnPct,
+          yrsAfterMaturity,
+        );
+        components.push({
+          itemName: `${p.insurer} ${p.policyType.replace('_', ' ').toLowerCase()} · ${p.policyNumber}`,
+          todayPaisa: payoutPaisa,
+          atRetirementPaisa: corpusAtRetirement,
+          growthRatePct: expectedReturnPct,
+          balanceComponentPaisa: corpusAtRetirement,
           contributionComponentPaisa: 0,
           monthlyContributionPaisa: 0,
-        };
-      });
-      if (components.length > 0) {
-        const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-        const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
-        breakdowns.push({
-          assetClass: 'FOREX',
-          todayPaisa: today,
-          atRetirementPaisa: future,
-          growthMultiple: today > 0 ? future / today : 0,
-          components,
         });
       }
-    }
-
-    // ── GOLD ────────────────────────────────────────────────────────
-    if (gold.length > 0) {
-      const ratePct = rates.GOLD;
-      const components: Component[] = gold
-        .map((g) => {
-          const today = g.currentValue ?? 0;
-          if (today <= 0) return null;
-          const r = project(today, 0, ratePct, yearsToRetire);
-          return {
-            itemName: `${g.type} · ${g.grams ?? 0}g`,
-            todayPaisa: today,
-            atRetirementPaisa: r.totalPaisa,
-            growthRatePct: ratePct,
-            balanceComponentPaisa: r.balanceComponentPaisa,
-            contributionComponentPaisa: 0,
-            monthlyContributionPaisa: 0,
-          } as Component;
-        })
-        .filter((c): c is Component => c !== null);
-      if (components.length > 0) {
-        const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-        const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
-        breakdowns.push({
-          assetClass: 'GOLD',
-          todayPaisa: today,
-          atRetirementPaisa: future,
-          growthMultiple: today > 0 ? future / today : 0,
-          components,
-        });
-      }
-    }
-
-    // ── INSURANCE (cash-value policies only) ───────────────────────
-    if (policies.length > 0) {
-      const ratePct = rates.INSURANCE_POLICIES;
-      const components: Component[] = policies
-        .filter(
-          (p) =>
-            CASH_VALUE_POLICY_TYPES.includes(p.policyType) &&
-            (p.investmentValue ?? 0) > 0,
-        )
-        .map((p) => {
-          const today = p.investmentValue ?? 0;
-          const r = project(today, 0, ratePct, yearsToRetire);
-          return {
-            itemName: `${p.insurer} · ${p.policyNumber}`,
-            todayPaisa: today,
-            atRetirementPaisa: r.totalPaisa,
-            growthRatePct: ratePct,
-            balanceComponentPaisa: r.balanceComponentPaisa,
-            contributionComponentPaisa: 0,
-            monthlyContributionPaisa: 0,
-          };
-        });
       if (components.length > 0) {
         const today = components.reduce((s, c) => s + c.todayPaisa, 0);
         const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
@@ -459,41 +371,14 @@ export async function GET(_request: NextRequest) {
       }
     }
 
-    // ── FIXED DEPOSITS ─────────────────────────────────────────────
-    if (fds.length > 0) {
-      const ratePct = rates.FIXED_DEPOSITS;
-      const components: Component[] = fds
-        .filter((f) => f.status === 'ACTIVE')
-        .map((f) => {
-          const today = f.principalPaisa;
-          const r = project(today, 0, ratePct, yearsToRetire);
-          return {
-            itemName: `${f.bankName} · ${f.accountNumber ?? '—'}`,
-            todayPaisa: today,
-            atRetirementPaisa: r.totalPaisa,
-            growthRatePct: ratePct,
-            balanceComponentPaisa: r.balanceComponentPaisa,
-            contributionComponentPaisa: 0,
-            monthlyContributionPaisa: 0,
-          };
-        });
-      if (components.length > 0) {
-        const today = components.reduce((s, c) => s + c.todayPaisa, 0);
-        const future = components.reduce((s, c) => s + c.atRetirementPaisa, 0);
-        breakdowns.push({
-          assetClass: 'FD',
-          todayPaisa: today,
-          atRetirementPaisa: future,
-          growthMultiple: today > 0 ? future / today : 0,
-          components,
-        });
-      }
-    }
-
     const totalCorpusAtRetirementPaisa = breakdowns.reduce(
       (s, b) => s + b.atRetirementPaisa,
       0,
     );
+
+    const excludedFromCorpus: ExcludedFromCorpus = {
+      realEstate: heldOutsideCorpus,
+    };
 
     return NextResponse.json({
       totalCorpusAtRetirementPaisa,
@@ -502,6 +387,7 @@ export async function GET(_request: NextRequest) {
       byAssetClass: breakdowns.sort(
         (a, b) => b.atRetirementPaisa - a.atRetirementPaisa,
       ),
+      excludedFromCorpus,
     });
   } catch (err) {
     console.error('[finance/retirement-corpus-breakdown GET]', err);

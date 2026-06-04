@@ -276,19 +276,13 @@ export function RetirementCorpusBreakdownCard() {
               </tfoot>
             </table>
             <p className="mt-2 text-xs text-[var(--dxp-text-muted)]">
-              Each row uses its class&apos;s growth-rate assumption from
-              Settings. Items with a monthly contribution (NPS, EPF, PPF,
-              SSY) split into a Balance leg (current balance compounding)
-              and a Contribution leg (recurring contribution annuity).
-              Click a class row to see per-asset detail.
-            </p>
-            <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">
-              Note: this breakdown shows your FULL asset base projected
-              to retirement. The &ldquo;Corpus selected → grows to&rdquo;
-              tile above uses only items you&apos;ve ticked in for
-              retirement on the asset-picker; the two numbers can differ
-              when you&apos;ve earmarked specific MFs/properties for
-              other goals.
+              This breakdown mirrors the &ldquo;Corpus selected → grows
+              to&rdquo; KPI tile above — same item-level selection, same
+              math. Only NPS (lumpsum portion), EPF, sell-mode real
+              estate, and pre-retirement maturing insurance policies
+              contribute to corpus. Annuity income, rental income, and
+              post-retirement policy maturities are tracked as cashflow,
+              not corpus. Click a class row to see per-asset detail.
             </p>
           </div>
         )}
