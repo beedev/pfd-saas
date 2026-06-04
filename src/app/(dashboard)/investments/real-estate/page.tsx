@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay } from '@dxp/ui';
 import { Plus, Loader2, Home, Trash2 } from 'lucide-react';
 
+type RetirementTreatment = 'sell' | 'rental_only' | 'self_occupied';
+
 interface Property {
   id: number;
   propertyName: string;
@@ -25,7 +27,23 @@ interface Property {
   mortgageAmount: number | null;
   monthlyRent: number | null;
   notes: string | null;
+  retirementTreatment: RetirementTreatment | null;
 }
+
+/**
+ * Sprint 5.12 — compact label + Badge variant for the retirement-intent
+ * indicator on the list page. Subtle on purpose — glance-level signal,
+ * not a shout. Keyed exhaustively over RetirementTreatment so adding a
+ * new value to the type forces a re-think here.
+ */
+const TREATMENT_BADGE: Record<
+  RetirementTreatment,
+  { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' | 'brand' }
+> = {
+  sell: { label: 'For sale at retirement', variant: 'default' },
+  rental_only: { label: 'Rental — kept', variant: 'success' },
+  self_occupied: { label: 'Self-occupied', variant: 'default' },
+};
 
 const formatINR = (paisa: number) =>
   new Intl.NumberFormat('en-IN', {
@@ -158,6 +176,13 @@ export default function RealEstatePage() {
                     <div className="flex flex-col items-end gap-1">
                       <Badge variant="info">{p.type}</Badge>
                       {p.status && p.status !== 'OWNED' && <Badge variant="warning">{p.status}</Badge>}
+                      {(() => {
+                        // Sprint 5.12 — retirement intent badge. Defaults to
+                        // 'sell' when null (matches the DB column default).
+                        const t = (p.retirementTreatment ?? 'sell') as RetirementTreatment;
+                        const b = TREATMENT_BADGE[t];
+                        return <Badge variant={b.variant}>{b.label}</Badge>;
+                      })()}
                     </div>
                   </div>
                 </CardHeader>
