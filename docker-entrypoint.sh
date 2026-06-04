@@ -122,6 +122,39 @@ fi
 # and by the runtime app (next-auth adapter, query layer).
 export DATABASE_URL="postgres://${PG_USER}:${PG_PASS}@127.0.0.1:5432/${PG_DB}"
 
+# ─── Maintenance sentinel (Sprint 6.3c) ──────────────────────────────
+# scripts/pfd-restore.sh creates /data/.maintenance to signal that
+# Postgres should be up but the application (and migrations) must be
+# held back so an external pg_restore can swap the database safely.
+#
+# Behavior when sentinel is present at this point in startup:
+#   • Skip drizzle migrations (the restored dump already carries schema)
+#   • Loop until the sentinel is removed (max 30 min — safety cap)
+#   • Then fall through to migrations + Next.js launch
+#
+# The restore script's flow:
+#   touch /data/.maintenance → docker restart → script runs pg_restore
+#   via docker exec → script removes sentinel → docker restart (again).
+# So in practice the wait loop is a belt-and-suspenders safety net for
+# the case where someone forgets to remove the sentinel.
+if [ -f "$DATA_DIR/.maintenance" ]; then
+  echo "[entrypoint] /data/.maintenance present — Postgres up; Next.js held"
+  # Max wait: 30 min (360 × 5s). Beyond that, log a warning and proceed
+  # rather than hang silently.
+  WAIT_SECS=0
+  MAX_WAIT=1800
+  while [ -f "$DATA_DIR/.maintenance" ] && [ "$WAIT_SECS" -lt "$MAX_WAIT" ]; do
+    sleep 5
+    WAIT_SECS=$((WAIT_SECS + 5))
+  done
+  if [ -f "$DATA_DIR/.maintenance" ]; then
+    echo "[entrypoint] WARNING: /data/.maintenance still present after ${MAX_WAIT}s — proceeding anyway"
+    rm -f "$DATA_DIR/.maintenance" || true
+  else
+    echo "[entrypoint] sentinel removed after ${WAIT_SECS}s — resuming normal startup"
+  fi
+fi
+
 # ─── Run migrations ──────────────────────────────────────────────────
 # drizzle-kit migrate is idempotent; the migrations journal in
 # drizzle/meta/_journal.json tracks which hashes have been applied.
