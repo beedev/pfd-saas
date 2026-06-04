@@ -19,6 +19,7 @@ import { ArrowLeft, Loader2, Home, Trash2, Pencil, Save, X, Plus, CalendarDays }
 
 type PropertyType = 'RESIDENTIAL' | 'COMMERCIAL' | 'LAND' | 'PLOT';
 type PropertyStatus = 'OWNED' | 'MORTGAGED' | 'UNDER_CONSTRUCTION' | 'RENTED';
+type RetirementTreatment = 'sell' | 'rental_only' | 'self_occupied';
 
 interface Property {
   id: number;
@@ -48,6 +49,8 @@ interface Property {
   isFirstHome?: boolean;
   stampValuePaisa?: number | null;
   carpetAreaSqft?: number | null;
+  // Sprint 5.12 — retirement intent (strategic, independent of isSelfOccupied)
+  retirementTreatment?: RetirementTreatment | null;
 }
 
 const TYPE_OPTIONS: Array<{ label: string; value: PropertyType }> = [
@@ -63,6 +66,18 @@ const STATUS_OPTIONS: Array<{ label: string; value: PropertyStatus }> = [
   { label: 'Under construction', value: 'UNDER_CONSTRUCTION' },
   { label: 'Rented', value: 'RENTED' },
 ];
+
+const RETIREMENT_TREATMENT_OPTIONS: Array<{ label: string; value: RetirementTreatment }> = [
+  { label: 'Sell at retirement', value: 'sell' },
+  { label: 'Rental — keep forever', value: 'rental_only' },
+  { label: 'Self-occupied — keep forever', value: 'self_occupied' },
+];
+
+const TREATMENT_LABEL: Record<RetirementTreatment, string> = {
+  sell: 'Sell at retirement',
+  rental_only: 'Rental — keep forever',
+  self_occupied: 'Self-occupied — keep forever',
+};
 
 const formatINR = (paisa: number) =>
   new Intl.NumberFormat('en-IN', {
@@ -93,6 +108,8 @@ interface FormState {
   isFirstHome: boolean;
   stampValueRupees: string;
   carpetAreaSqft: string;
+  // Sprint 5.12 — retirement intent
+  retirementTreatment: RetirementTreatment;
 }
 
 function propertyToForm(p: Property): FormState {
@@ -117,6 +134,7 @@ function propertyToForm(p: Property): FormState {
     isFirstHome: p.isFirstHome ?? false,
     stampValueRupees: p.stampValuePaisa != null ? (p.stampValuePaisa / 100).toString() : '',
     carpetAreaSqft: p.carpetAreaSqft != null ? p.carpetAreaSqft.toString() : '',
+    retirementTreatment: (p.retirementTreatment ?? 'sell') as RetirementTreatment,
   };
 }
 
@@ -189,6 +207,8 @@ export default function PropertyDetailPage() {
         isFirstHome: form.isFirstHome,
         stampValueRupees: form.stampValueRupees === '' ? 0 : Number(form.stampValueRupees),
         carpetAreaSqft: form.carpetAreaSqft === '' ? 0 : Number(form.carpetAreaSqft),
+        // Sprint 5.12 — retirement intent (validated server-side)
+        retirementTreatment: form.retirementTreatment,
       };
       const r = await fetch(`/api/investments/real-estate/${params.id}`, {
         method: 'PATCH',
@@ -322,6 +342,7 @@ export default function PropertyDetailPage() {
 /* --- view mode ----------------------------------------------------------- */
 
 function DetailView({ property }: { property: Property }) {
+  const treatment = (property.retirementTreatment ?? 'sell') as RetirementTreatment;
   const fields: Array<[string, string]> = [
     ['Type', property.type],
     ['Status', property.status ?? 'OWNED'],
@@ -335,6 +356,7 @@ function DetailView({ property }: { property: Property }) {
     ...(property.valuationDate ? [['Last valued', property.valuationDate] as [string, string]] : []),
     ...(property.monthlyRent ? [['Monthly rent', formatINR(property.monthlyRent)] as [string, string]] : []),
     ...(property.mortgageLender ? [['Lender', property.mortgageLender] as [string, string]] : []),
+    ['Retirement intent', TREATMENT_LABEL[treatment]],
   ];
   return (
     <>
@@ -518,6 +540,26 @@ function EditForm({
           80EEA additional ₹1.5L benefit needs ALL of: first home + stamp ≤ ₹45L + carpet ≤ 968 sqft + loan disbursed
           Apr-2019 to Mar-2022. OLD regime only — NEW regime disallows these deductions.
         </p>
+      </div>
+
+      {/* ─── Sprint 5.12 — Retirement intent (strategic, not tax) ───── */}
+      <div className="sm:col-span-2">
+        <Field label="Retirement intent">
+          <Select
+            value={form.retirementTreatment}
+            onChange={(v) => setField('retirementTreatment', v as RetirementTreatment)}
+            options={RETIREMENT_TREATMENT_OPTIONS}
+          />
+          <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">
+            Drives how this property feeds the retirement projection.
+            &ldquo;Sell&rdquo; — appreciated value enters the corpus, rental
+            stops at retirement. &ldquo;Rental&rdquo; — excluded from corpus,
+            rental flows post-retirement. &ldquo;Self-occupied&rdquo; —
+            excluded from corpus, no rental stream. Independent of the
+            &ldquo;Self-occupied?&rdquo; tax flag above (which caps sec
+            24(b) interest deduction).
+          </p>
+        </Field>
       </div>
 
       <div className="sm:col-span-2">

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
-import { db, realEstate } from '@/db';
+import { db, realEstate, type RetirementTreatment } from '@/db';
 import { auth } from '@/auth';
+
+const VALID_RETIREMENT_TREATMENTS: RetirementTreatment[] = [
+  'sell',
+  'rental_only',
+  'self_occupied',
+];
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -46,6 +52,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const current = existing[0];
     const body = await request.json();
+
+    // Sprint 5.12 — retirement_treatment validation. Reject any
+    // non-canonical value with 400 so the UI / a stray script can't
+    // silently corrupt the column to a string the projection layer
+    // doesn't recognise.
+    let retirementTreatment = current.retirementTreatment;
+    if (typeof body.retirementTreatment === 'string') {
+      if (
+        !VALID_RETIREMENT_TREATMENTS.includes(
+          body.retirementTreatment as RetirementTreatment,
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error: `Invalid retirementTreatment. Expected one of: ${VALID_RETIREMENT_TREATMENTS.join(', ')}`,
+          },
+          { status: 400 },
+        );
+      }
+      retirementTreatment = body.retirementTreatment as RetirementTreatment;
+    }
 
     const purchasePrice =
       typeof body.purchasePriceRupees === 'number'
@@ -103,6 +130,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
             : current.stampValuePaisa,
         carpetAreaSqft:
           typeof body.carpetAreaSqft === 'number' ? body.carpetAreaSqft : current.carpetAreaSqft,
+        // Sprint 5.12 — retirement intent (sell/rental_only/self_occupied)
+        retirementTreatment,
         updatedAt: new Date(),
       })
       .where(and(eq(realEstate.id, numericId), eq(realEstate.userId, session.user.id)))
