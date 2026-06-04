@@ -50,6 +50,21 @@ interface Goal {
   monthsRemaining: number | null;
   monthlyRequired: number | null;
   linkedCategories: string[];
+  /**
+   * Per-goal selected corpus — the sum of assets actually earmarked to
+   * this goal via savings_asset_inclusion.included=true, weighted by
+   * allocation_pct. Mirrors what the /goals/[id] detail page shows in
+   * its "Mapped corpus" tile. This is THE truthful per-goal number;
+   * never carve up the global asset_included_total proportionally.
+   */
+  currentCorpusPaisa: number;
+  /**
+   * Estimated annual contribution into this goal — SIPs on mapped MFs
+   * + recurring cashflow events earmarked to this goal. Returned by
+   * /api/finance/goals and surfaced here in the "earmarked inflows"
+   * footer of each goal card.
+   */
+  yearlyContributionPaisa: number;
 }
 
 interface Summary {
@@ -409,15 +424,29 @@ export default function ProjectionsPage() {
   const parseAmountInput = (input: string): number => parseAmount(input);
 
   const totalGoalTarget = goals.reduce((sum, g) => sum + g.targetAmount, 0);
-  const completedGoals = goals.filter(g => g.progress >= 100).length;
-  // Current Total Savings is just the asset-backed total — no more manual
-  // carryforward categories. The user's two forward-looking inputs (lump sum
-  // + monthly) project onto each goal's target date but don't inflate today's
-  // balance.
+  // "Completed" must reflect the per-goal earmarked corpus, not the legacy
+  // projection_categories `progress` (which is always 0 for goals managed
+  // through the asset-picker model).
+  const completedGoals = goals.filter(
+    (g) => g.targetAmount > 0 && g.currentCorpusPaisa >= g.targetAmount,
+  ).length;
+  // Page-level "Liquid Assets" tile reflects the GLOBAL asset-backed total —
+  // i.e. everything the user has ticked in the Liquid Assets section below.
+  // This is a top-of-page liquid-assets dashboard view, deliberately NOT
+  // per-goal. The goal cards below show per-goal selected corpus instead.
   const combinedSavings = assetIncludedTotal;
+  // Sum of per-goal earmarked corpus across all active goals — the
+  // truthful "how much of my portfolio is allocated to goals" number.
+  // Differs from combinedSavings because goals may double-count an asset
+  // (allocation_pct splits an asset across goals) or leave assets
+  // unallocated. Drives the goal-side coverage tile.
+  const totalGoalEarmarkedCorpus = goals.reduce(
+    (sum, g) => sum + g.currentCorpusPaisa,
+    0,
+  );
   const combinedCoveragePct =
     totalGoalTarget > 0
-      ? Math.round((combinedSavings / totalGoalTarget) * 100)
+      ? Math.round((totalGoalEarmarkedCorpus / totalGoalTarget) * 100)
       : 0;
   // suppress unused-warning while the projection categories table is still
   // queried by the projections API (other consumers may rely on it).
@@ -473,24 +502,24 @@ export default function ProjectionsPage() {
             iconClassName="text-purple-600"
           />
           <SummaryCard
-            title="Total Savings"
+            title="Liquid Assets"
             value={formatCompact(combinedSavings)}
             subtitle={
               futureMonthlyPaisa > 0 || futureLumpPaisa > 0
                 ? `+ planned ${formatCompact(futureLumpPaisa)} lump · ${formatCompact(futureMonthlyPaisa)}/mo`
-                : 'From liquid assets'
+                : 'Ticked in Liquid Assets below'
             }
             icon={PiggyBank}
             className="bg-green-50 border-green-200"
             iconClassName="text-green-600"
           />
           <SummaryCard
-            title="Coverage"
+            title="Goal Coverage"
             value={`${combinedCoveragePct}%`}
             subtitle={
               combinedCoveragePct >= 100
-                ? 'Fully covered!'
-                : `${formatCompact(totalGoalTarget - combinedSavings)} to go`
+                ? 'Fully covered by earmarked assets'
+                : `${formatCompact(totalGoalTarget - totalGoalEarmarkedCorpus)} to go (earmarked)`
             }
             icon={CheckCircle2}
             className={combinedCoveragePct >= 100 ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}
@@ -499,16 +528,19 @@ export default function ProjectionsPage() {
         </div>
       )}
 
-      {/* Coverage Progress Bar */}
+      {/* Coverage Progress Bar — sum of per-goal earmarked corpus vs sum
+          of targets. Was previously the global liquid-assets total / sum of
+          targets, which conflated "what I own" with "what I've earmarked",
+          making goals look more covered than they actually are. */}
       {summary && (
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex justify-between text-sm mb-2">
-            <span className="text-gray-600 font-medium">Savings vs Goals</span>
+            <span className="text-gray-600 font-medium">Earmarked corpus vs Goal targets</span>
             <span className={cn(
               'font-semibold',
               combinedCoveragePct >= 100 ? 'text-green-600' : 'text-blue-600'
             )}>
-              {formatCompact(combinedSavings)} / {formatCompact(totalGoalTarget)}
+              {formatCompact(totalGoalEarmarkedCorpus)} / {formatCompact(totalGoalTarget)}
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
@@ -684,7 +716,7 @@ export default function ProjectionsPage() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Financial Goals</h2>
               <p className="text-xs text-gray-500">
-                Projected by target date = current assets + lump + monthly × months left
+                Each goal shows only the assets you&apos;ve earmarked to it on its detail page
               </p>
             </div>
           </div>
@@ -698,10 +730,6 @@ export default function ProjectionsPage() {
             <GoalCard
               key={goal.id}
               goal={goal}
-              totalSavings={assetIncludedTotal}
-              totalGoalTarget={totalGoalTarget}
-              futureLumpPaisa={futureLumpPaisa}
-              futureMonthlyPaisa={futureMonthlyPaisa}
               onEdit={() => handleEditGoal(goal)}
               onDelete={() => handleDeleteGoal(goal.id)}
               isDeleting={deletingGoalId === goal.id}
@@ -960,58 +988,44 @@ function SavingsCard({
 }
 
 // Goal Card Component
+//
+// Per-goal earmarked corpus — mirrors the retirement page principle.
+// "Selected corpus" comes ONLY from savings_asset_inclusion rows where
+// goal_id = this goal AND included = true (computed server-side via
+// corpusForGoal()). No proportional carve-up of the global asset pool;
+// each card is a faithful per-goal view.
 function GoalCard({
   goal,
-  totalSavings,
-  totalGoalTarget,
-  futureLumpPaisa,
-  futureMonthlyPaisa,
   onEdit,
   onDelete,
   isDeleting,
 }: {
   goal: Goal;
-  totalSavings: number;
-  totalGoalTarget: number;
-  futureLumpPaisa: number;
-  futureMonthlyPaisa: number;
   onEdit: () => void;
   onDelete: () => void;
   isDeleting: boolean;
 }) {
-  // Calculate this goal's share of total savings (proportional allocation —
-  // each goal gets its slice of the asset pool weighted by its target size).
-  const goalShare = totalGoalTarget > 0 ? goal.targetAmount / totalGoalTarget : 0;
-  const allocatedSavings = Math.round(totalSavings * goalShare);
+  // Per-goal earmarked corpus — the single source of truth for THIS goal.
+  // Equals the /goals/[id] detail page "Mapped corpus" tile byte-for-byte.
+  const selectedCorpus = goal.currentCorpusPaisa;
   const progress = goal.targetAmount > 0
-    ? Math.min(100, Math.round((allocatedSavings / goal.targetAmount) * 100))
+    ? Math.min(100, Math.round((selectedCorpus / goal.targetAmount) * 100))
     : 0;
   const isCompleted = progress >= 100;
 
-  // Projected coverage by the goal's target date. Lump sum lands on that day;
-  // monthly contributions accumulate over the months between now and then.
-  // Both are proportionally allocated to this goal (same logic as current).
+  // Growth projection from today's selected corpus to the goal's target
+  // date at a flat 10% return — same convention used by the retirement
+  // page's pre-retirement growth assumption. The goal's own
+  // expectedReturnPct lives on the detail page projection chart; here
+  // we use a uniform rate so all cards are comparable at a glance.
   const monthsLeft = Math.max(0, goal.monthsRemaining ?? 0);
-  const projectedPool =
-    totalSavings + futureLumpPaisa + futureMonthlyPaisa * monthsLeft;
-  const projectedAllocated = Math.round(projectedPool * goalShare);
-  const projectedProgress = goal.targetAmount > 0
-    ? Math.min(100, Math.round((projectedAllocated / goal.targetAmount) * 100))
-    : 0;
-  const hasPlan = futureLumpPaisa > 0 || futureMonthlyPaisa > 0;
-  const projectedDelta = projectedAllocated - allocatedSavings;
-
-  // What this allocation would actually be worth at the goal's target date if
-  // the current pool compounds at a moderate return (10% default — matches
-  // the retirement page's pre-retirement assumption). Lets the user see the
-  // time-value alongside the raw "if-nothing-grows" projected pool above.
   const GOAL_RETURN_RATE = 0.1;
   const yearsLeft = monthsLeft / 12;
-  const allocatedAtTargetDate = Math.round(
-    allocatedSavings * Math.pow(1 + GOAL_RETURN_RATE, yearsLeft),
+  const corpusAtTargetDate = Math.round(
+    selectedCorpus * Math.pow(1 + GOAL_RETURN_RATE, yearsLeft),
   );
   const compoundedProgress = goal.targetAmount > 0
-    ? Math.min(100, Math.round((allocatedAtTargetDate / goal.targetAmount) * 100))
+    ? Math.min(100, Math.round((corpusAtTargetDate / goal.targetAmount) * 100))
     : 0;
 
   return (
@@ -1044,7 +1058,7 @@ function GoalCard({
       {/* Progress Bar */}
       <div className="mb-3">
         <div className="flex justify-between items-center mb-1">
-          <span className="text-xs text-gray-500">Progress</span>
+          <span className="text-xs text-gray-500">Progress (earmarked)</span>
           <span className={cn('text-sm font-semibold', isCompleted ? 'text-green-600' : 'text-gray-900')}>
             {progress}%
           </span>
@@ -1057,11 +1071,11 @@ function GoalCard({
         </div>
       </div>
 
-      {/* Amounts — today + at-target-date + target */}
+      {/* Amounts — earmarked today + at-target-date + target */}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="bg-gray-50 rounded p-2">
-          <p className="text-[10px] text-gray-500">Allocated today</p>
-          <p className="font-semibold text-gray-900">{formatCompact(allocatedSavings)}</p>
+          <p className="text-[10px] text-gray-500">Selected corpus</p>
+          <p className="font-semibold text-gray-900">{formatCompact(selectedCorpus)}</p>
         </div>
         <div className="bg-blue-50 rounded p-2">
           <p className="text-[10px] text-gray-500">
@@ -1070,7 +1084,7 @@ function GoalCard({
               : 'target'}{' '}
             (10%)
           </p>
-          <p className="font-semibold text-blue-700">{formatCompact(allocatedAtTargetDate)}</p>
+          <p className="font-semibold text-blue-700">{formatCompact(corpusAtTargetDate)}</p>
           <p className={cn(
             'text-[9px] font-mono',
             compoundedProgress >= 100 ? 'text-emerald-600' : 'text-blue-600',
@@ -1084,36 +1098,13 @@ function GoalCard({
         </div>
       </div>
 
-      {/* Projected by target date (only shown when there's a forward-looking plan) */}
-      {hasPlan && monthsLeft > 0 && (
-        <div className="mt-3 rounded-md border border-blue-100 bg-blue-50/50 p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700">
-              Projected by {goal.targetDate ? new Date(goal.targetDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : 'target'}
-            </span>
-            <span className={cn(
-              'text-sm font-bold',
-              projectedProgress >= 100 ? 'text-green-600' : 'text-blue-700',
-            )}>
-              {projectedProgress}%
-            </span>
-          </div>
-          <div className="w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
-            <div
-              className={cn(
-                'h-1.5 rounded-full transition-all duration-500',
-                projectedProgress >= 100 ? 'bg-green-500' : 'bg-blue-500',
-              )}
-              style={{ width: `${projectedProgress}%` }}
-            />
-          </div>
-          <p className="mt-1 text-[10px] text-blue-700">
-            {formatCompact(projectedAllocated)} projected
-            {projectedDelta > 0 && (
-              <> · +{formatCompact(projectedDelta)} from plan</>
-            )}
-          </p>
-        </div>
+      {/* Earmarked annual contribution — from mapped SIPs and recurring
+          cashflow events earmarked to this goal. Goal-specific; no
+          proportional carve-up of the global future-savings plan. */}
+      {goal.yearlyContributionPaisa > 0 && (
+        <p className="mt-3 text-[11px] text-gray-500">
+          + {formatCompact(goal.yearlyContributionPaisa)}/yr from earmarked SIPs &amp; events
+        </p>
       )}
 
       {/* Status Footer */}
