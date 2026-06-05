@@ -83,6 +83,7 @@ export default function YeswanthImportPage() {
   const [overrideFy, setOverrideFy] = useState<string>('');
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [mappings, setMappings] = useState({
     salary: true,
     setupParams: true,
@@ -93,7 +94,23 @@ export default function YeswanthImportPage() {
   });
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /** Client-side validation + reject early to keep the spinner honest. */
+  const validateFile = (file: File): string | null => {
+    if (file.size > 5 * 1024 * 1024) {
+      return `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — max 5 MB.`;
+    }
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      return `Unsupported type: ${file.name.split('.').pop()}. Use .xlsx or .xls.`;
+    }
+    return null;
+  };
+
   const handleUpload = async (file: File) => {
+    const validationError = validateFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     setUploading(true);
     try {
       const fd = new FormData();
@@ -164,29 +181,67 @@ export default function YeswanthImportPage() {
             <h3 className="text-base font-bold text-[var(--dxp-text)]">Step 1 — Upload xlsx</h3>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col items-center justify-center gap-3 rounded border-2 border-dashed border-[var(--dxp-border)] bg-[var(--dxp-surface)] p-6">
-              <Upload className="h-8 w-8 text-[var(--dxp-text-muted)]" />
+            {/* The whole label IS the click + drop target. The native
+                input is sr-only so its tiny "Choose file" button never
+                eats clicks meant for the dashed area. */}
+            <label
+              htmlFor="yeswanth-file-input"
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (!uploading) setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (uploading) return;
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleUpload(file);
+              }}
+              className={`flex flex-col items-center justify-center gap-3 rounded border-2 border-dashed p-10 transition-colors ${
+                uploading
+                  ? 'cursor-wait border-[var(--dxp-border)] bg-[var(--dxp-surface)]'
+                  : dragOver
+                    ? 'cursor-pointer border-blue-400 bg-blue-50'
+                    : 'cursor-pointer border-[var(--dxp-border)] bg-[var(--dxp-surface)] hover:border-[var(--dxp-text-muted)] hover:bg-[var(--dxp-border-light)]'
+              }`}
+            >
               <input
                 ref={fileRef}
+                id="yeswanth-file-input"
                 type="file"
                 accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) handleUpload(file);
+                  // Reset the input so picking the same file twice re-fires onChange.
+                  e.target.value = '';
                 }}
-                className="text-sm"
+                className="sr-only"
                 disabled={uploading}
               />
-              <p className="text-xs text-[var(--dxp-text-muted)]">
-                Max 5 MB. The file is stored under uploads/yeswanth-imports/&lt;you&gt;/
-                (gitignored). Re-uploading the same file produces the same preview.
-              </p>
-              {uploading && (
-                <p className="flex items-center gap-2 text-xs text-[var(--dxp-text-secondary)]">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Parsing…
-                </p>
+              {uploading ? (
+                <>
+                  <Loader2 className="h-10 w-10 animate-spin text-[var(--dxp-text-muted)]" />
+                  <p className="text-sm font-semibold text-[var(--dxp-text)]">Parsing…</p>
+                  <p className="text-xs text-[var(--dxp-text-muted)]">
+                    Reading sheets, computing annual sums, validating.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Upload className={`h-10 w-10 ${dragOver ? 'text-blue-500' : 'text-[var(--dxp-text-muted)]'}`} />
+                  <p className="text-base font-semibold text-[var(--dxp-text)]">
+                    {dragOver ? 'Drop the xlsx here' : 'Click to choose a file or drag-drop it here'}
+                  </p>
+                  <p className="text-xs text-[var(--dxp-text-muted)] text-center max-w-md">
+                    .xlsx or .xls · Max 5 MB · Stored under{' '}
+                    <code>uploads/yeswanth-imports/&lt;you&gt;/</code> (gitignored). Re-uploading the
+                    same file produces the same preview.
+                  </p>
+                </>
               )}
-            </div>
+            </label>
           </CardContent>
         </Card>
       )}
