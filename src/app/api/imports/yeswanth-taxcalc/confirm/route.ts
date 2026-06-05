@@ -144,6 +144,9 @@ export async function POST(request: NextRequest) {
         medicalPaisa: preview.salaryAnnual.medicalPaisa,
         otherAllowancesPaisa: preview.salaryAnnual.otherAllowancesPaisa,
         rentPaidMonthlyPaisa: preview.salaryAnnual.rentPaidMonthlyPaisa,
+        // Salary TDS (R26 "IT" in the Yeswanth template — employer-deducted
+        // income tax across the year). Pre-fix this dropped silently.
+        tdsPaisa: preview.salaryAnnual.salaryTdsPaisa,
         notes: `Imported from Yeswanth TaxCalc ${today}`,
         updatedAt: new Date(),
       };

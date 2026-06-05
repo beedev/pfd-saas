@@ -35,6 +35,7 @@ interface PreviewSalary {
   medicalPaisa: number;
   otherAllowancesPaisa: number;
   rentPaidMonthlyPaisa: number;
+  salaryTdsPaisa: number;
 }
 
 interface Preview {
@@ -198,6 +199,7 @@ export default function YeswanthImportPage() {
                 <KV label="Medical" value={fmtINR(preview.salaryAnnual.medicalPaisa / 100)} />
                 <KV label="Other allowances" value={fmtINR(preview.salaryAnnual.otherAllowancesPaisa / 100)} />
                 <KV label="Rent paid (monthly)" value={fmtINR(preview.salaryAnnual.rentPaidMonthlyPaisa / 100)} />
+                <KV label="Salary TDS (employer-deducted)" value={fmtINR(preview.salaryAnnual.salaryTdsPaisa / 100)} />
               </Section>
 
               <Section

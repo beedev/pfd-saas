@@ -43,6 +43,10 @@ export interface YeswanthSalaryComponents {
   medicalPaisa: number;
   otherAllowancesPaisa: number;
   rentPaidMonthlyPaisa: number;
+  /** Salary TDS deducted by the employer (R26 "IT" in the Yeswanth
+   *  template — annual sum across D..O). Flows to salary_income.tds_paisa
+   *  on confirm. */
+  salaryTdsPaisa: number;
 }
 
 export interface YeswanthSetupParams {
@@ -246,6 +250,9 @@ function parseSalary(sheet: XLSX.WorkSheet): YeswanthSalaryComponents {
     ),
     // Rent — divided by 12 to get monthly rate (schema stores monthly).
     rentPaidMonthlyPaisa: toPaisa(annualSum(sheet, 27) / 12),
+    // R26 "IT" — income tax deducted by the employer from salary across
+    // the year. Maps to salary_income.tds_paisa, not to a deduction row.
+    salaryTdsPaisa: toPaisa(annualSum(sheet, 26)),
   };
 }
 
