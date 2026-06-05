@@ -21,9 +21,26 @@ import {
   CardContent,
   Button,
   Badge,
+  Select,
 } from '@dxp/ui';
-import { Upload, Loader2, FileCheck2, ArrowRight } from 'lucide-react';
+import { Upload, Loader2, FileCheck2, ArrowRight, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+
+/** Last 7 FYs ending with current — covers "filing last FY now" + 5 prior
+ *  + the current ongoing FY. Wide enough to never block a legitimate
+ *  override choice. */
+function recentFys(): string[] {
+  const current = getCurrentFinancialYear();
+  const startYear = Number(current.split('-')[0]);
+  const out: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const s = startYear - i + 1; // include next FY too (filing-ahead case)
+    out.push(`${s - 1}-${String(s % 100).padStart(2, '0')}`);
+  }
+  // dedupe + return newest-first
+  return Array.from(new Set(out));
+}
 
 interface PreviewSalary {
   basicPaisa: number;
@@ -63,6 +80,7 @@ function fmtINR(rupees: number): string {
 export default function YeswanthImportPage() {
   const [importId, setImportId] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [overrideFy, setOverrideFy] = useState<string>('');
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [mappings, setMappings] = useState({
@@ -85,6 +103,9 @@ export default function YeswanthImportPage() {
       const data = await r.json();
       setImportId(data.importId);
       setPreview(data.preview);
+      // Default override = detected FY. The user can correct it if the
+      // template's sheet name doesn't match their filing intent.
+      setOverrideFy(data.preview.fy);
       toast.success(`Parsed FY ${data.preview.fy} — review below before confirming.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Upload failed');
@@ -100,7 +121,10 @@ export default function YeswanthImportPage() {
       const r = await fetch('/api/imports/yeswanth-taxcalc/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ importId, mappings }),
+        // overrideFy lets the user correct the FY at confirm time (e.g.
+        // template sheet name says one FY but they're importing a copy
+        // meant for a different filing year).
+        body: JSON.stringify({ importId, mappings, overrideFy }),
       });
       if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
       const data = await r.json();
@@ -171,17 +195,58 @@ export default function YeswanthImportPage() {
         <>
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-[var(--dxp-text)]">
-                  Step 2 — Review &amp; confirm
-                </h3>
-                <Badge variant="info">FY {preview.fy}</Badge>
-              </div>
+              <h3 className="text-base font-bold text-[var(--dxp-text)]">
+                Step 2 — Review &amp; confirm
+              </h3>
               <p className="text-xs text-[var(--dxp-text-secondary)]">
                 Check sections to import. Salary &amp; setup will UPSERT (overwrite existing
                 row for this FY). Deductions, TDS, and capital gains will INSERT new rows
                 (no de-duplication — re-importing creates duplicates).
               </p>
+              {/* FY banner — prominent because the wrong FY silently
+                  misfiles the entire import. Override surfaces here, not
+                  buried in a dropdown later. */}
+              <div className={`mt-3 rounded border p-3 ${
+                overrideFy !== preview.fy
+                  ? 'border-amber-300 bg-amber-50'
+                  : 'border-[var(--dxp-border)] bg-[var(--dxp-surface)]'
+              }`}>
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${
+                    overrideFy !== preview.fy ? 'text-amber-600' : 'text-[var(--dxp-text-muted)]'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-[var(--dxp-text)]">
+                      {overrideFy !== preview.fy
+                        ? `Importing as FY ${overrideFy} (overriding detected FY ${preview.fy})`
+                        : `This will import as FY ${preview.fy}`}
+                    </p>
+                    <p className="text-xs text-[var(--dxp-text-muted)] mt-0.5">
+                      Detected from file&apos;s sheet name. Override if the template&apos;s
+                      naming doesn&apos;t match your filing intent.
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs text-[var(--dxp-text-muted)]">Import as:</span>
+                      <div className="w-36">
+                        <Select
+                          options={recentFys().map((y) => ({ value: y, label: `FY ${y}` }))}
+                          value={overrideFy}
+                          onChange={setOverrideFy}
+                        />
+                      </div>
+                      {overrideFy !== preview.fy && (
+                        <button
+                          type="button"
+                          onClick={() => setOverrideFy(preview.fy)}
+                          className="text-xs text-[var(--dxp-text-muted)] hover:underline"
+                        >
+                          reset to detected
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <Section

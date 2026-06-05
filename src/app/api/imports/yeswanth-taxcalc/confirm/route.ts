@@ -60,6 +60,10 @@ interface ConfirmBody {
     tds?: boolean;
     capitalGains?: boolean;
   };
+  /** User override of the parser-detected FY. Format YYYY-YY (e.g.
+   *  "2025-26"). When present, all FY-scoped writes use this instead
+   *  of the sheet-name-derived FY. */
+  overrideFy?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -73,9 +77,13 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as ConfirmBody;
     const importId = body.importId;
     const mappings = body.mappings ?? {};
+    const overrideFy = body.overrideFy;
 
     if (!importId || !/^[a-f0-9]{32}$/.test(importId)) {
       return NextResponse.json({ error: 'Invalid importId' }, { status: 400 });
+    }
+    if (overrideFy && !/^\d{4}-\d{2}$/.test(overrideFy)) {
+      return NextResponse.json({ error: 'Invalid overrideFy format (expected YYYY-YY)' }, { status: 400 });
     }
 
     const filePath = path.join(UPLOAD_ROOT, userId, `${importId}.xlsx`);
@@ -100,6 +108,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 422 });
     }
 
+    // Effective FY = user-supplied override (when present) else the
+    // sheet-name-derived FY. ALL FY-scoped writes use this so a single
+    // override flips every row consistently.
+    const effectiveFy = overrideFy || preview.fy;
+
     const today = new Date().toISOString().slice(0, 10);
     const writeSummary = {
       salary: 0,
@@ -115,7 +128,7 @@ export async function POST(request: NextRequest) {
       const existing = await db
         .select()
         .from(salaryIncome)
-        .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, preview.fy)))
+        .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, effectiveFy)))
         .limit(1);
 
       const componentSum =
@@ -130,7 +143,7 @@ export async function POST(request: NextRequest) {
 
       const values = {
         userId,
-        financialYear: preview.fy,
+        financialYear: effectiveFy,
         employerName: existing[0]?.employerName ?? 'Imported (Yeswanth)',
         employerTan: existing[0]?.employerTan ?? 'IMPORTED',
         grossSalaryPaisa: componentSum,
@@ -155,7 +168,7 @@ export async function POST(request: NextRequest) {
         await db
           .update(salaryIncome)
           .set(values)
-          .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, preview.fy)));
+          .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, effectiveFy)));
       } else {
         await db.insert(salaryIncome).values(values);
       }
@@ -252,7 +265,7 @@ export async function POST(request: NextRequest) {
           availableLimit: 0,
           utilizableAmount: amountPaisa,
           incurredDate: today,
-          financialYear: preview.fy,
+          financialYear: effectiveFy,
           amountPaisa,
           eightyDBucket: d.eightyDBucket ?? null,
           notes: `Imported from Yeswanth TaxCalc ${today}`,
@@ -273,7 +286,7 @@ export async function POST(request: NextRequest) {
         if (t.amountRupees <= 0) continue;
         await db.insert(tdsCredits).values({
           userId,
-          financialYear: preview.fy,
+          financialYear: effectiveFy,
           category: 'OTHER',
           deductorName: 'IMPORTED',
           section: 'IMPORTED',
@@ -287,7 +300,7 @@ export async function POST(request: NextRequest) {
         if (b.tdsRupees <= 0) continue;
         await db.insert(tdsCredits).values({
           userId,
-          financialYear: preview.fy,
+          financialYear: effectiveFy,
           category: 'INTEREST',
           deductorName: b.bankName || 'IMPORTED',
           section: '194A',
@@ -314,7 +327,7 @@ export async function POST(request: NextRequest) {
         const ltShort = r.longTermFlag ? 'LTCG' : 'STCG';
         await db.insert(capitalGains).values({
           userId,
-          financialYear: preview.fy,
+          financialYear: effectiveFy,
           assetType: type,
           assetName: r.scripName || 'Imported',
           purchaseDate: r.purchaseDate || null,
