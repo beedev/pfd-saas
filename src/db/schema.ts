@@ -2670,6 +2670,12 @@ export const form26asUploads = pgTable('form_26as_uploads', {
   parsedTotalIncomePaisa: bigint('parsed_total_income_paisa', { mode: 'number' }),
   parsedAt: timestamp('parsed_at', { mode: 'date' }),
   parseNotes: text('parse_notes'),
+  /** JSON string of per-deductor rows extracted from Part-I of the 26AS:
+   *  Array<{ deductorName, tan, section, totalPaidPaisa, totalTdsPaisa,
+   *           totalDepositedPaisa, transactionDate? }>.
+   *  Powers per-section reconciliation; falls back to headline totals
+   *  when null. */
+  parsedDeductorsJson: text('parsed_deductors_json'),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('form_26as_uploads_user_id_idx').on(table.userId),
