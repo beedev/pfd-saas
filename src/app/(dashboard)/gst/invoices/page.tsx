@@ -73,9 +73,16 @@ function generateFyOptions(): Array<{ value: string; label: string }> {
   return opts;
 }
 
+// Sprint A.3 — TDS deducted tile summary shape.
+interface TdsSummary {
+  totalTdsPaisa: number;
+  invoiceCount: number;
+}
+
 export default function InvoicesPage() {
   const [fy, setFy] = useState(getCurrentFy());
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [tdsSummary, setTdsSummary] = useState<TdsSummary>({ totalTdsPaisa: 0, invoiceCount: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
@@ -85,9 +92,21 @@ export default function InvoicesPage() {
   const loadInvoices = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/gst/invoices?fy=${encodeURIComponent(fy)}`);
-      const data = await response.json();
-      setInvoices(data.invoices || []);
+      const [invResp, tdsResp] = await Promise.all([
+        fetch(`/api/gst/invoices?fy=${encodeURIComponent(fy)}`),
+        fetch(`/api/gst/invoices/tds-summary?fy=${encodeURIComponent(fy)}`),
+      ]);
+      const invData = await invResp.json();
+      setInvoices(invData.invoices || []);
+      if (tdsResp.ok) {
+        const tdsData = await tdsResp.json();
+        setTdsSummary({
+          totalTdsPaisa: tdsData.totalTdsPaisa ?? 0,
+          invoiceCount: tdsData.invoiceCount ?? 0,
+        });
+      } else {
+        setTdsSummary({ totalTdsPaisa: 0, invoiceCount: 0 });
+      }
     } catch (error) {
       console.error('Failed to load invoices:', error);
       toast.error('Failed to load invoices');
@@ -315,7 +334,7 @@ export default function InvoicesPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Total Invoices (FY {fy})</CardTitle>
@@ -356,6 +375,22 @@ export default function InvoicesPage() {
             <div className="text-2xl font-bold text-green-600">
               ₹{formatAmount(totalAmount)}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Sprint A.3 — TDS Deducted tile (sum of auto-derived tds_credits
+            for this FY where source_kind='GST_INVOICE'). */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">TDS Deducted</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-muted-foreground">
+              ₹{formatAmount(tdsSummary.totalTdsPaisa)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {tdsSummary.invoiceCount} invoice{tdsSummary.invoiceCount === 1 ? '' : 's'}
+            </p>
           </CardContent>
         </Card>
       </div>
