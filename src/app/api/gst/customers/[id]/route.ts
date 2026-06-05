@@ -67,6 +67,8 @@ export async function PUT(
       pincode,
       email,
       phone,
+      tdsRatePct,
+      tdsSection,
     } = body;
 
     // Validate required fields
@@ -113,6 +115,16 @@ export async function PUT(
     const validSupplyTypes = ['REGULAR', 'EXPORT_WITH_IGST', 'EXPORT_LUT', 'SEZ'];
     const validatedSupplyType = validSupplyTypes.includes(supplyType) ? supplyType : 'REGULAR';
 
+    // Sprint A.1 — TDS deduction config. Only patch when the client
+    // actually sends the field; absent → keep existing DB value.
+    const tdsPatch: { tdsRatePct?: number; tdsSection?: string } = {};
+    if (typeof tdsRatePct === 'number' && Number.isFinite(tdsRatePct) && tdsRatePct >= 0 && tdsRatePct <= 100) {
+      tdsPatch.tdsRatePct = tdsRatePct;
+    }
+    if (typeof tdsSection === 'string' && tdsSection.trim().length > 0) {
+      tdsPatch.tdsSection = tdsSection.trim().toUpperCase();
+    }
+
     await db
       .update(customers)
       .set({
@@ -127,6 +139,7 @@ export async function PUT(
         email: email || null,
         phone: phone || null,
         isB2B,
+        ...tdsPatch,
         updatedAt: new Date(),
       })
       .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)));

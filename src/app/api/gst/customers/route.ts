@@ -43,6 +43,8 @@ export async function POST(request: NextRequest) {
       pincode,
       email,
       phone,
+      tdsRatePct,
+      tdsSection,
     } = body;
 
     // Validate required fields
@@ -89,6 +91,18 @@ export async function POST(request: NextRequest) {
     const validSupplyTypes = ['REGULAR', 'EXPORT_WITH_IGST', 'EXPORT_LUT', 'SEZ'];
     const validatedSupplyType = validSupplyTypes.includes(supplyType) ? supplyType : 'REGULAR';
 
+    // Sprint A.1 — TDS deduction config. Normalise to safe defaults so
+    // legacy clients that don't send these fields still get usable values
+    // (10% / '194J' matches the most common consulting case).
+    const normalisedTdsRate =
+      typeof tdsRatePct === 'number' && Number.isFinite(tdsRatePct) && tdsRatePct >= 0 && tdsRatePct <= 100
+        ? tdsRatePct
+        : 10;
+    const normalisedTdsSection =
+      typeof tdsSection === 'string' && tdsSection.trim().length > 0
+        ? tdsSection.trim().toUpperCase()
+        : '194J';
+
     const result = await db.insert(customers).values({
       userId: session.user.id,
       name,
@@ -102,6 +116,8 @@ export async function POST(request: NextRequest) {
       email: email || null,
       phone: phone || null,
       isB2B,
+      tdsRatePct: normalisedTdsRate,
+      tdsSection: normalisedTdsSection,
       createdAt: new Date(),
       updatedAt: new Date(),
     }).returning();

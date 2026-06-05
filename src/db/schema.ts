@@ -748,6 +748,14 @@ export const customers = pgTable('customers', {
   phone: text('phone'),
   isB2B: boolean('is_b2b').notNull().default(false),
   supplyType: text('supply_type').$type<SupplyType>().default('REGULAR'),
+  // Sprint A.1 (saas back-port) — per-customer TDS deduction config. Most
+  // B2B consulting customers deduct 10% TDS u/s 194J on the pre-GST
+  // taxable value of each invoice. Defaults match that common case so
+  // existing rows just work. When an invoice is finalised, an
+  // auto-derived tds_credits row is emitted using these settings (see
+  // src/lib/finance/derive-invoice-tds.ts).
+  tdsRatePct: real('tds_rate_pct').notNull().default(10),
+  tdsSection: text('tds_section').notNull().default('194J'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

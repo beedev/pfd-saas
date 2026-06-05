@@ -49,6 +49,11 @@ const customerSchema = z.object({
   pincode: z.string().optional(),
   email: z.string().optional(),
   phone: z.string().optional(),
+  // Sprint A.1 — TDS deduction config. The number input emits a number;
+  // the API also clamps + normalises defensively. NaN handling is in the
+  // submit path so the form stays forgiving.
+  tdsRatePct: z.number().min(0).max(100).optional(),
+  tdsSection: z.string().optional(),
 });
 
 type CustomerFormData = z.infer<typeof customerSchema>;
@@ -84,6 +89,8 @@ export function CustomerForm({ customerId, initialData }: CustomerFormProps) {
       pincode: '',
       email: '',
       phone: '',
+      tdsRatePct: 10,
+      tdsSection: '194J',
     },
   });
 
@@ -312,6 +319,71 @@ export function CustomerForm({ customerId, initialData }: CustomerFormProps) {
                 </FormItem>
               )}
             />
+          </CardContent>
+        </Card>
+
+        {/* TDS Deduction (Sprint A.1) */}
+        <Card>
+          <CardHeader>
+            <CardTitle>TDS Deduction</CardTitle>
+            <CardDescription>
+              If this customer deducts TDS on your invoices, set the rate and section.
+              Defaults to 10% u/s 194J (most common for professional / consulting income).
+              Auto-emits a tds_credits row when an invoice to this customer is finalised.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="tdsRatePct"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>TDS rate (%)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          field.onChange(v === '' ? undefined : Number(v));
+                        }}
+                        placeholder="10"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Set to 0 if this customer does not deduct TDS.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="tdsSection"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Section</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        value={field.value ?? ''}
+                        placeholder="194J"
+                        className="uppercase"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Common: 194J (professional), 194C (contract), 194A (interest), 194-IA (property).
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
           </CardContent>
         </Card>
 

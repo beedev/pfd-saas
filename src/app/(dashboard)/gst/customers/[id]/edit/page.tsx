@@ -17,6 +17,8 @@ interface Customer {
   pincode: string | null;
   email: string | null;
   phone: string | null;
+  tdsRatePct: number | null;
+  tdsSection: string | null;
 }
 
 export default function EditCustomerPage({ params }: { params: Promise<{ id: string }> }) {
@@ -92,6 +94,8 @@ export default function EditCustomerPage({ params }: { params: Promise<{ id: str
           pincode: customer.pincode || '',
           email: customer.email || '',
           phone: customer.phone || '',
+          tdsRatePct: customer.tdsRatePct ?? 10,
+          tdsSection: customer.tdsSection ?? '194J',
         }}
       />
     </div>
