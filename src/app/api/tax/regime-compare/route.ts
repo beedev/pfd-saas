@@ -463,8 +463,24 @@ export async function GET(request: NextRequest) {
       regime: 'NEW',
       fy,
     });
-    const oldTotal = result.old.totalTaxPaisa;
-    const newTotal = newResult.totalTaxPaisa;
+    // ─── Capital gains tax (regime-agnostic flat rates) ─────────────
+    // CG tax is computed per-row when the user files the gain (12.5%
+    // for equity LTCG post-2024-budget, 20% for property LTCG indexed,
+    // etc.) — see capital_gains.tax_amount. CG tax is NOT subject to
+    // the 87A rebate (slab-only) and is added on top of slab tax. Cess
+    // (4%) re-applies on the combined slab+CG total.
+    //
+    // Surcharge interaction (per-band on aggregate income) is left
+    // approximated to slab-only for now — most users won't cross a
+    // band boundary because of CG alone; if they do, the slab-only
+    // surcharge under-counts by a few thousand. Documented limitation.
+    const capitalGainsTaxPaisa = caps.reduce((s, r) => s + (r.taxAmount ?? 0), 0);
+    const CESS_PCT = 4;
+    const capitalGainsTaxWithCessPaisa = Math.round(
+      capitalGainsTaxPaisa * (1 + CESS_PCT / 100),
+    );
+    const oldTotal = result.old.totalTaxPaisa + capitalGainsTaxWithCessPaisa;
+    const newTotal = newResult.totalTaxPaisa + capitalGainsTaxWithCessPaisa;
     const recommendation: 'NEW' | 'OLD' = newTotal <= oldTotal ? 'NEW' : 'OLD';
     const savingsPaisa = Math.abs(newTotal - oldTotal);
 
@@ -511,8 +527,24 @@ export async function GET(request: NextRequest) {
         perLiability: loanDeductions.perLiability,
       },
       comparison: {
-        old: result.old,
-        new: newResult,
+        // Augment each regime result with the CG tax add-on so the UI
+        // can render it as a line item beneath the slab tax. Keeping
+        // the regime object's existing fields untouched preserves
+        // backward-compat (slab tax computed exactly as before).
+        old: {
+          ...result.old,
+          capitalGainsTaxPaisa,
+          capitalGainsCessPaisa: capitalGainsTaxWithCessPaisa - capitalGainsTaxPaisa,
+          capitalGainsTotalPaisa: capitalGainsTaxWithCessPaisa,
+          totalTaxPaisa: oldTotal, // overrides the slab-only total
+        },
+        new: {
+          ...newResult,
+          capitalGainsTaxPaisa,
+          capitalGainsCessPaisa: capitalGainsTaxWithCessPaisa - capitalGainsTaxPaisa,
+          capitalGainsTotalPaisa: capitalGainsTaxWithCessPaisa,
+          totalTaxPaisa: newTotal,
+        },
         recommendation,
         savingsPaisa,
       },
