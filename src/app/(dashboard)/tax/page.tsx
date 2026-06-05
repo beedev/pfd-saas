@@ -14,6 +14,11 @@ import {
   Coins,
   FileCheck2,
   Pencil,
+  Scale,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  HelpCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
@@ -105,6 +110,14 @@ export default function TaxDashboardPage() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   // Sprint 5.2 — onboarding completion signals (drives U9 checklist)
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  // Sprint C.3 — reconciliation status drives the indicator on the
+  // Reconciliation link card.
+  const [reconOverall, setReconOverall] = useState<{
+    allMatched: boolean;
+    matchedCount: number;
+    mismatchCount: number;
+    missingCount: number;
+  } | null>(null);
   // Bump this to force child components (KPI strip, regime card,
   // regime-aware stats) to re-fetch after a tax-profile chip toggle.
   const [refreshTick, setRefreshTick] = useState(0);
@@ -124,7 +137,7 @@ export default function TaxDashboardPage() {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [s, tp, itr1, f26, sel, fp, ded] = await Promise.all([
+      const [s, tp, itr1, f26, sel, fp, ded, rc] = await Promise.all([
         fetch(`/api/tax/summary?fy=${encodeURIComponent(fy)}`).then((r) => r.json()),
         fetch(`/api/tax/tax-paid?fy=${encodeURIComponent(fy)}`).then((r) => r.json()),
         // Onboarding signals — non-blocking, only used to decide whether
@@ -146,7 +159,12 @@ export default function TaxDashboardPage() {
         fetch(`/api/tax/deductions?fy=${encodeURIComponent(fy)}`)
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
+        // Sprint C.3 — reconciliation overall status (drives indicator).
+        fetch(`/api/tax/reconciliation?fy=${encodeURIComponent(fy)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
       ]);
+      setReconOverall(rc?.overall ?? null);
       setDeductionRows((ded?.deductions ?? []) as DeductionRow[]);
       setSummary(s);
       setTaxPayments(tp.payments ?? []);
@@ -293,6 +311,60 @@ export default function TaxDashboardPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Sprint C.3 — Reconciliation triangle entry cards (books vs
+              Form 16 vs 26AS). The Reconciliation card carries a status
+              indicator driven by /api/tax/reconciliation overall block. */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Link href="/tax/reconciliation">
+              <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                <CardContent>
+                  <div className="flex items-center gap-3">
+                    <Scale className="h-8 w-8 text-[var(--dxp-brand)]" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-[var(--dxp-text)]">Reconciliation</p>
+                        {reconOverall?.allMatched ? (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-label="all matched" />
+                        ) : reconOverall && reconOverall.mismatchCount > 0 ? (
+                          <AlertTriangle className="h-4 w-4 text-amber-500" aria-label="mismatch" />
+                        ) : reconOverall && reconOverall.missingCount > 0 ? (
+                          <HelpCircle className="h-4 w-4 text-[var(--dxp-text-muted)]" aria-label="missing actual" />
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">Books vs Form 16 vs 26AS</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/tax/form-16">
+              <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                <CardContent>
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-8 w-8 text-[var(--dxp-brand)]" />
+                    <div>
+                      <p className="font-bold text-[var(--dxp-text)]">Form 16</p>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">Upload + manual entry</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/tax/form-26as">
+              <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                <CardContent>
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-8 w-8 text-[var(--dxp-brand)]" />
+                    <div>
+                      <p className="font-bold text-[var(--dxp-text)]">Form 26AS</p>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">Upload + reconcile</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
 
           {/* D — Section 80 regime-aware stats (replaces 3-tile stats) */}
           <Section80RegimeAwareStats key={`s80-${fy}-${refreshTick}`} fy={fy} />
