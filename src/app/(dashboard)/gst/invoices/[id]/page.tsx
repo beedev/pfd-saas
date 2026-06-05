@@ -81,6 +81,7 @@ interface Invoice {
   status: string;
   returnPeriod: string;
   notes: string | null;
+  tdsDeducted: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +94,8 @@ interface Customer {
   city: string | null;
   stateCode: string;
   pincode: string | null;
+  tdsRatePct: number | null;
+  tdsSection: string | null;
 }
 
 interface Business {
@@ -194,6 +197,35 @@ export default function InvoiceDetailPage({
       });
     } catch (error) {
       toast.error('Failed to update status', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Sprint A.2 — toggle the per-invoice TDS-deduction override. The PUT
+  // route reuses the status-only path and resyncs the derived
+  // tds_credits row automatically.
+  const handleToggleTds = async (next: boolean) => {
+    if (!invoice) return;
+    setIsUpdating(true);
+    try {
+      const response = await fetch(`/api/gst/invoices/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tdsDeducted: next }),
+      });
+      if (!response.ok) throw new Error('Failed to update TDS flag');
+      const data = await response.json();
+      setInvoice((cur) => (cur ? { ...cur, ...data.invoice } : cur));
+      toast.success(
+        next
+          ? 'TDS deduction enabled — credit will be auto-derived.'
+          : 'TDS deduction disabled — any auto-derived credit was removed.',
+      );
+    } catch (error) {
+      toast.error('Failed to update', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
     } finally {
@@ -604,6 +636,53 @@ export default function InvoiceDetailPage({
               </div>
             </CardContent>
           </Card>
+
+          {/* Sprint A.2 — TDS deduction card (B2B only, when customer
+              has a non-zero TDS rate). Per-invoice override of the
+              customer's default TDS deduction config. */}
+          {invoice.invoiceType === 'B2B' && customer && (customer.tdsRatePct ?? 0) > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>TDS Deduction</CardTitle>
+                <CardDescription>
+                  {customer.tdsSection ?? '194J'} · {customer.tdsRatePct ?? 10}% on taxable value
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Estimated TDS</span>
+                  <span className="font-mono font-medium">
+                    ₹{formatAmount(Math.round(invoice.taxableAmount * (customer.tdsRatePct ?? 0) / 100))}
+                  </span>
+                </div>
+                <Separator />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-sm">
+                    <p className="font-medium">
+                      {invoice.tdsDeducted === false
+                        ? 'TDS not deducted on this invoice'
+                        : 'TDS will be deducted'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {invoice.status === 'FINAL' && invoice.tdsDeducted !== false
+                        ? 'A tds_credits row is auto-maintained for this invoice.'
+                        : invoice.status !== 'FINAL'
+                          ? 'Finalize the invoice to emit the tds_credits row.'
+                          : 'Auto-derivation is suppressed for this invoice.'}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleToggleTds(invoice.tdsDeducted === false)}
+                    disabled={isUpdating}
+                  >
+                    {invoice.tdsDeducted === false ? 'Enable TDS' : 'Disable TDS'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Supplier */}
           {business && (

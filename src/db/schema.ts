@@ -831,6 +831,13 @@ export const invoices = pgTable('invoices', {
   returnPeriod: text('return_period').notNull(),
   status: text('status').$type<InvoiceStatus>().default('DRAFT'),
   notes: text('notes'),
+  // Sprint A.2 (saas back-port) — per-invoice override for TDS
+  // auto-derivation. Defaults to true (the customer's configured rate
+  // applies). When false, the finalisation hook will NOT emit a
+  // tds_credits row for this invoice — useful for one-off invoices to
+  // small customers who don't deduct TDS despite the customer-level
+  // config saying they do.
+  tdsDeducted: boolean('tds_deducted').notNull().default(true),
 
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -2697,6 +2704,12 @@ export type NewForm26asUpload = typeof form26asUploads.$inferInsert;
 // TDS credits — non-salary (consulting/interest/property) — feeds CSV_TDS2 / CSV_TDS3
 export type TdsCategory = 'CONSULTING' | 'INTEREST' | 'RENT' | 'PROPERTY' | 'OTHER';
 
+/** Sprint A.2 (saas back-port) — provenance for auto-derived tds_credits
+ *  rows. The shape intentionally mirrors cashflow_events.sourceKind so
+ *  /tax/reconciliation can carry a homogeneous derivation story across
+ *  modules. */
+export type TdsCreditSourceKind = 'GST_INVOICE' | 'MANUAL' | 'OTHER';
+
 export const tdsCredits = pgTable('tds_credits', {
   id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
@@ -2714,6 +2727,19 @@ export const tdsCredits = pgTable('tds_credits', {
     () => form26asUploads.id,
     { onDelete: 'set null' },
   ),
+  // Sprint A.2 — auto-derivation provenance. When `autoDerived` is true
+  // the row was emitted by the finalisation hook (or any future
+  // derivation). `(userId, sourceKind, sourceId)` is the idempotency
+  // key — the partial unique index keeps re-derivation safe (only
+  // non-null pairs are constrained, leaving manual rows alone). Note
+  // the unique constraint MUST include user_id so different tenants can
+  // each have their own auto-derived row for the same invoice id.
+  autoDerived: boolean('auto_derived').notNull().default(false),
+  sourceKind: text('source_kind').$type<TdsCreditSourceKind>(),
+  sourceId: integer('source_id'),
+  /** ISO date when the TDS was deducted. For GST_INVOICE rows this is
+   *  the invoice_date. Used to bucket into quarterly 26AS comparisons. */
+  paymentDate: text('payment_date'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

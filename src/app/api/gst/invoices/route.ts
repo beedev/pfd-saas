@@ -4,6 +4,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
 import { auth } from '@/auth';
+import { syncInvoiceTdsCredit } from '@/lib/finance/derive-invoice-tds';
 
 // GET - List all invoices (supports ?fy=2026-27 or ?period=MMYYYY)
 export async function GET(request: NextRequest) {
@@ -226,6 +227,14 @@ export async function POST(request: NextRequest) {
       .select()
       .from(invoiceItems)
       .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+
+    // Sprint A.2 — DRAFTs are not eligible for TDS derivation today, but
+    // call sync so the sole entry point covers any future state machine.
+    try {
+      await syncInvoiceTdsCredit(session.user.id, invoiceId);
+    } catch (err) {
+      console.error('[invoices POST] tds derivation failed', err);
+    }
 
     return NextResponse.json(
       {

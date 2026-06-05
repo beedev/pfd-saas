@@ -253,6 +253,13 @@
 			"when": 1780703907000,
 			"tag": "0035_customer_tds",
 			"breakpoints": true
+		},
+		{
+			"idx": 36,
+			"version": "7",
+			"when": 1780703908000,
+			"tag": "0036_invoice_tds_autoderive",
+			"breakpoints": true
 		}
 	]
 }

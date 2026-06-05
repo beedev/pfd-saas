@@ -4,6 +4,10 @@ import { and, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
 import { auth } from '@/auth';
+import {
+  syncInvoiceTdsCredit,
+  removeInvoiceTdsCredit,
+} from '@/lib/finance/derive-invoice-tds';
 
 // GET - Fetch single invoice with items, customer, and business profile
 export async function GET(
@@ -97,6 +101,14 @@ export async function DELETE(
     // Delete invoice
     await db.delete(invoices).where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
 
+    // Sprint A.2 — retract any auto-derived tds_credits row for this
+    // invoice. Non-fatal: log and continue if it fails.
+    try {
+      await removeInvoiceTdsCredit(session.user.id, invoiceId);
+    } catch (err) {
+      console.error('[invoices DELETE] tds derivation cleanup failed', err);
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting invoice:', error);
@@ -135,23 +147,41 @@ export async function PUT(
 
     const body = await request.json();
 
-    // If only status is provided, just update status
-    if (body.status && !body.items) {
-      const { status } = body;
-      if (!['DRAFT', 'FINAL', 'CANCELLED'].includes(status)) {
-        return NextResponse.json(
-          { error: 'Invalid status. Must be DRAFT, FINAL, or CANCELLED' },
-          { status: 400 }
-        );
+    // If only status / tdsDeducted is provided (no items), just patch
+    // those fields. Sprint A.2 — the tdsDeducted toggle is a per-invoice
+    // override that suppresses TDS auto-derivation independent of
+    // status.
+    const isStatusOnly =
+      !body.items && (body.status !== undefined || body.tdsDeducted !== undefined);
+    if (isStatusOnly) {
+      const patch: Record<string, unknown> = { updatedAt: new Date() };
+
+      if (body.status !== undefined) {
+        const { status } = body;
+        if (!['DRAFT', 'FINAL', 'CANCELLED'].includes(status)) {
+          return NextResponse.json(
+            { error: 'Invalid status. Must be DRAFT, FINAL, or CANCELLED' },
+            { status: 400 }
+          );
+        }
+        patch.status = status;
+      }
+
+      if (body.tdsDeducted !== undefined) {
+        patch.tdsDeducted = Boolean(body.tdsDeducted);
       }
 
       await db
         .update(invoices)
-        .set({
-          status,
-          updatedAt: new Date(),
-        })
+        .set(patch)
         .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
+
+      // Sprint A.2 — invoice state changed, resync the derived row.
+      try {
+        await syncInvoiceTdsCredit(session.user.id, invoiceId);
+      } catch (err) {
+        console.error('[invoices PUT status] tds derivation failed', err);
+      }
 
       const updated = await db
         .select()
@@ -332,6 +362,14 @@ export async function PUT(
       .select()
       .from(invoiceItems)
       .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+
+    // Sprint A.2 — full edit changed the taxable amount; resync the
+    // derived row. Skipped no-op for DRAFTs.
+    try {
+      await syncInvoiceTdsCredit(session.user.id, invoiceId);
+    } catch (err) {
+      console.error('[invoices PUT full] tds derivation failed', err);
+    }
 
     return NextResponse.json({
       invoice: updated[0],
