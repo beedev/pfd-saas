@@ -2701,6 +2701,63 @@ export const form26asUploads = pgTable('form_26as_uploads', {
 export type Form26asUpload = typeof form26asUploads.$inferSelect;
 export type NewForm26asUpload = typeof form26asUploads.$inferInsert;
 
+// ─── Sprint B (saas back-port) — Form 16 upload + manual entry ──────────
+/**
+ * Form 16 captures the salary side of the reconciliation triangle
+ * (vs Form 26AS which captures TDS on the deductor side, vs books which
+ * captures invoices + salary_income manual entries).
+ *
+ * Part A (TRACES-generated) carries quarterly TDS in a stable table;
+ * Part B is less consistent across employers, so the parser is
+ * best-effort and we always allow manual edits via /tax/form-16/[id].
+ *
+ * sourceKind:
+ *   'PDF'    — uploaded TRACES-generated PDF, parsed by upload route
+ *   'MANUAL' — user-entered without a source PDF
+ *
+ * Multi-tenant: user_id NOT NULL FK to users(id) ON DELETE CASCADE.
+ * Indexes cover (user_id, fy) and (user_id, employer_tan) for fast
+ * per-user lookups.
+ */
+export type Form16SourceKind = 'PDF' | 'MANUAL';
+
+export const form16Uploads = pgTable('form_16_uploads', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  employerName: text('employer_name').notNull(),
+  employerTan: text('employer_tan').notNull(),
+  uploadedAt: timestamp('uploaded_at', { mode: 'date' }).defaultNow(),
+  sourceFilename: text('source_filename'),
+  sourceKind: text('source_kind').$type<Form16SourceKind>().notNull(),
+
+  // Part B headline numbers (all in paisa).
+  grossSalaryPaisa: bigint('gross_salary_paisa', { mode: 'number' }).default(0),
+  exemptAllowancesPaisa: bigint('exempt_allowances_paisa', { mode: 'number' }).default(0),
+  standardDeductionPaisa: bigint('standard_deduction_paisa', { mode: 'number' }).default(0),
+  professionalTaxPaisa: bigint('professional_tax_paisa', { mode: 'number' }).default(0),
+  taxableSalaryPaisa: bigint('taxable_salary_paisa', { mode: 'number' }).default(0),
+
+  // Part A — TDS by quarter.
+  totalTdsPaisa: bigint('total_tds_paisa', { mode: 'number' }).default(0),
+  quarterlyTdsQ1Paisa: bigint('quarterly_tds_q1_paisa', { mode: 'number' }).default(0),
+  quarterlyTdsQ2Paisa: bigint('quarterly_tds_q2_paisa', { mode: 'number' }).default(0),
+  quarterlyTdsQ3Paisa: bigint('quarterly_tds_q3_paisa', { mode: 'number' }).default(0),
+  quarterlyTdsQ4Paisa: bigint('quarterly_tds_q4_paisa', { mode: 'number' }).default(0),
+
+  // Diagnostic — extracted text + free-form notes.
+  rawText: text('raw_text'),
+  notes: text('notes'),
+
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('form_16_uploads_fy_idx').on(table.userId, table.fy),
+  index('form_16_uploads_employer_idx').on(table.userId, table.employerTan),
+  index('form_16_uploads_user_id_idx').on(table.userId),
+]);
+
+export type Form16Upload = typeof form16Uploads.$inferSelect;
+export type NewForm16Upload = typeof form16Uploads.$inferInsert;
+
 // TDS credits — non-salary (consulting/interest/property) — feeds CSV_TDS2 / CSV_TDS3
 export type TdsCategory = 'CONSULTING' | 'INTEREST' | 'RENT' | 'PROPERTY' | 'OTHER';
 

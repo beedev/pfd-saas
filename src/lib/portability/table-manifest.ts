@@ -102,6 +102,7 @@ import {
   incomeTaxPaid,
   salaryIncome,
   form26asUploads,
+  form16Uploads,
   tdsCredits,
   advanceTaxInstallments,
   itrFormSelection,
@@ -173,6 +174,8 @@ export const MANIFEST: TableSpec[] = [
   { tableName: 'incomeTaxPaid', drizzleTable: incomeTaxPaid, hasNotes: true, parents: [] },
   { tableName: 'salaryIncome', drizzleTable: salaryIncome, hasNotes: true, parents: [] },
   { tableName: 'form26asUploads', drizzleTable: form26asUploads, hasNotes: true, parents: [] },
+  // Sprint B — Form 16 uploads. Root table, no FKs to other user data.
+  { tableName: 'form16Uploads', drizzleTable: form16Uploads, hasNotes: true, parents: [] },
   { tableName: 'advanceTaxInstallments', drizzleTable: advanceTaxInstallments, hasNotes: true, parents: [] },
   { tableName: 'itrFormSelection', drizzleTable: itrFormSelection, hasNotes: false, parents: [] },
   { tableName: 'presumptiveIncome', drizzleTable: presumptiveIncome, hasNotes: true, parents: [] },
@@ -225,7 +228,7 @@ export const MANIFEST: TableSpec[] = [
  * silently ship broken builds.
  * ──────────────────────────────────────────────────────────────────────── */
 
-const EXPECTED_TABLE_COUNT = 72;
+const EXPECTED_TABLE_COUNT = 73;
 
 if (MANIFEST.length !== EXPECTED_TABLE_COUNT) {
   throw new Error(
