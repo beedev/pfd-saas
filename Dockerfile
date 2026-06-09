@@ -108,6 +108,14 @@ COPY --from=builder --chown=postgres:postgres /app/node_modules/@drizzle-team ./
 # .next bundle, so the top-level node_modules tree is missing it.
 COPY --from=builder --chown=postgres:postgres /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 
+# pdfjs-dist legacy build — Next.js standalone only includes pdf.mjs
+# (the entry it sees statically). pdf.worker.mjs is loaded dynamically
+# even when getDocument() runs with disableWorker:true, so it must be
+# physically present on disk or the require throws "Cannot find module
+# pdf.worker.mjs". Statement parsers (Form 26AS, EPF passbook, NPS SOT,
+# LIC, chit DSC) all import pdf-text.ts which depends on this.
+COPY --from=builder --chown=postgres:postgres /app/node_modules/pdfjs-dist/legacy/build ./node_modules/pdfjs-dist/legacy/build
+
 # Custom entrypoint orchestrates postgres + Next.js.
 COPY --chown=postgres:postgres docker-entrypoint.sh /usr/local/bin/pfd-entrypoint.sh
 RUN chmod +x /usr/local/bin/pfd-entrypoint.sh
