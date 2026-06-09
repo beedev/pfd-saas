@@ -115,6 +115,10 @@ interface UploadRow {
   parsedTotalTdsPaisa: number | null;
   parsedTotalIncomePaisa: number | null;
   parseNotes: string | null;
+  /** When NULL the upload predates per-deductor parsing — TAN matching
+   *  falls back to headline totals and the UI hints the user to
+   *  re-upload. */
+  parsedDeductorsJson: string | null;
 }
 
 // ─── helpers ───────────────────────────────────────────────────────────
@@ -196,6 +200,7 @@ export default function Form26asPage() {
   const [data, setData] = useState<ReconResp | null>(null);
   const [uploads, setUploads] = useState<UploadRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pendingTan, setPendingTan] = useState<string | null>(null);
   const [uploadPanelOpen, setUploadPanelOpen] = useState(false);
@@ -204,6 +209,7 @@ export default function Form26asPage() {
 
   const load = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const [reconR, indexR] = await Promise.all([
         fetch(`/api/tax/reconciliation/per-tan?fy=${encodeURIComponent(fy)}`),
@@ -220,7 +226,10 @@ export default function Form26asPage() {
       }
       setExpanded(new Set());
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Load failed');
+      const msg = e instanceof Error ? e.message : 'Load failed';
+      toast.error(msg);
+      setLoadError(msg);
+      setData(null);
     } finally {
       setIsLoading(false);
     }
@@ -377,6 +386,24 @@ export default function Form26asPage() {
         </div>
       )}
 
+      {/* ── Error ── */}
+      {!isLoading && loadError && (
+        <Card className="border-rose-300">
+          <CardContent>
+            <div className="flex items-start gap-3">
+              <XCircle className="mt-0.5 h-5 w-5 text-rose-500" />
+              <div>
+                <p className="font-bold text-[var(--dxp-text)]">Could not load reconciliation</p>
+                <p className="text-sm text-[var(--dxp-text-secondary)]">{loadError}</p>
+                <Button variant="secondary" size="sm" onClick={load} className="mt-2">
+                  Retry
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Headline summary ── */}
       {!isLoading && data && !isFullyEmpty && (
         <SummaryCard data={data} />
@@ -458,42 +485,54 @@ export default function Form26asPage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {uploads.map((u) => (
-                    <div
-                      key={u.id}
-                      className="flex items-start justify-between rounded border border-[var(--dxp-border-light)] p-3"
-                    >
-                      <div className="flex items-start gap-2">
-                        <FileText className="mt-0.5 h-4 w-4 text-[var(--dxp-text-muted)]" />
-                        <div>
-                          <p className="text-sm font-bold text-[var(--dxp-text)]">
-                            {u.filePath.split('/').pop()}
-                          </p>
-                          <p className="text-xs text-[var(--dxp-text-muted)]">
-                            Uploaded {u.uploadedAt ? new Date(u.uploadedAt).toLocaleString() : '—'}
-                            {' · '}Parsed TDS:{' '}
-                            <span className="font-mono">
-                              {u.parsedTotalTdsPaisa != null
-                                ? formatINR(u.parsedTotalTdsPaisa)
-                                : 'not detected'}
-                            </span>
-                          </p>
-                          {u.parseNotes && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400">
-                              {u.parseNotes}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteUpload(u.id)}
+                  {uploads.map((u) => {
+                    // pre-Sprint-5.13 uploads were parsed for headline
+                    // totals only. Without per-deductor JSON the per-TAN
+                    // matcher can't see this upload's deductors — flag
+                    // it so the user knows to re-upload.
+                    const legacyFormat = u.parsedDeductorsJson == null;
+                    return (
+                      <div
+                        key={u.id}
+                        className="flex items-start justify-between rounded border border-[var(--dxp-border-light)] p-3"
                       >
-                        <Trash2 className="h-3 w-3 text-rose-500" />
-                      </Button>
-                    </div>
-                  ))}
+                        <div className="flex items-start gap-2">
+                          <FileText className="mt-0.5 h-4 w-4 text-[var(--dxp-text-muted)]" />
+                          <div>
+                            <p className="text-sm font-bold text-[var(--dxp-text)]">
+                              {u.filePath.split('/').pop()}
+                            </p>
+                            <p className="text-xs text-[var(--dxp-text-muted)]">
+                              Uploaded {u.uploadedAt ? new Date(u.uploadedAt).toLocaleString() : '—'}
+                              {' · '}Parsed TDS:{' '}
+                              <span className="font-mono">
+                                {u.parsedTotalTdsPaisa != null
+                                  ? formatINR(u.parsedTotalTdsPaisa)
+                                  : 'not detected'}
+                              </span>
+                            </p>
+                            {u.parseNotes && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400">
+                                {u.parseNotes}
+                              </p>
+                            )}
+                            {legacyFormat && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400">
+                                ⚠ Older parse format — re-upload this PDF to enable per-TAN matching for its deductors.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteUpload(u.id)}
+                        >
+                          <Trash2 className="h-3 w-3 text-rose-500" />
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
