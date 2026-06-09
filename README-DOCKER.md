@@ -7,29 +7,61 @@ run`.
 
 ---
 
-## Quick start (one command)
+## Quick install — no clone needed
 
 Only prerequisite: Docker Desktop running.
 
 ```bash
-./scripts/deploy.sh
+curl -fsSL https://raw.githubusercontent.com/beedev/pfd-saas/main/install.sh | bash
 ```
 
-The script builds the image, sets up a persistent volume, starts the container,
-polls `/api/health` until ready, then opens your browser to <http://localhost:3000>.
-First run takes ~5–10 minutes for the image build; subsequent runs are seconds.
+Pulls the pre-built image from `ghcr.io/beedev/pfd-saas:latest` (built on every push
+to main by [the GHCR workflow](./.github/workflows/docker-publish.yml)),
+starts the container, waits for `/api/health`, opens your browser. Around **30 seconds
+on a warm cache**, ~2 minutes on first run (one-time image pull, ~600 MB, multi-arch).
+
+To upgrade later, re-run the same one-liner — it pulls the latest image and recreates
+the container (your data in the named volume survives).
+
+Pin to a specific version:
+
+```bash
+IMAGE_TAG=v0.7.0 curl -fsSL https://raw.githubusercontent.com/beedev/pfd-saas/main/install.sh | bash
+```
+
+Bind to a different port:
+
+```bash
+PORT=8080 curl -fsSL https://raw.githubusercontent.com/beedev/pfd-saas/main/install.sh | bash
+```
 
 ### Or run docker directly
 
 ```bash
 docker run -d \
-  -v pfd_data:/data \
+  -v pfd_saas_data:/data \
   -p 3000:3000 \
+  -e AUTH_URL=http://localhost:3000 \
   --name pfd-saas \
-  pfd-saas:latest
+  ghcr.io/beedev/pfd-saas:latest
 
 open http://localhost:3000
 ```
+
+---
+
+## Build from source (developers)
+
+If you've cloned the repo and want to build locally instead of pulling
+from GHCR:
+
+```bash
+./scripts/deploy.sh
+```
+
+The script builds the image from the local `Dockerfile`, sets up the persistent
+volume, starts the container, polls `/api/health` until ready, then opens your
+browser. First build takes ~5–10 minutes; subsequent rebuilds reuse layers.
 
 ---
 
