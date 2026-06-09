@@ -13,6 +13,24 @@
  *                       depend on. Tokens within a row are tab-separated.
  */
 
+// ─── Canvas-API polyfill stubs (Node compatibility) ──────────────────
+//
+// pdfjs-dist v5 references DOMMatrix / ImageData / Path2D at module top
+// level and tries to polyfill them via @napi-rs/canvas. In stripped
+// Docker images (no canvas native binary) the polyfill fails and the
+// ReferenceError surfaces at import time, even though TEXT extraction
+// doesn't actually use any of these APIs. Empty stub classes satisfy
+// the reference; the unused code paths (rendering, viewport transforms)
+// never trigger when we only call getTextContent().
+//
+// Must run BEFORE the dynamic import of pdfjs-dist below.
+{
+  const g = globalThis as Record<string, unknown>;
+  if (typeof g.DOMMatrix === 'undefined') g.DOMMatrix = class {};
+  if (typeof g.ImageData === 'undefined') g.ImageData = class {};
+  if (typeof g.Path2D === 'undefined') g.Path2D = class {};
+}
+
 interface PdfTextItem {
   str?: string;
   transform?: number[];
