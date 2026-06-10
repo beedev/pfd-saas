@@ -68,3 +68,9 @@ All 32 actionable findings resolved except items requiring user action or upstre
 - [U] Container recreate to apply migration 0038 + new image (user-gated)
 - [deferred] CSP header (needs browser testing) · nodemailer (no upstream fix) · drizzle-kit esbuild chain (breaking bump)
 - [A] S1/S2/S3 accepted test-mode defaults
+
+## Docker deploy validation — 2026-06-10
+- Container pfd-saas:latest built locally + running on :3001 (fresh pfd_saas_data volume), health green.
+- 50e3674 fix(docker): drizzle-kit 0.31.10 swapped esbuild-register->tsx; Dockerfile runner COPY updated (regression from S21 audit-fix). Build was failing at COPY esbuild-register.
+- Cold-boot validated on real container: S15 scram-sha-256 bootstrap OK; all 39 migrations incl. 0038 applied via tsx; business_profile_gstin_user_unique index confirmed in DB; demo/personal chooser present (DEMO_PERSONAL_SWITCH=true entrypoint default).
+- Cosmetic: one benign boot log line "listen_addresses cannot be changed without restarting" on the pg_hba reload — pg_hba change still applied, DB fully functional. Not fixed (would touch working entrypoint); silence later if desired.
