@@ -26,7 +26,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [ ] S12 parseBody(schema) helper + top mutation routes
 - [~] S13 security headers in next.config — nosniff/XFO/Referrer/HSTS done (c47fc6b); CSP deferred (needs browser testing)
 - [U] S14 nodemailer — advisory now covers <=8.0.4, NO fix available upstream; revisit when nodemailer ships a patch
-- [ ] S15 pg_hba trust → scram-sha-256
+- [x] S15 pg_hba → scram-sha-256, both boot paths safe (2f7e142)
 - [x] A3 gstin → (user_id, gstin) via migration 0038; applies on next container recreate (80af714)
 - [x] A4 tds_credits partial idx declared + payment_date date mode:string (80af714)
 - [ ] A5 consolidate FY-window helpers (11 sites)
@@ -35,8 +35,8 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [ ] A8 upload path ordering standardize userId-first + rewrite script
 
 ## P3
-- [x] S16 amfi (c47fc6b) · [x] S17 wipe-demo-data parameterize (c47fc6b) · [~] S18 timingSafeEqual done (c47fc6b), telegram pairing rate limit pending · [x] S19 health generic error (c47fc6b) · [x] S20 .dockerignore (c47fc6b) · [~] S21 npm audit fix applied 17→11 vulns (23a5e53); drizzle-kit esbuild chain needs breaking bump — deferred · [ ] S22 Dockerfile build-arg secret · [ ] S23 pin security deps
-- [ ] A9 requireUserId() helper · [ ] A10 providentFund alias codemod · [ ] A11 stale comments · [ ] A12 PF rate single constant
+- [x] S16 amfi (c47fc6b) · [x] S17 wipe-demo-data parameterize (c47fc6b) · [x] S18 timingSafeEqual (c47fc6b) + pairing rate limit (2f7e142) · [x] S19 health generic error (c47fc6b) · [x] S20 .dockerignore (c47fc6b) · [~] S21 npm audit fix applied 17→11 vulns (23a5e53); drizzle-kit esbuild chain needs breaking bump — deferred · [x] S22 build ARG (2f7e142) · [x] S23 exact pins (2f7e142)
+- [ ] A9 requireUserId() helper · [x] A10 alias codemod, 11 files (2f7e142) · [x] A11 (2f7e142) · [x] A12 PF_ANNUAL_RATE_PCT (2f7e142)
 
 ## Blocked / user actions
 - Smoke suite (smoke-test-tax/portability) requires `DEV_AUTH_BYPASS=true npm run dev` — permission classifier blocks Claude starting it. User: run `! cd /Users/bharath/Desktop/pfd-saas && DEV_AUTH_BYPASS=true npm run dev` in the session, or add a Bash allow rule. Until then the compliance gate per commit = `npm run build` (type-checked) — all green so far.
@@ -49,3 +49,6 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - next up: A1 snapshot reconstruction + A3 gstin + A4 tds_credits as one migration-cluster (fix schema A4/A3 first, then drizzle-kit generate snapshot-sync 0038, trim duplicate DDL); then A5-A8 extractions, S11/S12, S15, S22/S23, A9-A12
 - 2026-06-10: 80af714 migration cluster A1+A3+A4 — snapshot chain healed, drift zero
 - next up: small-mechanical batch (S15, S22, S23, S18-rest, A10, A11, A12), then extractions A5/A6/A8, then A7, S11, S12, A9
+- 2026-06-10: 2f7e142 small-mechanical batch (S15,S18r,S22,S23,A10-A12) + orphaned schema-hash artifact committed
+- follow-up noted by agent: 4th PF 8.25 copy in goal-corpus.ts DEFAULT_RETURN_PCT_BY_CLASS; rate-table drift between asset-class-returns defaults and constants file (pre-existing)
+- next up: extractions A5 (fyBounds x11), A6 (itr3-summary lib), A8 (upload path ordering); then A7, A9, S11, S12
