@@ -6,6 +6,7 @@ uploads
 backups
 backups-*
 tmp
+.env
 .env*.local
 .env.local.bak
 *.log

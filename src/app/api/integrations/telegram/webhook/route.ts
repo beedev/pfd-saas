@@ -21,6 +21,7 @@
  * cookie check doesn't redirect Telegram to /login.
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, gt } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
@@ -39,6 +40,16 @@ interface TelegramUpdate {
 
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
 
+// Constant-time string compare — avoids leaking the secret's contents
+// through response-timing differences. Length check first because
+// timingSafeEqual throws on unequal-length buffers.
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 export async function POST(request: NextRequest) {
   const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
   if (!expectedSecret) {
@@ -49,7 +60,7 @@ export async function POST(request: NextRequest) {
   }
 
   const receivedSecret = request.headers.get(SECRET_HEADER);
-  if (receivedSecret !== expectedSecret) {
+  if (!receivedSecret || !safeCompare(receivedSecret, expectedSecret)) {
     console.warn('[telegram/webhook] secret mismatch (or missing header)');
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }

@@ -17,6 +17,7 @@
  *   sip_auto_execute  → +24 hours
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { db, scheduledJobs, type JobType } from '@/db';
@@ -25,6 +26,16 @@ import { runAlertsCheck } from '@/lib/cron/alerts-check';
 import { runDailyDigestJob } from '@/lib/cron/daily-digest';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
+
+// Constant-time string compare — avoids leaking the secret's contents
+// through response-timing differences. Length check first because
+// timingSafeEqual throws on unequal-length buffers.
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 const ADVANCE_MS: Record<JobType, number> = {
   daily_digest: 24 * 60 * 60 * 1000,
@@ -46,7 +57,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
   }
   const auth = request.headers.get('authorization') ?? '';
-  if (auth !== `Bearer ${CRON_SECRET}`) {
+  if (!safeCompare(auth, `Bearer ${CRON_SECRET}`)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

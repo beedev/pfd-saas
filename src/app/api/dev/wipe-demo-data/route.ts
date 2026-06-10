@@ -37,11 +37,10 @@ export async function POST() {
   try {
     const deleted: Record<string, number> = {};
     for (const table of TABLES_WITH_DEMO_MARKER) {
-      // Drizzle's sql template doesn't interpolate identifiers safely,
-      // so we whitelist the table name above and concatenate. The list
-      // is hardcoded — no user input ever reaches this point.
+      // Table names come from the hardcoded whitelist above and are
+      // quoted via sql.identifier; userId is bound as a parameter.
       const result = await db.execute(
-        sql.raw(`DELETE FROM ${table} WHERE user_id = '${userId.replace(/'/g, "''")}' AND notes LIKE 'DEMO-SEED:%'`),
+        sql`DELETE FROM ${sql.identifier(table)} WHERE user_id = ${userId} AND notes LIKE 'DEMO-SEED:%'`,
       );
       // postgres-js returns { count: N } on DELETE
       deleted[table] = (result as { count?: number }).count ?? 0;

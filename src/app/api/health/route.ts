@@ -33,11 +33,14 @@ export async function GET() {
       uptimeMs: Date.now() - startedAt,
     });
   } catch (err) {
+    // Log the real failure server-side; the public probe response stays
+    // generic so internal details (connection strings, hosts) never leak.
+    console.error('[health] DB check failed:', err);
     return NextResponse.json(
       {
         ok: false,
         db: 'down',
-        error: err instanceof Error ? err.message : 'unknown',
+        error: 'db unavailable',
       },
       { status: 503 },
     );

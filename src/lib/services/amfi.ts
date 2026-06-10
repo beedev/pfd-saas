@@ -175,6 +175,9 @@ export async function getHistoricalNav(
   try {
     const code = schemeCode.trim();
     if (!code || !dateIso) return null;
+    // Scheme codes are numeric AMFI identifiers — reject anything else
+    // before it reaches the URL (prevents path/query injection).
+    if (!/^\d+$/.test(code)) return null;
 
     let dataPoints: MfApiDataPoint[];
 
@@ -183,7 +186,7 @@ export async function getHistoricalNav(
     if (cached && Date.now() - cached.timestamp < HISTORY_CACHE_TTL_MS) {
       dataPoints = cached.data;
     } else {
-      const response = await fetch(`https://api.mfapi.in/mf/${code}`, {
+      const response = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(code)}`, {
         headers: { 'User-Agent': USER_AGENT },
         cache: 'no-store',
       });
