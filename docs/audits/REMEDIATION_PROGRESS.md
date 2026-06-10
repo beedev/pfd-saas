@@ -23,7 +23,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 
 ## P2
 - [x] S11 metadata-driven per-column validator + unknown-key strip/count; offline test 12/12 (611da84)
-- [ ] S12 parseBody(schema) helper + top mutation routes
+- [x] S12 parseBody + zod schemas on 10 route files (71e10eb)
 - [~] S13 security headers in next.config — nosniff/XFO/Referrer/HSTS done (c47fc6b); CSP deferred (needs browser testing)
 - [U] S14 nodemailer — advisory now covers <=8.0.4, NO fix available upstream; revisit when nodemailer ships a patch
 - [x] S15 pg_hba → scram-sha-256, both boot paths safe (2f7e142)
@@ -36,7 +36,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 
 ## P3
 - [x] S16 amfi (c47fc6b) · [x] S17 wipe-demo-data parameterize (c47fc6b) · [x] S18 timingSafeEqual (c47fc6b) + pairing rate limit (2f7e142) · [x] S19 health generic error (c47fc6b) · [x] S20 .dockerignore (c47fc6b) · [~] S21 npm audit fix applied 17→11 vulns (23a5e53); drizzle-kit esbuild chain needs breaking bump — deferred · [x] S22 build ARG (2f7e142) · [x] S23 exact pins (2f7e142)
-- [ ] A9 requireUserId() helper · [x] A10 alias codemod, 11 files (2f7e142) · [x] A11 (2f7e142) · [x] A12 PF_ANNUAL_RATE_PCT (2f7e142)
+- [x] A9 getSessionUserId()/unauthenticated() convention, adopted in same 10 files (71e10eb) · [x] A10 alias codemod, 11 files (2f7e142) · [x] A11 (2f7e142) · [x] A12 PF_ANNUAL_RATE_PCT (2f7e142)
 
 ## Blocked / user actions
 - Smoke suite (smoke-test-tax/portability) requires `DEV_AUTH_BYPASS=true npm run dev` — permission classifier blocks Claude starting it. User: run `! cd /Users/bharath/Desktop/pfd-saas && DEV_AUTH_BYPASS=true npm run dev` in the session, or add a Bash allow rule. Until then the compliance gate per commit = `npm run build` (type-checked) — all green so far.
@@ -58,3 +58,13 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - next up: A7 retirement-shared dedup (incl. 4th PF copy + rate-table drift); then final batch S12 parseBody + A9 requireUserId
 - 2026-06-10: bfbf8bd A7 dedup — NEW DECISION ITEM for user: GOLD/NPS/RE rate drift between asset-class-returns seed (9/9.5/6) and DEFAULT_GROWTH_RATES (8/9/5) is accidental per git history; un-seeded users get inconsistent projections; pick canonical values
 - next up: FINAL batch — S12 parseBody zod helper + A9 requireUserId, adopt across top mutation routes
+- 2026-06-10: 71e10eb final batch S12+A9 — ACTIONABLE BACKLOG COMPLETE
+
+## LOOP COMPLETE — 2026-06-10
+All 32 actionable findings resolved except items requiring user action or upstream:
+- [U] S4 secret rotation (user, external consoles)
+- [U] Smoke suite run (user must start DEV_AUTH_BYPASS dev server; then: node scripts/smoke-test-tax.mjs <userId>, smoke-portability.mjs <userId>)
+- [U] Rate-drift decision: GOLD/NPS/RE — seed (9/9.5/6) vs DEFAULT_GROWTH_RATES (8/9/5), accidental per git history, pick canonical
+- [U] Container recreate to apply migration 0038 + new image (user-gated)
+- [deferred] CSP header (needs browser testing) · nodemailer (no upstream fix) · drizzle-kit esbuild chain (breaking bump)
+- [A] S1/S2/S3 accepted test-mode defaults
