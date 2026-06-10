@@ -22,7 +22,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [x] A1 snapshot chain rebuilt via 0038 snapshot-sync; second generate run clean (80af714)
 
 ## P2
-- [ ] S11 portability import per-column zod validation
+- [x] S11 metadata-driven per-column validator + unknown-key strip/count; offline test 12/12 (611da84)
 - [ ] S12 parseBody(schema) helper + top mutation routes
 - [~] S13 security headers in next.config — nosniff/XFO/Referrer/HSTS done (c47fc6b); CSP deferred (needs browser testing)
 - [U] S14 nodemailer — advisory now covers <=8.0.4, NO fix available upstream; revisit when nodemailer ships a patch
@@ -54,3 +54,5 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - next up: extractions A5 (fyBounds x11), A6 (itr3-summary lib), A8 (upload path ordering); then A7, A9, S11, S12
 - 2026-06-10: 3ea7fbe extraction batch A5+A6+A8 — build green
 - next up: S11 portability per-column zod validation + portability upload dir userId-first; then A7 retirement-shared dedup (+4th PF copy, rate-table drift); then S12 parseBody + A9 requireUserId
+- 2026-06-10: 611da84 S11 + portability upload dir userId-first — A8 now fully closed
+- next up: A7 retirement-shared dedup (incl. 4th PF copy + rate-table drift); then final batch S12 parseBody + A9 requireUserId
