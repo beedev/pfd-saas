@@ -2,7 +2,8 @@
  * Sprint 6.4d — commit a previously-previewed import in Replace mode.
  *
  * Algorithm:
- *   1. Read the stored payload from uploads/portability/<userId>/<id>.json
+ *   1. Read the stored payload from uploads/<userId>/portability/<id>.json
+ *      (userId-first per the repo upload convention)
  *   2. Re-validate (defense in depth — file could have been edited
  *      after the preview).
  *   3. Open one Drizzle transaction.
@@ -39,7 +40,7 @@ import { db } from '@/db';
 import { MANIFEST } from './table-manifest';
 import { validateExport } from './import-validate';
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'portability');
+const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const BATCH_SIZE = 500;
 
 /** Tables whose primary key is `userId` (not a serial id). Special-cased
@@ -92,7 +93,7 @@ export async function commitImport(userId: string, importId: string): Promise<Co
   if (!/^[a-f0-9]{32}$/.test(importId)) {
     throw new Error('Invalid importId.');
   }
-  const filePath = path.join(UPLOAD_ROOT, userId, `${importId}.json`);
+  const filePath = path.join(UPLOAD_ROOT, userId, 'portability', `${importId}.json`);
   let raw: string;
   try {
     raw = await fs.readFile(filePath, 'utf8');

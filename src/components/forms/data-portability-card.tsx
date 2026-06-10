@@ -28,6 +28,9 @@ interface DiffSummary {
   willInsert: Record<string, number>;
   totalWillDelete: number;
   totalWillInsert: number;
+  /** Unknown fields stripped from rows during validation (per table). */
+  strippedUnknownKeys?: Record<string, number>;
+  totalStrippedKeys?: number;
   exportedAt: string;
   version: string;
 }
@@ -177,6 +180,13 @@ export function DataPortabilityCard() {
                   {diff.totalWillInsert} rows. Your current{' '}
                   {diff.totalWillDelete} rows will be wiped first.
                 </p>
+                {(diff.totalStrippedKeys ?? 0) > 0 && (
+                  <p className="mt-1 text-sm text-[var(--dxp-text-secondary)]">
+                    {diff.totalStrippedKeys} unrecognised field
+                    {diff.totalStrippedKeys === 1 ? '' : 's'} in the file will
+                    be ignored.
+                  </p>
+                )}
               </div>
               <button
                 onClick={handleCancel}

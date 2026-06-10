@@ -3,8 +3,9 @@
  *
  * Accepts a multipart upload with a single `file` field (the JSON
  * produced by the matching GET /api/portability/export). Validates the
- * envelope (version, schemaHash, structure), persists it to
- * `uploads/portability/<userId>/<importId>.json`, then returns a diff
+ * envelope (version, schemaHash, structure) plus every row's column
+ * types, persists it to `uploads/<userId>/portability/<importId>.json`
+ * (userId-first per the repo upload convention), then returns a diff
  * summary the UI uses to surface what would be wiped and reinserted.
  *
  * NO database writes happen here — those are deferred to the confirm
@@ -24,7 +25,7 @@ import { validateExport } from '@/lib/portability/import-validate';
 import { MANIFEST } from '@/lib/portability/table-manifest';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'portability');
+const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
 export const runtime = 'nodejs';
 
@@ -92,8 +93,9 @@ export async function POST(request: NextRequest) {
     willDelete[spec.tableName] = rows[0]?.n ?? 0;
   }
 
-  // Persist the upload for confirm step.
-  const userDir = path.join(UPLOAD_ROOT, userId);
+  // Persist the upload for confirm step (userId-first layout:
+  // uploads/<userId>/portability/<importId>.json).
+  const userDir = path.join(UPLOAD_ROOT, userId, 'portability');
   await fs.mkdir(userDir, { recursive: true });
   const importId = crypto.randomBytes(16).toString('hex');
   const filePath = path.join(userDir, `${importId}.json`);
@@ -108,6 +110,10 @@ export async function POST(request: NextRequest) {
     willInsert,
     totalWillDelete,
     totalWillInsert,
+    // Unknown keys are stripped (not errors) — surfaced so the user
+    // knows some fields in the file were ignored.
+    strippedUnknownKeys: validation.strippedUnknownKeys ?? {},
+    totalStrippedKeys: validation.totalStrippedKeys ?? 0,
     exportedAt: payload.exportedAt,
     version: payload.version,
   });
