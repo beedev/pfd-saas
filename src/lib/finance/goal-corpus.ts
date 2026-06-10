@@ -23,7 +23,7 @@ import {
   chitFunds,
   insurancePolicies,
   npsAccounts,
-  providentFund,
+  epfAccounts,
   assetClassReturns,
 } from '@/db';
 
@@ -127,7 +127,7 @@ export async function loadCorpusContext(userId: string): Promise<CorpusContext> 
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
       db.select().from(sips).where(and(eq(sips.userId, userId), eq(sips.status, 'ACTIVE'))),
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
-      db.select().from(providentFund).where(eq(providentFund.userId, userId)),
+      db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
       db.select().from(goldHoldings).where(eq(goldHoldings.userId, userId)),
       db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, userId)),
       db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, userId)),

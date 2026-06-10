@@ -44,7 +44,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # placeholder that is never queried at build time. The real URL is
 # constructed by the entrypoint at runtime.
 ENV DATABASE_URL=postgres://dummy:dummy@dummy:5432/dummy
-ENV AUTH_SECRET=build-only-secret-32-bytes-long-xxxxxx
+# AUTH_SECRET is only needed so `next build` doesn't bail; it never signs
+# anything real. Build-arg so it's overridable, and scoped to this builder
+# stage only — the runner stage starts FROM a fresh base, so neither the
+# ARG nor the ENV leaks into the shipped image (the entrypoint generates
+# and exports the real secret at runtime).
+ARG AUTH_SECRET=build-only-secret-32-bytes-long-xxxxxx
+ENV AUTH_SECRET=$AUTH_SECRET
 
 RUN npm run build
 

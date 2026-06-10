@@ -21,7 +21,7 @@ import {
   mutualFunds,
   goldHoldings,
   npsAccounts,
-  providentFund,
+  epfAccounts,
   smallSavingsAccounts,
   realEstate,
   insurancePolicies,
@@ -66,7 +66,7 @@ export async function fetchNetWorth(params: ReportParams): Promise<NetWorthRepor
       db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
       db.select().from(goldHoldings).where(eq(goldHoldings.userId, userId)),
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
-      db.select().from(providentFund).where(eq(providentFund.userId, userId)),
+      db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
       db
         .select()
         .from(smallSavingsAccounts)

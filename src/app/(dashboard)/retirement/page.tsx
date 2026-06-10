@@ -57,6 +57,7 @@ import {
   DEFAULT_RETIREMENT_TAX_BRACKETS,
   type RetirementTaxBracket,
 } from '@/lib/finance/retirement-tax';
+import { PF_ANNUAL_RATE_PCT } from '@/lib/finance/asset-growth-rates-constants';
 
 /* ─── types mirrored from /api/finance/retirement-assets ──────────────── */
 
@@ -382,7 +383,7 @@ export default function RetirementPage() {
   const projection = useMemo(() => {
     const yrs = Math.max(0, targetAge - currentAge);
     const r = expectedReturn / 100;
-    const pfRate = 0.0825;
+    const pfRate = PF_ANNUAL_RATE_PCT / 100;
     const infl = inflation / 100;
     const monthsToRet = yrs * 12;
 

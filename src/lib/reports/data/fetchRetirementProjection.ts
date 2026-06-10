@@ -24,7 +24,7 @@ import {
   holdings,
   mutualFunds,
   npsAccounts,
-  providentFund,
+  epfAccounts,
   smallSavingsAccounts,
   realEstate,
   goldHoldings,
@@ -74,7 +74,7 @@ export async function fetchRetirementProjection(
     db.select().from(holdings).where(eq(holdings.userId, userId)),
     db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
     db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
-    db.select().from(providentFund).where(eq(providentFund.userId, userId)),
+    db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
     db
       .select()
       .from(smallSavingsAccounts)

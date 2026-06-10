@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
-import { db, providentFund } from '@/db';
+import { db, epfAccounts } from '@/db';
 import { auth } from '@/auth';
 
 interface Params {
@@ -18,8 +18,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
     }
     const rows = await db
       .select()
-      .from(providentFund)
-      .where(and(eq(providentFund.id, numericId), eq(providentFund.userId, session.user.id)))
+      .from(epfAccounts)
+      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)))
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ account: rows[0] });
@@ -40,8 +40,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
     const existing = await db
       .select()
-      .from(providentFund)
-      .where(and(eq(providentFund.id, numericId), eq(providentFund.userId, session.user.id)))
+      .from(epfAccounts)
+      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const current = existing[0];
@@ -72,7 +72,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         : current.monthlyContributionPaisa;
 
     const result = await db
-      .update(providentFund)
+      .update(epfAccounts)
       .set({
         accountHolder: typeof body.accountHolder === 'string' ? body.accountHolder : current.accountHolder,
         accountNumber: typeof body.accountNumber === 'string' ? (body.accountNumber || null) : current.accountNumber,
@@ -88,7 +88,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
         updatedAt: new Date(),
       })
-      .where(and(eq(providentFund.id, numericId), eq(providentFund.userId, session.user.id)))
+      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)))
       .returning();
     return NextResponse.json({ account: result[0] });
   } catch (err) {
@@ -106,7 +106,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(providentFund).where(and(eq(providentFund.id, numericId), eq(providentFund.userId, session.user.id)));
+    await db.delete(epfAccounts).where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete PF account:', err);

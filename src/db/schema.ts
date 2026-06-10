@@ -1839,9 +1839,6 @@ export const epfAccounts = pgTable('epf_accounts', {
   uniqueIndex('epf_account_number_unique').on(table.userId, table.accountNumber),
 ]);
 
-// Backwards-compat alias — older code imports `providentFund`. New
-// code should use `epfAccounts`.
-export const providentFund = epfAccounts;
 export type EpfAccount = typeof epfAccounts.$inferSelect;
 export type NewEpfAccount = typeof epfAccounts.$inferInsert;
 export type ProvidentFund = EpfAccount;

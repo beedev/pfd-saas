@@ -34,7 +34,6 @@
  *   • NPS / PF                  → default included=true
  *   • REAL_ESTATE               → default included=true; default mode is
  *                                 RENTAL when monthlyRent > 0, else SELL
- *                                 (saas has no retirement_treatment column)
  *   • INSURANCE_POLICIES        → default included=true
  *
  * Auth-gated, user-scoped.
@@ -46,19 +45,17 @@ import {
   db,
   insurancePolicies,
   npsAccounts,
-  providentFund,
+  epfAccounts,
   realEstate,
   retirementAssetSelection,
   retirementAssumptions,
   type RetirementAssetSelection,
 } from '@/db';
 import { auth } from '@/auth';
+import { PF_ANNUAL_RATE_PCT } from '@/lib/finance/asset-growth-rates-constants';
 
 /** Same set the asset-picker exposes for corpus contribution. */
 const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
-
-/** PF compound rate — matches the hardcoded `pfRate=0.0825` the top tile uses. */
-const PF_RATE_PCT = 8.25;
 
 interface Component {
   itemName: string;
@@ -126,7 +123,7 @@ export async function GET(_request: NextRequest) {
     const userId = session.user.id;
     const [nps, pf, props, policies, selections, assRows] = await Promise.all([
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
-      db.select().from(providentFund).where(eq(providentFund.userId, userId)),
+      db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
       db.select().from(realEstate).where(eq(realEstate.userId, userId)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
       db
@@ -205,14 +202,14 @@ export async function GET(_request: NextRequest) {
         if (!included) continue;
         const corpusAtRetirement = compound(
           a.totalBalance,
-          PF_RATE_PCT,
+          PF_ANNUAL_RATE_PCT,
           yearsToRetire,
         );
         components.push({
           itemName: `${a.accountType} · ${a.accountHolder}`,
           todayPaisa: a.totalBalance,
           atRetirementPaisa: corpusAtRetirement,
-          growthRatePct: PF_RATE_PCT,
+          growthRatePct: PF_ANNUAL_RATE_PCT,
           balanceComponentPaisa: corpusAtRetirement,
           contributionComponentPaisa: 0,
           monthlyContributionPaisa: 0,

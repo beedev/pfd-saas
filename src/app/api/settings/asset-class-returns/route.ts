@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, assetClassReturns } from '@/db';
 import { auth } from '@/auth';
+import { PF_ANNUAL_RATE_PCT } from '@/lib/finance/asset-growth-rates-constants';
 
 // Seed defaults — must match the constant in lib/finance/goal-corpus.ts
 // so newly-onboarded users get the same starting point a vanilla
@@ -35,7 +36,7 @@ const DEFAULTS: Array<{ assetClass: string; returnPct: number }> = [
   { assetClass: 'MF_HYBRID', returnPct: 9 },
   { assetClass: 'GOLD', returnPct: 9 },
   { assetClass: 'NPS', returnPct: 9.5 },
-  { assetClass: 'PF', returnPct: 8.25 },
+  { assetClass: 'PF', returnPct: PF_ANNUAL_RATE_PCT },
   { assetClass: 'SMALL_SAVINGS', returnPct: 7.5 },
   { assetClass: 'FIXED_DEPOSITS', returnPct: 7 },
   { assetClass: 'CHIT_FUNDS', returnPct: 6 },

@@ -15,11 +15,11 @@
  *   - every named parent resolves to an earlier entry
  *   - no excluded table accidentally appears
  *
- * NOTE on the prompt's "77" target: the live DB has 72 user-scoped
- * tables. The plan document's 77 was an earlier estimate; reality
- * (queried via `information_schema.columns WHERE column_name='user_id'`
- * minus 3 auth/cron tables) is 72. We assert the real number so future
- * schema growth must update both.
+ * NOTE on the plan document's "77" target: that was an earlier
+ * estimate. The manifest currently carries 73 user-scoped tables
+ * (EXPECTED_TABLE_COUNT below), and the module-load assert pins the
+ * real number so future schema growth must update both the manifest
+ * and the count together.
  */
 
 import type { PgTable } from 'drizzle-orm/pg-core';

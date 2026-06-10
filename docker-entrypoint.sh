@@ -5,9 +5,12 @@
 # Orchestrates a single-container postgres + Next.js stack:
 #   1. Bootstrap /data layout (pgdata, uploads, secrets, socket dir)
 #   2. First run: initdb + generate a random postgres password + lock
-#      pg_hba.conf to localhost-only
+#      pg_hba.conf to localhost-only with scram-sha-256 auth
 #   3. First run: generate AUTH_SECRET if not already present
 #   4. Start postgres in the background, wait for it to accept connections
+#   4b. Idempotently (re)set the role password from /data/.secrets and
+#       enforce scram-sha-256 in pg_hba.conf (upgrades volumes created
+#       when this file still wrote `trust`), then reload postgres
 #   5. Ensure the application database exists
 #   6. Run drizzle-kit migrate against the live database
 #   7. Exec the Next.js standalone server in the foreground (PID becomes
@@ -66,13 +69,15 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
 
   rm -f "$PWFILE"
 
-  # Lock down: only allow connections from inside the container.
-  # `trust` is acceptable here because the only path to the socket
-  # is from PID 1 namespace inside the container.
+  # Lock down: only allow connections from inside the container, and
+  # require the scram-sha-256 password we just generated. The password
+  # is already set at this point — initdb's --pwfile hashes it (PG 17's
+  # password_encryption defaults to scram-sha-256), so no `trust`
+  # bootstrap window is needed on first boot.
   cat > "$PGDATA/pg_hba.conf" <<EOF
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
-local   all             all                                     trust
-host    all             all             127.0.0.1/32            trust
+local   all             all                                     scram-sha-256
+host    all             all             127.0.0.1/32            scram-sha-256
 EOF
   chown postgres:postgres "$PGDATA/pg_hba.conf"
 fi
@@ -107,9 +112,39 @@ su-exec postgres pg_ctl \
 # -F handles log rotation; the process exits when the container does.
 tail -F "$PG_LOG" &
 
-# ─── Ensure database exists ──────────────────────────────────────────
+# ─── Enforce scram-sha-256 auth (idempotent, every startup) ──────────
+# Two volume generations exist:
+#   • Fresh volumes — pg_hba.conf already says scram-sha-256 (written in
+#     the first-run block above) and the role password was set by
+#     initdb --pwfile. The connection below authenticates via PGPASSWORD.
+#   • Pre-existing volumes — pg_hba.conf still says `trust` (written by
+#     an older entrypoint), so the connection below succeeds without a
+#     password. We then (re)set the role password from the secrets file
+#     — idempotent, and guarantees a scram-sha-256 hash exists that
+#     matches DATABASE_URL — before rewriting pg_hba.conf to
+#     scram-sha-256 and reloading. Order matters: password first, then
+#     flip auth, so we never lock ourselves out mid-startup.
 PG_PASS=$(cat "$SECRETS/postgres_password")
 export PGPASSWORD="$PG_PASS"
+
+echo "[entrypoint] Ensuring role password + scram-sha-256 auth..."
+# Password is fed via stdin (not argv) so it never shows up in `ps`.
+# The generated password is strictly alphanumeric (openssl base64 with
+# /=+ stripped), so single-quoting it in SQL is safe.
+su-exec postgres psql -h 127.0.0.1 -U "$PG_USER" -d postgres -v ON_ERROR_STOP=1 -q <<SQL
+SET password_encryption = 'scram-sha-256';
+ALTER ROLE $PG_USER WITH PASSWORD '$PG_PASS';
+SQL
+
+cat > "$PGDATA/pg_hba.conf" <<EOF
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+local   all             all                                     scram-sha-256
+host    all             all             127.0.0.1/32            scram-sha-256
+EOF
+chown postgres:postgres "$PGDATA/pg_hba.conf"
+su-exec postgres pg_ctl -D "$PGDATA" reload >/dev/null
+
+# ─── Ensure database exists ──────────────────────────────────────────
 
 # psql -lqt | cut -d \| -f 1 | grep -qw $PG_DB
 # Match the database name on the cleaned-up list. If absent, create it.

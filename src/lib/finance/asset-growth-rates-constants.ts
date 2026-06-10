@@ -8,6 +8,14 @@
  */
 
 /**
+ * EPF annual interest rate (%). Single source of truth — consumed by the
+ * /retirement top-tile projection (page.tsx), the retirement-corpus-
+ * breakdown endpoint, and the asset-class-returns seed so the three
+ * surfaces can never drift apart.
+ */
+export const PF_ANNUAL_RATE_PCT = 8.25;
+
+/**
  * EQUITY / DEBT — direct exposure rates (Indian equity, govt + corp
  * bonds). MUTUAL_FUNDS is the legacy umbrella rate kept for back-compat
  * (used when a fund's category is UNKNOWN). The MF_EQUITY / MF_DEBT /
@@ -22,7 +30,7 @@ export const DEFAULT_GROWTH_RATES = {
   DEBT: 7,
   GOLD: 8,
   NPS: 9,
-  PF: 8.25,
+  PF: PF_ANNUAL_RATE_PCT,
   REAL_ESTATE: 5,
   CASH: 4,
   STOCKS: 12,

@@ -40,6 +40,37 @@ interface TelegramUpdate {
 
 const SECRET_HEADER = 'x-telegram-bot-api-secret-token';
 
+// ─── Pairing-attempt rate limit ──────────────────────────────────────
+// The /start <token> lookup below is effectively an oracle: without a
+// limit, a chat could brute-force pairing tokens. Cap FAILED pairing
+// attempts at 5 per chat_id per 10 minutes. In-memory Map with prune-on-
+// hit cleanup — same single-instance pattern as the per-IP throttle in
+// src/app/api/auth/pending-link/route.ts.
+const PAIRING_WINDOW_MS = 10 * 60 * 1000;
+const PAIRING_MAX_FAILURES = 5;
+const failedPairingAttempts = new Map<string, { count: number; windowStart: number }>();
+
+function prunePairingAttempts(now: number) {
+  for (const [key, entry] of failedPairingAttempts) {
+    if (now - entry.windowStart > PAIRING_WINDOW_MS) failedPairingAttempts.delete(key);
+  }
+}
+
+function isPairingRateLimited(chatKey: string, now: number): boolean {
+  prunePairingAttempts(now);
+  const entry = failedPairingAttempts.get(chatKey);
+  return !!entry && entry.count >= PAIRING_MAX_FAILURES;
+}
+
+function recordFailedPairing(chatKey: string, now: number) {
+  const entry = failedPairingAttempts.get(chatKey);
+  if (!entry || now - entry.windowStart > PAIRING_WINDOW_MS) {
+    failedPairingAttempts.set(chatKey, { count: 1, windowStart: now });
+  } else {
+    entry.count += 1;
+  }
+}
+
 // Constant-time string compare — avoids leaking the secret's contents
 // through response-timing differences. Length check first because
 // timingSafeEqual throws on unequal-length buffers.
@@ -86,6 +117,15 @@ export async function POST(request: NextRequest) {
   const startMatch = text.match(/^\/start\s+([A-Za-z0-9-]+)\s*$/);
   if (startMatch) {
     const token = startMatch[1];
+    const chatKey = String(chatId);
+    const now = Date.now();
+    if (isPairingRateLimited(chatKey, now)) {
+      await sendTelegramToChatId(
+        chatId,
+        '⚠️ *Too many pairing attempts.* Please wait 10 minutes, then click *Connect Telegram* in Settings again.',
+      ).catch(() => {});
+      return NextResponse.json({ ok: true, paired: false, reason: 'rate-limited' });
+    }
     try {
       const rows = await db
         .select({ userId: userPreferences.userId })
@@ -99,6 +139,7 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (!rows.length) {
+        recordFailedPairing(chatKey, now);
         await sendTelegramToChatId(
           chatId,
           '⚠️ *Pairing token expired or invalid.*\n\nOpen Settings → Telegram in pfd-saas and click *Connect Telegram* again.',
@@ -108,6 +149,7 @@ export async function POST(request: NextRequest) {
 
       const userId = rows[0].userId;
       const username = msg?.from?.username ?? null;
+      failedPairingAttempts.delete(chatKey); // success — clear strikes
 
       await db
         .update(userPreferences)

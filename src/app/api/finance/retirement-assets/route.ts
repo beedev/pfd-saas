@@ -8,7 +8,7 @@
  *
  * Items are pulled live from the underlying investment tables:
  *   • NPS               — npsAccounts            (lumpsum + annuity at 60)
- *   • PF                — providentFund          (lumpsum at retirement)
+ *   • PF                — epfAccounts          (lumpsum at retirement)
  *   • ANNUITY_POLICIES  — insurancePolicies where annuityAmount > 0
  *   • INSURANCE_POLICIES — insurancePolicies with maturity_date (ladder)
  *   • REAL_ESTATE       — realEstate properties  (sell or rent)
@@ -20,7 +20,7 @@ import {
   db,
   retirementAssetSelection,
   npsAccounts,
-  providentFund,
+  epfAccounts,
   insurancePolicies,
   realEstate,
   smallSavingsAccounts,
@@ -104,7 +104,7 @@ export async function GET() {
   try {
     const [nps, pf, ins, props, smallSavings, mfs, selections, rates] = await Promise.all([
       db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
-      db.select().from(providentFund).where(eq(providentFund.userId, session.user.id)),
+      db.select().from(epfAccounts).where(eq(epfAccounts.userId, session.user.id)),
       db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
       db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
       db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),

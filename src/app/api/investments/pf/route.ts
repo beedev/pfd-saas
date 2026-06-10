@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
-import { db, providentFund, type PFAccountType } from '@/db';
+import { db, epfAccounts, type PFAccountType } from '@/db';
 import { auth } from '@/auth';
 
 const VALID_TYPES: PFAccountType[] = ['EPF', 'PPF', 'VPF'];
@@ -11,9 +11,9 @@ export async function GET() {
   try {
     const rows = await db
       .select()
-      .from(providentFund)
-      .where(eq(providentFund.userId, session.user.id))
-      .orderBy(desc(providentFund.createdAt));
+      .from(epfAccounts)
+      .where(eq(epfAccounts.userId, session.user.id))
+      .orderBy(desc(epfAccounts.createdAt));
     return NextResponse.json({ accounts: rows });
   } catch (err) {
     console.error('Failed to fetch PF accounts:', err);
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await db
-      .insert(providentFund)
+      .insert(epfAccounts)
       .values({
         userId: session.user.id,
         accountType: body.accountType,
