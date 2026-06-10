@@ -101,11 +101,15 @@ COPY --from=builder --chown=postgres:postgres /app/node_modules/postgres ./node_
 COPY --from=builder --chown=postgres:postgres /app/node_modules/dotenv ./node_modules/dotenv
 
 # drizzle-kit's dependency tree we need at runtime — it transpiles
-# drizzle.config.ts on every invocation via esbuild + esbuild-register.
-# The @esbuild/<platform> binary is matched to the build platform by
-# `npm ci` in the deps stage.
+# drizzle.config.ts on every invocation. drizzle-kit 0.31.10 transpiles
+# the config via `tsx` (replacing the old esbuild-register path); tsx in
+# turn drives esbuild. The @esbuild/<platform> binary is matched to the
+# build platform by `npm ci` in the deps stage. get-tsconfig +
+# resolve-pkg-maps are tsx/@esbuild-kit resolution helpers needed on disk.
 COPY --from=builder --chown=postgres:postgres /app/node_modules/esbuild ./node_modules/esbuild
-COPY --from=builder --chown=postgres:postgres /app/node_modules/esbuild-register ./node_modules/esbuild-register
+COPY --from=builder --chown=postgres:postgres /app/node_modules/tsx ./node_modules/tsx
+COPY --from=builder --chown=postgres:postgres /app/node_modules/get-tsconfig ./node_modules/get-tsconfig
+COPY --from=builder --chown=postgres:postgres /app/node_modules/resolve-pkg-maps ./node_modules/resolve-pkg-maps
 COPY --from=builder --chown=postgres:postgres /app/node_modules/@esbuild ./node_modules/@esbuild
 COPY --from=builder --chown=postgres:postgres /app/node_modules/@esbuild-kit ./node_modules/@esbuild-kit
 COPY --from=builder --chown=postgres:postgres /app/node_modules/@drizzle-team ./node_modules/@drizzle-team
