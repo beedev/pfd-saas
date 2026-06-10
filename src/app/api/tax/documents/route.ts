@@ -7,6 +7,17 @@ import { db, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { auth } from '@/auth';
 
+const MAX_BYTES = 25 * 1024 * 1024;
+// Extension → MIME pairs accepted for tax document uploads. The stored
+// extension is always taken from this allowlist, never from raw input.
+const ALLOWED_TYPES: Array<{ ext: string; mime: string }> = [
+  { ext: '.pdf', mime: 'application/pdf' },
+  { ext: '.jpg', mime: 'image/jpeg' },
+  { ext: '.jpeg', mime: 'image/jpeg' },
+  { ext: '.png', mime: 'image/png' },
+  { ext: '.webp', mime: 'image/webp' },
+];
+
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
@@ -44,18 +55,37 @@ export async function POST(request: NextRequest) {
 
     const category = (formData.get('category') as string) || 'OTHER';
     const financialYear = (formData.get('financialYear') as string) || getCurrentFinancialYear();
+    if (!/^\d{4}-\d{2}$/.test(financialYear)) {
+      return NextResponse.json({ error: 'invalid financialYear' }, { status: 400 });
+    }
     const title = (formData.get('title') as string) || file.name;
     const deductionIdRaw = formData.get('deductionId');
     const deductionId = deductionIdRaw ? Number(deductionIdRaw) : null;
     const notes = (formData.get('notes') as string) || null;
 
+    if (file.size > MAX_BYTES) {
+      return NextResponse.json(
+        { error: `File too large (max ${MAX_BYTES / 1024 / 1024} MB)` },
+        { status: 413 },
+      );
+    }
+    const rawExt = path.extname(file.name).toLowerCase();
+    const allowed = ALLOWED_TYPES.find((t) => t.ext === rawExt && t.mime === file.type);
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Unsupported file type. Allowed: .pdf, .jpg, .jpeg, .png, .webp' },
+        { status: 400 },
+      );
+    }
+
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const hash = crypto.createHash('sha256').update(buffer).digest('hex');
-    const ext = path.extname(file.name) || '';
+    const ext = allowed.ext;
 
     const safeCategory = category.replace(/[^A-Z0-9_]/gi, '_');
-    const dir = path.join(process.cwd(), 'uploads', 'finance', financialYear, safeCategory);
+    // Tenant-folder-first, matching the form-16 / migration-0037 convention.
+    const dir = path.join(process.cwd(), 'uploads', session.user.id, 'finance', financialYear, safeCategory);
     await fs.promises.mkdir(dir, { recursive: true });
     const absPath = path.join(dir, `${hash}${ext}`);
     await fs.promises.writeFile(absPath, buffer);
@@ -70,7 +100,7 @@ export async function POST(request: NextRequest) {
         fileSize: buffer.length,
         fileName: file.name,
         filePath: relPath,
-        mimeType: file.type || 'application/octet-stream',
+        mimeType: allowed.mime,
         financialYear,
         category,
         title,

@@ -26,6 +26,8 @@ import { db, form16Uploads } from '@/db';
 import { auth } from '@/auth';
 import { extractPdfText } from '@/lib/services/statement-parsers/pdf-text';
 
+const MAX_BYTES = 5 * 1024 * 1024;
+
 // ─── small utils ────────────────────────────────────────────────────────
 
 function rupeesNumberToPaisa(n: number | null | undefined): number {
@@ -222,6 +224,15 @@ export async function POST(request: NextRequest) {
     if (!/^\d{4}-\d{2}$/.test(fy)) {
       return NextResponse.json({ error: 'fy must be YYYY-YY' }, { status: 400 });
     }
+    if (file.size > MAX_BYTES) {
+      return NextResponse.json(
+        { error: `File too large (max ${MAX_BYTES / 1024 / 1024} MB)` },
+        { status: 413 },
+      );
+    }
+    if (file.type !== 'application/pdf' || !file.name.toLowerCase().endsWith('.pdf')) {
+      return NextResponse.json({ error: 'Only PDF files are accepted' }, { status: 400 });
+    }
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
@@ -230,8 +241,7 @@ export async function POST(request: NextRequest) {
     const dir = path.join(process.cwd(), 'uploads', userId, 'form-16');
     await fs.promises.mkdir(dir, { recursive: true });
     const ts = Date.now();
-    const ext = path.extname(file.name) || '.pdf';
-    const absPath = path.join(dir, `${fy}-${ts}${ext}`);
+    const absPath = path.join(dir, `${fy}-${ts}.pdf`);
     await fs.promises.writeFile(absPath, buffer);
     const relPath = path.relative(process.cwd(), absPath);
 

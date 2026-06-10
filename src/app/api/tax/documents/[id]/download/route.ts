@@ -5,6 +5,21 @@ import path from 'path';
 import { db, taxDocuments } from '@/db';
 import { auth } from '@/auth';
 
+// Only ever serve MIME types we know are safe to hand to a browser —
+// anything else (including legacy stored values) downgrades to a binary
+// download so a stored text/html can't become stored XSS.
+const SAFE_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+/** Strip CR/LF, double-quotes, and path separators from the download name. */
+function sanitizeFilename(name: string | null | undefined): string {
+  return (name ?? '').replace(/[\r\n"\\/]/g, '').trim() || 'document';
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -26,11 +41,14 @@ export async function GET(
   }
   const buffer = await fs.promises.readFile(abs);
   const bytes = new Uint8Array(buffer);
+  const contentType =
+    doc.mimeType && SAFE_MIME_TYPES.has(doc.mimeType) ? doc.mimeType : 'application/octet-stream';
   return new NextResponse(bytes, {
     headers: {
-      'Content-Type': doc.mimeType || 'application/octet-stream',
-      'Content-Disposition': `inline; filename="${doc.fileName || 'document'}"`,
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${sanitizeFilename(doc.fileName)}"`,
       'Content-Length': String(buffer.length),
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 }
