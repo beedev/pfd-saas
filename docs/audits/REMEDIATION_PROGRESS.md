@@ -31,7 +31,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [x] A4 tds_credits partial idx declared + payment_date date mode:string (80af714)
 - [x] A5 FY-window consolidated, 11 sites, -255 lines (3ea7fbe)
 - [x] A6 itr3-summary.ts extracted, payload identical (3ea7fbe)
-- [ ] A7 retirement-shared.ts extraction (4 routes) + 24(b) vintage into section-24b.ts
+- [x] A7 retirement-shared.ts + 24(b) into lib + PF 4th copy (bfbf8bd); lookup helpers + compound() left split (behavior-divergent, documented)
 - [x] A8 userId-first on 6 sites + confirm-route reconstructions + CLAUDE.md (3ea7fbe); residual: portability dir (fold into S11 batch)
 
 ## P3
@@ -56,3 +56,5 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - next up: S11 portability per-column zod validation + portability upload dir userId-first; then A7 retirement-shared dedup (+4th PF copy, rate-table drift); then S12 parseBody + A9 requireUserId
 - 2026-06-10: 611da84 S11 + portability upload dir userId-first — A8 now fully closed
 - next up: A7 retirement-shared dedup (incl. 4th PF copy + rate-table drift); then final batch S12 parseBody + A9 requireUserId
+- 2026-06-10: bfbf8bd A7 dedup — NEW DECISION ITEM for user: GOLD/NPS/RE rate drift between asset-class-returns seed (9/9.5/6) and DEFAULT_GROWTH_RATES (8/9/5) is accidental per git history; un-seeded users get inconsistent projections; pick canonical values
+- next up: FINAL batch — S12 parseBody zod helper + A9 requireUserId, adopt across top mutation routes
