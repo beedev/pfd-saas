@@ -65,17 +65,8 @@ import {
   type EightyGCategory,
 } from '@/lib/finance/section-80g';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 import { auth } from '@/auth';
-
-/** Convert FY string "2026-27" → { start: '2026-04-01', end: '2027-03-31' }. */
-function fyBounds(fy: string): { start: string; end: string } | null {
-  const m = fy.match(/^(\d{4})-(\d{2})$/);
-  if (!m) return null;
-  const startYear = parseInt(m[1], 10);
-  const start = `${startYear}-04-01`;
-  const end = `${startYear + 1}-03-31`;
-  return { start, end };
-}
 
 /** 1-Apr-1999 cutoff for sec 24(b) — pre = ₹30k cap, post = ₹2L. */
 const SEC_24B_VINTAGE_CUTOFF = '1999-04-01';
@@ -89,7 +80,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy') ?? defaultCurrentFY();
-    const bounds = fyBounds(fy);
+    const bounds = /^\d{4}-\d{2}$/.test(fy) ? financialYearBoundsIso(fy) : null;
     if (!bounds) {
       return NextResponse.json({ error: 'Invalid fy format, use YYYY-YY' }, { status: 400 });
     }

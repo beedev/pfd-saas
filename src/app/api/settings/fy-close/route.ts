@@ -11,6 +11,7 @@ import {
   fyCloseStatus,
 } from '@/db';
 import { auth } from '@/auth';
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 
 interface ChecklistItem {
   label: string;
@@ -18,14 +19,6 @@ interface ChecklistItem {
   status: 'done' | 'partial' | 'pending';
   detail: string;
   isLocked: boolean;
-}
-
-function fyDates(fy: string): { start: string; end: string } {
-  const startYear = parseInt(fy.split('-')[0], 10);
-  return {
-    start: `${startYear}-04-01`,
-    end: `${startYear + 1}-03-31`,
-  };
 }
 
 export async function GET(request: NextRequest) {
@@ -38,7 +31,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'fy parameter required' }, { status: 400 });
     }
 
-    const { start, end } = fyDates(fy);
+    const { start, end } = financialYearBoundsIso(fy);
     const checklist: ChecklistItem[] = [];
 
     // Load lock status for this FY

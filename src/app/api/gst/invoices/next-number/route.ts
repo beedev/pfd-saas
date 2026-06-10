@@ -2,24 +2,10 @@ import { NextResponse } from 'next/server';
 import { db, invoices, businessProfile } from '@/db';
 import { desc, like, and, gte, eq } from 'drizzle-orm';
 import { auth } from '@/auth';
-
-/**
- * Get the start date of the current Indian financial year (April 1).
- * e.g., if today is 2026-04-09, FY starts 2026-04-01.
- *       if today is 2026-02-15, FY starts 2025-04-01.
- */
-function currentFyStart(): string {
-  const now = new Date();
-  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return `${year}-04-01`;
-}
-
-/** e.g., "26-27" for FY 2026-27 */
-function currentFySuffix(): string {
-  const now = new Date();
-  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return `${String(startYear).slice(2)}-${String(startYear + 1).slice(2)}`;
-}
+import {
+  getCurrentFinancialYear,
+  financialYearBoundsIso,
+} from '@/lib/finance/tax-constants';
 
 // GET - Get next invoice number (resets per financial year)
 export async function GET() {
@@ -34,8 +20,11 @@ export async function GET() {
       .limit(1);
     const prefix = profile[0]?.invoicePrefix || '';
     const startNumber = profile[0]?.invoiceStartNumber || 1;
-    const fyStart = currentFyStart();
-    const fySuffix = currentFySuffix();
+    // Current FY: start date anchors the "latest invoice this FY" query;
+    // suffix ("26-27") feeds the default invoice-number format.
+    const currentFy = getCurrentFinancialYear();
+    const fyStart = financialYearBoundsIso(currentFy).start;
+    const fySuffix = currentFy.slice(2);
 
     // Find the latest invoice in the current FY
     const latestInvoice = await db

@@ -236,7 +236,7 @@ export default function YeswanthImportPage() {
                   </p>
                   <p className="text-xs text-[var(--dxp-text-muted)] text-center max-w-md">
                     .xlsx or .xls · Max 5 MB · Stored under{' '}
-                    <code>uploads/yeswanth-imports/&lt;you&gt;/</code> (gitignored). Re-uploading the
+                    <code>uploads/&lt;you&gt;/yeswanth-imports/</code> (gitignored). Re-uploading the
                     same file produces the same preview.
                   </p>
                 </>

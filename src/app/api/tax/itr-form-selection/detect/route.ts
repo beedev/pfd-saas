@@ -29,13 +29,7 @@ import {
   otherSourcesIncome,
 } from '@/db';
 import { auth } from '@/auth';
-
-function fyBounds(fy: string): { start: string; end: string } | null {
-  const m = fy.match(/^(\d{4})-(\d{2})$/);
-  if (!m) return null;
-  const startYear = parseInt(m[1], 10);
-  return { start: `${startYear}-04-01`, end: `${startYear + 1}-03-31` };
-}
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -46,7 +40,7 @@ export async function GET(request: NextRequest) {
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
-    const bounds = fyBounds(fy);
+    const bounds = /^\d{4}-\d{2}$/.test(fy) ? financialYearBoundsIso(fy) : null;
     if (!bounds) return NextResponse.json({ error: 'fy must be YYYY-YY' }, { status: 400 });
 
     const userId = session.user.id;

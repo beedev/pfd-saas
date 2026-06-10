@@ -147,11 +147,12 @@ export async function POST(request: NextRequest) {
     if (receiptFile || certificateFile) {
       const uploadedPaths: string[] = [];
       try {
+        // userId-first per convention: uploads/<userId>/tax-deductions/.
         const baseDir = path.join(
           process.cwd(),
           'uploads',
-          'tax-deductions',
           session.user.id,
+          'tax-deductions',
         );
         await fs.promises.mkdir(baseDir, { recursive: true });
 

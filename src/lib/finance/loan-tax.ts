@@ -21,6 +21,7 @@
  */
 
 import { amortizationSchedule } from './emi';
+import { financialYearBoundsIso } from './tax-constants';
 
 /**
  * Shape of a liabilities row the aggregator needs. The fuller type
@@ -64,17 +65,6 @@ export interface LoanTaxDeductionResult {
   /** Sum of fyPrincipalPaisa across loans where principal_qualifies_80c=true. */
   totalPrincipalPaisa: number;
   perLiability: LoanTaxPerLiability[];
-}
-
-/** Convert an FY string "2025-26" → start + end ISO dates. */
-export function fyDateRange(fy: string): { start: string; end: string } | null {
-  const m = fy.match(/^(\d{4})-(\d{2})$/);
-  if (!m) return null;
-  const startYear = parseInt(m[1], 10);
-  return {
-    start: `${startYear}-04-01`,
-    end: `${startYear + 1}-03-31`,
-  };
 }
 
 /**
@@ -232,8 +222,8 @@ export function aggregateLoanTaxDeductions(
   loans: LoanTaxInputRow[],
   fy: string,
 ): LoanTaxDeductionResult | { error: string } {
-  const bounds = fyDateRange(fy);
-  if (!bounds) return { error: 'Invalid fy format, use YYYY-YY' };
+  if (!/^\d{4}-\d{2}$/.test(fy)) return { error: 'Invalid fy format, use YYYY-YY' };
+  const bounds = financialYearBoundsIso(fy);
 
   const perLiability: LoanTaxPerLiability[] = [];
   let totalInterest = 0;

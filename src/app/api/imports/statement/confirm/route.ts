@@ -17,7 +17,7 @@
  *   }
  *
  * Re-reads the persisted PDF from
- *   uploads/statement-imports/<user_id>/<importId>.pdf
+ *   uploads/<user_id>/statement-imports/<importId>.pdf
  * and re-runs the parser. Idempotent: re-calling with the same
  * importId + mappings replays the same writes (same DB state).
  *
@@ -36,7 +36,10 @@ import type { EpfPassbookData, NpsSotData } from '@/lib/services/statement-parse
 
 export const runtime = 'nodejs';
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'statement-imports');
+/** userId-first per convention — MUST mirror ../route.ts, which writes
+ *  the file this endpoint re-reads. */
+const uploadDirFor = (userId: string) =>
+  path.join(process.cwd(), 'uploads', userId, 'statement-imports');
 
 interface Body {
   importId?: string;
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     // Re-read the persisted file. Path is scoped by userId — another
     // user's importId can't be read here.
-    const filePath = path.join(UPLOAD_ROOT, userId, `${body.importId}.pdf`);
+    const filePath = path.join(uploadDirFor(userId), `${body.importId}.pdf`);
     let buf: Buffer;
     try {
       buf = await readFile(filePath);

@@ -336,7 +336,8 @@ Treat as a planning proxy, not a real tax engine.
   NSDL Sample SOT.pdf.
 - **Phase 5.6d — Import API.** `POST /api/imports/statement` (multi-
   part file, 5 MB max) → persists raw PDF under
-  `uploads/statement-imports/<user_id>/<importId>.pdf`, returns
+  `uploads/<user_id>/statement-imports/<importId>.pdf` (userId-first
+  upload convention — see below), returns
   `{ importId, kind, confidence, preview, currentValues, diff,
   warnings }`. `POST /api/imports/statement/confirm` re-reads the
   persisted file (idempotent — same input → same writes), applies
@@ -426,7 +427,7 @@ filing-side of the dashboard to par with the planning side:
   `user_preferences.tax_regime_default`. Migration 0020.
 - **Form 26AS reconciliation** (Phase 2): new `form_26as_uploads` table
   + `tds_credits.is_reconciled` flag. PDF upload to
-  `uploads/form-26as/<user>/<fy>-<ts>.pdf` with a best-effort regex
+  `uploads/<user>/form-26as/<fy>-<ts>.pdf` with a best-effort regex
   sweep over pdfjs-extracted text (govt template drift makes precise
   parsing fragile — manual reconciliation flow always works as
   fallback). Two-column `/tax/form-26as` view: books on the left,
@@ -575,8 +576,8 @@ closing the OLD-regime exemption gaps:
   `src/lib/yeswanth-parser.ts` uses SheetJS to extract salary
   components / setup params / housing loan / deductions / TDS /
   capital gains. POST `/api/imports/yeswanth-taxcalc` uploads xlsx
-  → preview JSON (no writes), stores at `uploads/yeswanth-imports/
-  <userId>/<importId>.xlsx` (gitignored). POST `/api/imports/
+  → preview JSON (no writes), stores at `uploads/<userId>/
+  yeswanth-imports/<importId>.xlsx` (gitignored). POST `/api/imports/
   yeswanth-taxcalc/confirm` re-parses by importId, applies writes
   per-section based on mapping flags. `/tax/import` UI: two-step
   upload → review-with-checkboxes → confirm. Capital-gains mapping
@@ -887,6 +888,13 @@ Still deferred from Sprint 4:
 - **API integrations stay free:** Yahoo Finance v8 (stocks), AMFI
   NAVAll.txt + mfapi.in (MFs), Yahoo GC=F × USDINR=X (gold). No API
   keys, no rate limits at single-user scale.
+- **Upload paths are userId-first:** `uploads/<userId>/<scope>/...`
+  (e.g. `uploads/<userId>/form-16/`, `uploads/<userId>/form-26as/`,
+  `uploads/<userId>/statement-imports/`). Never scope-first
+  (`uploads/<scope>/<userId>/`) — userId-first lets account deletion
+  `rm -rf uploads/<userId>` in one shot. Reads always resolve the
+  DB-stored path (`path.resolve(process.cwd(), stored)`), so legacy
+  scope-first files on disk keep working.
 
 ## Stack
 

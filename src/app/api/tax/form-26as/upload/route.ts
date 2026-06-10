@@ -2,7 +2,7 @@
  * Form 26AS PDF upload — Sprint 4 Phase 2.
  *
  * Multipart POST. Stores the PDF on disk under
- *   uploads/form-26as/<userId>/<fy>-<epoch>.pdf
+ *   uploads/<userId>/form-26as/<fy>-<epoch>.pdf
  * then attempts a best-effort regex sweep over the extracted text to
  * find headline TDS / total-income numbers.
  *
@@ -170,9 +170,9 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Per-user dir so account deletion can `rm -rf uploads/form-26as/<id>`
+    // userId-first dir so account deletion can `rm -rf uploads/<id>`
     const userId = session.user.id;
-    const dir = path.join(process.cwd(), 'uploads', 'form-26as', userId);
+    const dir = path.join(process.cwd(), 'uploads', userId, 'form-26as');
     await fs.promises.mkdir(dir, { recursive: true });
     const ts = Date.now();
     const absPath = path.join(dir, `${fy}-${ts}.pdf`);

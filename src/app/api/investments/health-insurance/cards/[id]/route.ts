@@ -2,7 +2,7 @@
  * Update or delete a single health-insurance card.
  *
  * DELETE also unlinks the uploaded card image from disk (if any),
- * so we don't leave orphan blobs in uploads/health-cards/. The DB row
+ * so we don't leave orphan blobs in uploads/<userId>/health-cards/. The DB row
  * delete will null the FK on any claims (cardId is ON DELETE SET NULL),
  * so claim history survives even after a card is removed.
  */

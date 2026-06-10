@@ -40,12 +40,7 @@ import {
 import { auth } from '@/auth';
 import { computeItr4Summary } from '@/lib/finance/itr4-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
-
-function fyDateRange(fy: string): [string, string] {
-  const [start] = fy.split('-');
-  const startYear = parseInt(start, 10);
-  return [`${startYear}-04-01`, `${startYear + 1}-03-31`];
-}
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 
 const ITR4_CAP_PAISA = 50 * 100 * 100000;
 
@@ -59,7 +54,7 @@ export async function GET(request: NextRequest) {
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
     const userId = session.user.id;
 
-    const [fyStart, fyEnd] = fyDateRange(fy);
+    const { start: fyStart, end: fyEnd } = financialYearBoundsIso(fy);
 
     const [
       salaries,

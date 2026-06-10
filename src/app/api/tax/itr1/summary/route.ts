@@ -41,14 +41,7 @@ import {
 import { auth } from '@/auth';
 import { computeItr1Summary } from '@/lib/finance/itr1-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
-
-/** FY string "2025-26" → ["2025-04-01", "2026-03-31"]. Used for the
- *  invoice-date range when checking business-income eligibility. */
-function fyDateRange(fy: string): [string, string] {
-  const [start] = fy.split('-');
-  const startYear = parseInt(start, 10);
-  return [`${startYear}-04-01`, `${startYear + 1}-03-31`];
-}
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 
 /** ITR-1 cap — gross total income must be ≤ ₹50L. */
 const ITR1_CAP_PAISA = 50 * 100 * 100000;
@@ -73,7 +66,7 @@ export async function GET(request: NextRequest) {
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
     const userId = session.user.id;
 
-    const [fyStart, fyEnd] = fyDateRange(fy);
+    const { start: fyStart, end: fyEnd } = financialYearBoundsIso(fy);
 
     const [
       salaries,

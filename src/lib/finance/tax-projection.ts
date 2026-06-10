@@ -25,14 +25,7 @@ import {
   type TaxRegime,
 } from '@/db';
 import { compareRegimes, type RegimeCompareResult } from './tax-slabs';
-
-/** "2026-27" → { start: '2026-04-01', end: '2027-03-31' }. */
-function fyBounds(fy: string): { start: string; end: string } | null {
-  const m = fy.match(/^(\d{4})-(\d{2})$/);
-  if (!m) return null;
-  const startYear = parseInt(m[1], 10);
-  return { start: `${startYear}-04-01`, end: `${startYear + 1}-03-31` };
-}
+import { financialYearBoundsIso } from './tax-constants';
 
 export interface TaxProjection {
   fy: string;
@@ -54,8 +47,8 @@ export async function projectAnnualTax(
   userId: string,
   fy: string,
 ): Promise<TaxProjection | null> {
-  const bounds = fyBounds(fy);
-  if (!bounds) return null;
+  if (!/^\d{4}-\d{2}$/.test(fy)) return null;
+  const bounds = financialYearBoundsIso(fy);
 
   const [slabs, configs] = await Promise.all([
     db.select().from(taxSlabs).where(eq(taxSlabs.fy, fy)),

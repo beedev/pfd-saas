@@ -5,7 +5,7 @@
  *
  * Accepts a multipart `file` field (PDF, max 5 MB). Detects the
  * document type, parses it, persists the raw PDF under
- *   uploads/statement-imports/<user_id>/<timestamp>.pdf
+ *   uploads/<user_id>/statement-imports/<timestamp>.pdf
  * so the user can re-confirm a previous parse (idempotency without a
  * DB table). Returns:
  *   {
@@ -41,7 +41,11 @@ import type { EpfPassbookData, NpsSotData } from '@/lib/services/statement-parse
 export const runtime = 'nodejs';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'statement-imports');
+/** userId-first per convention: uploads/<userId>/statement-imports/.
+ *  Keep in lockstep with ./confirm/route.ts, which reconstructs the
+ *  same path from userId + importId. */
+const uploadDirFor = (userId: string) =>
+  path.join(process.cwd(), 'uploads', userId, 'statement-imports');
 
 type StatementKind = 'EPF_PASSBOOK' | 'NPS_SOT' | 'UNKNOWN';
 
@@ -187,7 +191,7 @@ export async function POST(request: NextRequest) {
     // Persist the raw PDF under per-user dir, named by timestamp.
     // The timestamp is the importId — re-confirms hit the same file.
     const importId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const userDir = path.join(UPLOAD_ROOT, userId);
+    const userDir = uploadDirFor(userId);
     await mkdir(userDir, { recursive: true });
     await writeFile(path.join(userDir, `${importId}.pdf`), buf);
 

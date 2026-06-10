@@ -4,7 +4,7 @@
  * Multipart form-data, single field `file`. We sha256 the buffer and
  * use that hash as the on-disk filename so identical uploads dedupe
  * and the path never collides. Files live under
- *   uploads/health-cards/<userId>/<sha256>.<ext>
+ *   uploads/<userId>/health-cards/<sha256>.<ext>
  * Path stored in the DB is RELATIVE to the project root so the
  * download endpoint can re-anchor it via process.cwd().
  *
@@ -56,9 +56,9 @@ export async function POST(
     const hash = crypto.createHash('sha256').update(buffer).digest('hex');
     const ext = path.extname(file.name) || '';
 
-    // Per-user directory so a security audit can scope blobs by owner
+    // userId-first directory so a security audit can scope blobs by owner
     // and so a future "delete account" operation can `rm -rf` cleanly.
-    const dir = path.join(process.cwd(), 'uploads', 'health-cards', session.user.id);
+    const dir = path.join(process.cwd(), 'uploads', session.user.id, 'health-cards');
     await fs.promises.mkdir(dir, { recursive: true });
     const absPath = path.join(dir, `${hash}${ext}`);
     await fs.promises.writeFile(absPath, buffer);

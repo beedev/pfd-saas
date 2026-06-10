@@ -5,6 +5,7 @@ import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
 import { auth } from '@/auth';
 import { syncInvoiceTdsCredit } from '@/lib/finance/derive-invoice-tds';
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 
 // GET - List all invoices (supports ?fy=2026-27 or ?period=MMYYYY)
 export async function GET(request: NextRequest) {
@@ -31,8 +32,7 @@ export async function GET(request: NextRequest) {
       // FY filter: e.g., "2026-27" → April 1, 2026 to March 31, 2027
       const startYear = parseInt(fy.split('-')[0], 10);
       if (!isNaN(startYear)) {
-        const fyStart = `${startYear}-04-01`;
-        const fyEnd = `${startYear + 1}-03-31`;
+        const { start: fyStart, end: fyEnd } = financialYearBoundsIso(fy);
         filteredResults = results.filter(
           (r) => r.invoice.invoiceDate >= fyStart && r.invoice.invoiceDate <= fyEnd,
         );

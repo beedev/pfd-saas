@@ -6,8 +6,8 @@
  * the confirm endpoint uses to retrieve the parsed payload again.
  *
  * Safety:
- *  • Auth-gated. Each upload stored under uploads/yeswanth-imports/
- *    <userId>/<timestamp>.xlsx (gitignored).
+ *  • Auth-gated. Each upload stored under uploads/<userId>/
+ *    yeswanth-imports/<timestamp>.xlsx (gitignored).
  *  • Strict MIME + 5 MB size cap.
  *  • Re-parsing the same file yields the same preview (deterministic).
  *  • Parsed contents are NOT logged.
@@ -27,7 +27,11 @@ const ALLOWED_MIME = new Set([
   'application/octet-stream', // some browsers
 ]);
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'yeswanth-imports');
+/** userId-first per convention: uploads/<userId>/yeswanth-imports/.
+ *  Keep in lockstep with ./confirm/route.ts, which reconstructs the
+ *  same path from userId + importId. */
+const uploadDirFor = (userId: string) =>
+  path.join(process.cwd(), 'uploads', userId, 'yeswanth-imports');
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Persist file for confirm endpoint to read back.
-    const userDir = path.join(UPLOAD_ROOT, session.user.id);
+    const userDir = uploadDirFor(session.user.id);
     await fs.mkdir(userDir, { recursive: true });
     const importId = crypto.randomBytes(16).toString('hex');
     const filePath = path.join(userDir, `${importId}.xlsx`);

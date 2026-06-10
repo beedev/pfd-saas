@@ -138,3 +138,16 @@ export function financialYearBounds(fy: string): { start: Date; end: Date } {
     end: new Date(`${startYear + 1}-03-31T23:59:59Z`),
   };
 }
+
+/** ISO-string sibling of financialYearBounds — for sites that compare
+ *  against text date columns. "2026-27" →
+ *  { start: '2026-04-01', end: '2027-03-31' } (both ends inclusive).
+ *  Like the Date variant, this does NOT validate the FY format —
+ *  callers that 400 on malformed input keep their own regex guard. */
+export function financialYearBoundsIso(fy: string): { start: string; end: string } {
+  const startYear = parseInt(fy.split('-')[0], 10);
+  return {
+    start: `${startYear}-04-01`,
+    end: `${startYear + 1}-03-31`,
+  };
+}

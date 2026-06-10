@@ -48,7 +48,10 @@ import {
 import { auth } from '@/auth';
 import { parseYeswanthTaxCalc, type YeswanthPreview } from '@/lib/yeswanth-parser';
 
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'yeswanth-imports');
+/** userId-first per convention — MUST mirror ../route.ts, which writes
+ *  the file this endpoint re-reads. */
+const uploadDirFor = (userId: string) =>
+  path.join(process.cwd(), 'uploads', userId, 'yeswanth-imports');
 
 interface ConfirmBody {
   importId?: string;
@@ -86,9 +89,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid overrideFy format (expected YYYY-YY)' }, { status: 400 });
     }
 
-    const filePath = path.join(UPLOAD_ROOT, userId, `${importId}.xlsx`);
+    const filePath = path.join(uploadDirFor(userId), `${importId}.xlsx`);
     // Path safety: verify resolved path stays inside the user's dir.
-    const expectedPrefix = path.join(UPLOAD_ROOT, userId) + path.sep;
+    const expectedPrefix = uploadDirFor(userId) + path.sep;
     if (!(path.resolve(filePath) + path.sep).startsWith(expectedPrefix + '')) {
       return NextResponse.json({ error: 'Invalid importId path' }, { status: 400 });
     }

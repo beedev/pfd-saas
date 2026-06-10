@@ -42,13 +42,8 @@ import {
 import { auth } from '@/auth';
 import { computeItr2Summary } from '@/lib/finance/itr2-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
+import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 import type { CapitalGainRow, CgAssetType, CgGainType } from '@/lib/finance/capital-gains-tax';
-
-function fyDateRange(fy: string): [string, string] {
-  const [start] = fy.split('-');
-  const startYear = parseInt(start, 10);
-  return [`${startYear}-04-01`, `${startYear + 1}-03-31`];
-}
 
 /** Map schema `assetType` codes to the lib's CgAssetType. The lib's
  *  type covers both names — STOCKS in DB maps to STOCKS in lib. */
@@ -76,7 +71,7 @@ export async function GET(request: NextRequest) {
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
     const userId = session.user.id;
 
-    const [fyStart, fyEnd] = fyDateRange(fy);
+    const { start: fyStart, end: fyEnd } = financialYearBoundsIso(fy);
 
     const [
       salaries,
