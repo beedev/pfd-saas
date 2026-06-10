@@ -7,12 +7,14 @@
  *   Metadata
  */
 
-import * as XLSX from 'xlsx';
 import type { Section80ReportData } from '../data/fetchSection80';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import { appendSheet, metadataSheet, newWorkbook, rs, writeWorkbook } from './_helpers';
 
-export function buildSection80Xlsx(data: Section80ReportData, userId: string): Buffer {
-  const wb = XLSX.utils.book_new();
+export async function buildSection80Xlsx(
+  data: Section80ReportData,
+  userId: string,
+): Promise<Buffer> {
+  const wb = newWorkbook();
 
   // Summary
   const summaryRows: (string | number | null)[][] = [
@@ -32,7 +34,7 @@ export function buildSection80Xlsx(data: Section80ReportData, userId: string): B
       '',
     ],
   ];
-  XLSX.utils.book_append_sheet(wb, makeSheet({ name: 'Summary', rows: summaryRows }), 'Summary');
+  appendSheet(wb, { name: 'Summary', rows: summaryRows });
 
   // Deductions (flat)
   const detailRows: (string | number)[][] = [
@@ -61,13 +63,9 @@ export function buildSection80Xlsx(data: Section80ReportData, userId: string): B
       ]);
     }
   }
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({ name: 'Deductions', rows: detailRows }),
-    'Deductions',
-  );
+  appendSheet(wb, { name: 'Deductions', rows: detailRows });
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({
       reportId: 'section80',
@@ -75,7 +73,6 @@ export function buildSection80Xlsx(data: Section80ReportData, userId: string): B
       fy: data.fy,
       userId,
     }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

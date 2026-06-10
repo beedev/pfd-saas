@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     let preview: YeswanthPreview;
     try {
-      preview = parseYeswanthTaxCalc(buffer);
+      preview = await parseYeswanthTaxCalc(buffer);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Re-parse failed';
       return NextResponse.json({ error: message }, { status: 422 });

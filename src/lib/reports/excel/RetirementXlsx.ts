@@ -7,34 +7,29 @@
  *   Metadata
  */
 
-import * as XLSX from 'xlsx';
 import type { RetirementProjectionReportData } from '../data/fetchRetirementProjection';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import { appendSheet, metadataSheet, newWorkbook, rs, writeWorkbook } from './_helpers';
 
-export function buildRetirementXlsx(
+export async function buildRetirementXlsx(
   data: RetirementProjectionReportData,
   userId: string,
-): Buffer {
-  const wb = XLSX.utils.book_new();
+): Promise<Buffer> {
+  const wb = newWorkbook();
 
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Assumptions',
-      rows: [
-        ['Field', 'Value'],
-        ['Current Age', data.assumptions.currentAge],
-        ['Target Retirement Age', data.assumptions.targetAge],
-        ['Retirement Duration (years)', data.assumptions.retirementDurationYears],
-        ['Monthly Expense (₹)', data.assumptions.monthlyExpenseRupees],
-        ['Inflation (%)', data.assumptions.inflationPct],
-        ['Pre-Retirement Return (%)', data.assumptions.expectedReturnPct],
-        ['Post-Retirement Return (%)', data.assumptions.postRetirementReturnPct],
-        ['Starting Corpus (₹)', rs(data.startingCorpusPaisa)],
-      ],
-    }),
-    'Assumptions',
-  );
+  appendSheet(wb, {
+    name: 'Assumptions',
+    rows: [
+      ['Field', 'Value'],
+      ['Current Age', data.assumptions.currentAge],
+      ['Target Retirement Age', data.assumptions.targetAge],
+      ['Retirement Duration (years)', data.assumptions.retirementDurationYears],
+      ['Monthly Expense (₹)', data.assumptions.monthlyExpenseRupees],
+      ['Inflation (%)', data.assumptions.inflationPct],
+      ['Pre-Retirement Return (%)', data.assumptions.expectedReturnPct],
+      ['Post-Retirement Return (%)', data.assumptions.postRetirementReturnPct],
+      ['Starting Corpus (₹)', rs(data.startingCorpusPaisa)],
+    ],
+  });
 
   const projRows: (string | number)[][] = [
     [
@@ -56,20 +51,15 @@ export function buildRetirementXlsx(
       rs(p.corpusEndPaisa),
     ]),
   ];
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({ name: 'Projection', rows: projRows }),
-    'Projection',
-  );
+  appendSheet(wb, { name: 'Projection', rows: projRows });
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({
       reportId: 'retirement',
       title: 'Retirement Projection',
       userId,
     }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

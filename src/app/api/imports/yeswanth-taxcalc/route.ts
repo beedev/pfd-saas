@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     // Parse FIRST — if the parser rejects, don't bother writing the file.
     let preview;
     try {
-      preview = parseYeswanthTaxCalc(buffer);
+      preview = await parseYeswanthTaxCalc(buffer);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Parse error';
       return NextResponse.json({ error: message }, { status: 422 });

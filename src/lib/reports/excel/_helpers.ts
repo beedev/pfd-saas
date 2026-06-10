@@ -1,5 +1,5 @@
 /**
- * Sprint 6.2d — Excel generator helpers.
+ * Sprint 6.2d — Excel generator helpers (exceljs-backed).
  *
  * Conventions used across every workbook:
  *   • Sheet 1 = Summary (totals only)
@@ -7,7 +7,7 @@
  *   • Sheet N = Metadata (FY, generated-at, user, schema version)
  *
  * Currency: stored as JS numbers in rupees (paisa / 100). We don't
- * use SheetJS number formatting (it varies between Excel/Calc) — let
+ * use Excel number formatting (it varies between Excel/Calc) — let
  * the consumer format. The Summary sheet uses a string column for
  * `inr()`-formatted display values; raw numbers live in Detail sheets
  * for downstream formula use.
@@ -15,26 +15,38 @@
  * Column widths are estimated from the longest cell in each column
  * (capped at 50 chars) so the workbook opens with sensible widths
  * without per-sheet hand-tuning.
+ *
+ * Migrated from SheetJS (`xlsx`, prototype-pollution CVE-2023-30533 +
+ * ReDoS, no patched release) to `exceljs`. Generators now build sheets
+ * via appendSheet(wb, spec) and writeWorkbook() is async
+ * (exceljs serialisation returns a Promise).
  */
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { SCHEMA_HASH } from '@/lib/portability/schema-hash.generated';
+
+export type Workbook = ExcelJS.Workbook;
 
 export interface SheetSpec {
   name: string;
   rows: (string | number | boolean | null)[][];
 }
 
-/** Convert a 2D array of cells into a sheet with auto column widths.
- *  First row is treated as the header (no special formatting beyond
- *  the natural Excel layout). */
-export function makeSheet(spec: SheetSpec): XLSX.WorkSheet {
-  const ws = XLSX.utils.aoa_to_sheet(spec.rows);
+/** Create an empty workbook. */
+export function newWorkbook(): Workbook {
+  return new ExcelJS.Workbook();
+}
+
+/** Append a sheet built from a 2D array of cells, with auto column
+ *  widths. First row is treated as the header (no special formatting
+ *  beyond the natural Excel layout). */
+export function appendSheet(wb: Workbook, spec: SheetSpec): void {
+  const ws = wb.addWorksheet(spec.name);
+  for (const row of spec.rows) ws.addRow(row);
 
   // Auto column widths — Math.max of cell-as-string length across all rows.
   if (spec.rows.length > 0) {
     const colCount = Math.max(...spec.rows.map((r) => r.length));
-    const widths: number[] = [];
     for (let c = 0; c < colCount; c++) {
       let max = 8;
       for (const row of spec.rows) {
@@ -42,11 +54,9 @@ export function makeSheet(spec: SheetSpec): XLSX.WorkSheet {
         const s = v == null ? '' : String(v);
         if (s.length > max) max = s.length;
       }
-      widths.push(Math.min(50, max + 2));
+      ws.getColumn(c + 1).width = Math.min(50, max + 2);
     }
-    ws['!cols'] = widths.map((wch) => ({ wch }));
   }
-  return ws;
 }
 
 /** Standard metadata sheet appended as the last sheet of every report
@@ -57,8 +67,8 @@ export function metadataSheet(opts: {
   title: string;
   fy?: string;
   userId: string;
-}): XLSX.WorkSheet {
-  return makeSheet({
+}): SheetSpec {
+  return {
     name: 'Metadata',
     rows: [
       ['Field', 'Value'],
@@ -70,7 +80,7 @@ export function metadataSheet(opts: {
       ['Schema Hash', SCHEMA_HASH],
       ['Product', 'pfd-saas v0.6.2'],
     ],
-  });
+  };
 }
 
 /** Convert paisa → rupees as a JS number for Excel-side math. */
@@ -81,7 +91,7 @@ export function rs(paisa: bigint | number | null | undefined): number {
 }
 
 /** Serialise a workbook to a Buffer suitable for HTTP response. */
-export function writeWorkbook(wb: XLSX.WorkBook): Buffer {
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  return Buffer.from(buf);
+export async function writeWorkbook(wb: Workbook): Promise<Buffer> {
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
 }

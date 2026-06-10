@@ -8,15 +8,17 @@
  *   Metadata   — standard report metadata
  */
 
-import * as XLSX from 'xlsx';
 import type { NetWorthReportData } from '../data/fetchNetWorth';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import { appendSheet, metadataSheet, newWorkbook, rs, writeWorkbook } from './_helpers';
 
-export function buildNetWorthXlsx(data: NetWorthReportData, userId: string): Buffer {
-  const wb = XLSX.utils.book_new();
+export async function buildNetWorthXlsx(
+  data: NetWorthReportData,
+  userId: string,
+): Promise<Buffer> {
+  const wb = newWorkbook();
 
   // Summary
-  const summary = makeSheet({
+  appendSheet(wb, {
     name: 'Summary',
     rows: [
       ['Metric', 'Value (₹)'],
@@ -26,29 +28,23 @@ export function buildNetWorthXlsx(data: NetWorthReportData, userId: string): Buf
       ['As Of', data.asOfDate.toISOString().slice(0, 10)],
     ],
   });
-  XLSX.utils.book_append_sheet(wb, summary, 'Summary');
 
   // Categories
   const categoryRows: (string | number)[][] = [['Category', 'Value (₹)']];
   for (const c of data.categories) categoryRows.push([c.name, rs(c.valuePaisa)]);
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({ name: 'Categories', rows: categoryRows }),
-    'Categories',
-  );
+  appendSheet(wb, { name: 'Categories', rows: categoryRows });
 
   // Items (flat: category × item × value)
   const itemRows: (string | number)[][] = [['Category', 'Item', 'Value (₹)']];
   for (const c of data.categories) {
     for (const i of c.items) itemRows.push([c.name, i.name, rs(i.valuePaisa)]);
   }
-  XLSX.utils.book_append_sheet(wb, makeSheet({ name: 'Items', rows: itemRows }), 'Items');
+  appendSheet(wb, { name: 'Items', rows: itemRows });
 
   // Metadata
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({ reportId: 'networth', title: 'Net Worth Statement', userId }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

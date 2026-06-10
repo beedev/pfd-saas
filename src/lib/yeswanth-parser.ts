@@ -31,7 +31,73 @@
  *   © 1997-2026, Nithyanand Yeswanth (taxcalc@ynithya.com)
  */
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+
+// ─── Workbook adapter ────────────────────────────────────────────────
+//
+// The extraction logic below was written against SheetJS's sparse
+// cell-map shape (`sheet['B4'].v` = computed raw value). To migrate
+// off the vulnerable `xlsx` package without touching the extraction
+// logic, we load via exceljs and project the workbook into the same
+// lite shape: address → { v } where v matches SheetJS `raw: true`
+// semantics (formula cells → cached result, dates → Excel serial
+// numbers, rich text → concatenated plain text, errors/empty → absent).
+
+interface CellLite {
+  v: string | number | boolean;
+}
+type SheetLite = Record<string, CellLite>;
+interface WorkbookLite {
+  SheetNames: string[];
+  Sheets: Record<string, SheetLite>;
+}
+
+/** JS Date (UTC, as exceljs produces) → Excel 1900-system serial. */
+function dateToExcelSerial(d: Date): number {
+  return d.getTime() / 86400000 + 25569;
+}
+
+/** Normalise an exceljs cell value to SheetJS `.v` semantics. */
+function cellValueToLite(v: ExcelJS.CellValue): string | number | boolean | undefined {
+  if (v == null) return undefined;
+  if (v instanceof Date) return dateToExcelSerial(v);
+  if (typeof v === 'object') {
+    // Formula / shared-formula cells carry the cached result.
+    if ('result' in v || 'formula' in v || 'sharedFormula' in v) {
+      return cellValueToLite((v as ExcelJS.CellFormulaValue).result as ExcelJS.CellValue);
+    }
+    if ('richText' in v) {
+      return (v as ExcelJS.CellRichTextValue).richText.map((t) => t.text).join('');
+    }
+    if ('error' in v) return undefined;
+    if ('text' in v) {
+      return cellValueToLite((v as ExcelJS.CellHyperlinkValue).text as ExcelJS.CellValue);
+    }
+    return undefined;
+  }
+  return v;
+}
+
+/** Project an exceljs workbook into the sparse lite shape. */
+function workbookToLite(wb: ExcelJS.Workbook): WorkbookLite {
+  const lite: WorkbookLite = { SheetNames: [], Sheets: {} };
+  for (const ws of wb.worksheets) {
+    const sheet: SheetLite = {};
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        // Merged slave cells mirror the master's value in exceljs;
+        // SheetJS stores only the top-left cell. Skip slaves to match.
+        if (cell.type === ExcelJS.ValueType.Merge) return;
+        const v = cellValueToLite(cell.value);
+        if (v === undefined) return;
+        sheet[cell.address] = { v };
+      });
+    });
+    lite.SheetNames.push(ws.name);
+    lite.Sheets[ws.name] = sheet;
+  }
+  return lite;
+}
 
 export interface YeswanthSalaryComponents {
   basicPaisa: number;
@@ -124,7 +190,7 @@ export interface YeswanthPreview {
 }
 
 /** Detect the "IT YYYY-YY" sheet name. */
-function detectItSheetName(wb: XLSX.WorkBook): string | null {
+function detectItSheetName(wb: WorkbookLite): string | null {
   return wb.SheetNames.find((s) => /^IT \d{4}-\d{2}$/.test(s)) ?? null;
 }
 
@@ -134,7 +200,7 @@ function detectFy(itSheetName: string): string {
 }
 
 /** Read a numeric cell, returning 0 for empty/NaN. */
-function readNum(sheet: XLSX.WorkSheet, addr: string): number {
+function readNum(sheet: SheetLite, addr: string): number {
   const cell = sheet[addr];
   if (!cell) return 0;
   const v = cell.v;
@@ -148,7 +214,7 @@ function readNum(sheet: XLSX.WorkSheet, addr: string): number {
 }
 
 /** Read a string cell, returning empty for non-string. */
-function readStr(sheet: XLSX.WorkSheet, addr: string): string {
+function readStr(sheet: SheetLite, addr: string): string {
   const cell = sheet[addr];
   if (!cell) return '';
   if (typeof cell.v === 'string') return cell.v;
@@ -157,7 +223,7 @@ function readStr(sheet: XLSX.WorkSheet, addr: string): string {
 }
 
 /** Yeswanth template uses Y/N for boolean params. */
-function readYN(sheet: XLSX.WorkSheet, addr: string): boolean | undefined {
+function readYN(sheet: SheetLite, addr: string): boolean | undefined {
   const s = readStr(sheet, addr).trim().toUpperCase();
   if (s === 'Y' || s === 'YES') return true;
   if (s === 'N' || s === 'NO') return false;
@@ -168,7 +234,7 @@ function readYN(sheet: XLSX.WorkSheet, addr: string): boolean | undefined {
 const toPaisa = (rupees: number) => Math.round(rupees * 100);
 
 /** Sum a range of cells (e.g. D4:O4 = monthly Apr..Mar for row 4). */
-function sumRow(sheet: XLSX.WorkSheet, row: number, startCol: string, endCol: string): number {
+function sumRow(sheet: SheetLite, row: number, startCol: string, endCol: string): number {
   const startIdx = colToIdx(startCol);
   const endIdx = colToIdx(endCol);
   let s = 0;
@@ -196,7 +262,7 @@ function idxToCol(idx: number): string {
 
 /** Parse setup-parameter block (V52..W75). The label is in V, the
  *  user value typically in W or X. */
-function parseSetupParams(sheet: XLSX.WorkSheet): YeswanthSetupParams {
+function parseSetupParams(sheet: SheetLite): YeswanthSetupParams {
   // Yeswanth setup labels live in column V starting row 52. The user
   // value is to the right (typically column W or AB).
   const params: YeswanthSetupParams = {};
@@ -222,12 +288,12 @@ function parseSetupParams(sheet: XLSX.WorkSheet): YeswanthSetupParams {
 }
 
 /** Sum a salary-component row across months Apr (D) through Mar (O). */
-function annualSum(sheet: XLSX.WorkSheet, row: number): number {
+function annualSum(sheet: SheetLite, row: number): number {
   return sumRow(sheet, row, 'D', 'O');
 }
 
 /** Parse the Earnings section (rows 4..22). */
-function parseSalary(sheet: XLSX.WorkSheet): YeswanthSalaryComponents {
+function parseSalary(sheet: SheetLite): YeswanthSalaryComponents {
   // Row map per the FY 2026-27 template (column B label):
   //   R4 = Basic, R5 = DA, R6 = Convey, R7 = HRA, R8 = Ch. Educ
   //   R9 = Medical, R10 = LTA, R11 = Uniform All., R12 = Car allow
@@ -257,7 +323,7 @@ function parseSalary(sheet: XLSX.WorkSheet): YeswanthSalaryComponents {
 }
 
 /** Housing loan + 80EEA fields (Q65..T73 area). */
-function parseHousingLoan(sheet: XLSX.WorkSheet): YeswanthHousingLoan {
+function parseHousingLoan(sheet: SheetLite): YeswanthHousingLoan {
   return {
     rentalIncomeAnnualRupees: readNum(sheet, 'T66'),
     municipalTaxesAnnualRupees: readNum(sheet, 'T67'),
@@ -270,7 +336,7 @@ function parseHousingLoan(sheet: XLSX.WorkSheet): YeswanthHousingLoan {
 
 /** Parse the Deductions block (rows 23..37). Each row has label in B
  *  and monthly columns D..O. We map row labels to standard sections. */
-function parseDeductions(sheet: XLSX.WorkSheet, fy: string): YeswanthDeduction[] {
+function parseDeductions(sheet: SheetLite, fy: string): YeswanthDeduction[] {
   void fy;
   const rows: YeswanthDeduction[] = [];
   // Row labels per template:
@@ -314,7 +380,7 @@ function parseDeductions(sheet: XLSX.WorkSheet, fy: string): YeswanthDeduction[]
 }
 
 /** Parse the Bank interest tab. Rows 5..30 typically. */
-function parseBankInterest(wb: XLSX.WorkBook): YeswanthBankInterestRow[] {
+function parseBankInterest(wb: WorkbookLite): YeswanthBankInterestRow[] {
   const sheet = wb.Sheets['Bank int, Tax paid'];
   if (!sheet) return [];
   const rows: YeswanthBankInterestRow[] = [];
@@ -330,7 +396,7 @@ function parseBankInterest(wb: XLSX.WorkBook): YeswanthBankInterestRow[] {
   return rows;
 }
 
-function parseTaxesPaidOutsideSalary(wb: XLSX.WorkBook): YeswanthTaxPaidRow[] {
+function parseTaxesPaidOutsideSalary(wb: WorkbookLite): YeswanthTaxPaidRow[] {
   const sheet = wb.Sheets['Bank int, Tax paid'];
   if (!sheet) return [];
   const rows: YeswanthTaxPaidRow[] = [];
@@ -355,7 +421,7 @@ function parseTaxesPaidOutsideSalary(wb: XLSX.WorkBook): YeswanthTaxPaidRow[] {
   return rows;
 }
 
-function parseDividends(wb: XLSX.WorkBook): YeswanthDividendRow[] {
+function parseDividends(wb: WorkbookLite): YeswanthDividendRow[] {
   const sheet = wb.Sheets['Dividends'];
   if (!sheet) return [];
   const rows: YeswanthDividendRow[] = [];
@@ -379,7 +445,7 @@ function parseDividends(wb: XLSX.WorkBook): YeswanthDividendRow[] {
   return rows;
 }
 
-function parseCgEquity(wb: XLSX.WorkBook, sheetName: string): YeswanthCapitalGainRow[] {
+function parseCgEquity(wb: WorkbookLite, sheetName: string): YeswanthCapitalGainRow[] {
   const sheet = wb.Sheets[sheetName];
   if (!sheet) return [];
   const rows: YeswanthCapitalGainRow[] = [];
@@ -404,7 +470,7 @@ function parseCgEquity(wb: XLSX.WorkBook, sheetName: string): YeswanthCapitalGai
   return rows;
 }
 
-function serialToISO(cell: XLSX.CellObject | undefined): string | null {
+function serialToISO(cell: CellLite | undefined): string | null {
   if (!cell) return null;
   if (typeof cell.v === 'number') {
     const date = new Date(Math.round((cell.v - 25569) * 86400 * 1000));
@@ -419,8 +485,16 @@ function serialToISO(cell: XLSX.CellObject | undefined): string | null {
  * Main entry — parses xlsx buffer into preview JSON. Throws if the
  * file isn't a recognised Yeswanth TaxCalc workbook.
  */
-export function parseYeswanthTaxCalc(buffer: Buffer): YeswanthPreview {
-  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
+export async function parseYeswanthTaxCalc(buffer: Buffer): Promise<YeswanthPreview> {
+  const ewb = new ExcelJS.Workbook();
+  try {
+    // exceljs's .d.ts types the param as its own ArrayBuffer-flavoured
+    // Buffer; Node Buffers are accepted at runtime.
+    await ewb.xlsx.load(buffer as unknown as ArrayBuffer);
+  } catch {
+    throw new Error('Could not read the file as an xlsx workbook (corrupt or unsupported format).');
+  }
+  const wb = workbookToLite(ewb);
   const itSheetName = detectItSheetName(wb);
   if (!itSheetName) {
     throw new Error(

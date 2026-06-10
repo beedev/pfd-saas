@@ -8,12 +8,11 @@
  *   Metadata
  */
 
-import * as XLSX from 'xlsx';
 import type {
   CapitalGainsReportData,
   CapitalGainsEntry,
 } from '../data/fetchCapitalGains';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import { appendSheet, metadataSheet, newWorkbook, rs, writeWorkbook } from './_helpers';
 
 function entryRows(entries: CapitalGainsEntry[]): (string | number)[][] {
   const header = [
@@ -49,33 +48,29 @@ function entryRows(entries: CapitalGainsEntry[]): (string | number)[][] {
   ];
 }
 
-export function buildCapitalGainsXlsx(
+export async function buildCapitalGainsXlsx(
   data: CapitalGainsReportData,
   userId: string,
-): Buffer {
-  const wb = XLSX.utils.book_new();
+): Promise<Buffer> {
+  const wb = newWorkbook();
 
   // Summary
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Summary',
-      rows: [
-        ['Bucket', 'Amount (₹)'],
-        ['LTCG (Total Gain)', rs(data.totals.ltcgGainPaisa)],
-        ['STCG (Total Gain)', rs(data.totals.stcgGainPaisa)],
-        ['Exemption Applied', rs(data.totals.totalExemptionPaisa)],
-        ['Total Taxable', rs(data.totals.totalTaxablePaisa)],
-        ['Total Tax', rs(data.totals.totalTaxPaisa)],
-      ],
-    }),
-    'Summary',
-  );
+  appendSheet(wb, {
+    name: 'Summary',
+    rows: [
+      ['Bucket', 'Amount (₹)'],
+      ['LTCG (Total Gain)', rs(data.totals.ltcgGainPaisa)],
+      ['STCG (Total Gain)', rs(data.totals.stcgGainPaisa)],
+      ['Exemption Applied', rs(data.totals.totalExemptionPaisa)],
+      ['Total Taxable', rs(data.totals.totalTaxablePaisa)],
+      ['Total Tax', rs(data.totals.totalTaxPaisa)],
+    ],
+  });
 
-  XLSX.utils.book_append_sheet(wb, makeSheet({ name: 'LTCG', rows: entryRows(data.ltcg) }), 'LTCG');
-  XLSX.utils.book_append_sheet(wb, makeSheet({ name: 'STCG', rows: entryRows(data.stcg) }), 'STCG');
+  appendSheet(wb, { name: 'LTCG', rows: entryRows(data.ltcg) });
+  appendSheet(wb, { name: 'STCG', rows: entryRows(data.stcg) });
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({
       reportId: 'capital-gains',
@@ -83,7 +78,6 @@ export function buildCapitalGainsXlsx(
       fy: data.fy,
       userId,
     }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

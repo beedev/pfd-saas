@@ -7,26 +7,24 @@
  *   Metadata
  */
 
-import * as XLSX from 'xlsx';
 import type { Form80gReportData } from '../data/fetchForm80g';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import { appendSheet, metadataSheet, newWorkbook, rs, writeWorkbook } from './_helpers';
 
-export function buildForm80gXlsx(data: Form80gReportData, userId: string): Buffer {
-  const wb = XLSX.utils.book_new();
+export async function buildForm80gXlsx(
+  data: Form80gReportData,
+  userId: string,
+): Promise<Buffer> {
+  const wb = newWorkbook();
 
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Summary',
-      rows: [
-        ['Metric', 'Value (₹)'],
-        ['Gross Donations', rs(data.totals.grossPaisa)],
-        ['Deductible (80G)', rs(data.totals.deductiblePaisa)],
-        ['Number of Donations', data.donations.length],
-      ],
-    }),
-    'Summary',
-  );
+  appendSheet(wb, {
+    name: 'Summary',
+    rows: [
+      ['Metric', 'Value (₹)'],
+      ['Gross Donations', rs(data.totals.grossPaisa)],
+      ['Deductible (80G)', rs(data.totals.deductiblePaisa)],
+      ['Number of Donations', data.donations.length],
+    ],
+  });
 
   const detailRows: (string | number)[][] = [
     [
@@ -54,13 +52,9 @@ export function buildForm80gXlsx(data: Form80gReportData, userId: string): Buffe
       d.notes,
     ]),
   ];
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({ name: 'Donations', rows: detailRows }),
-    'Donations',
-  );
+  appendSheet(wb, { name: 'Donations', rows: detailRows });
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({
       reportId: 'form80g',
@@ -68,7 +62,6 @@ export function buildForm80gXlsx(data: Form80gReportData, userId: string): Buffe
       fy: data.fy,
       userId,
     }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

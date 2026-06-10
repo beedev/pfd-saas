@@ -10,37 +10,32 @@
  *   Metadata
  */
 
-import * as XLSX from 'xlsx';
 import type { IncomeSummaryReportData } from '../data/fetchIncomeSummary';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import { appendSheet, metadataSheet, newWorkbook, rs, writeWorkbook } from './_helpers';
 
-export function buildIncomeSummaryXlsx(
+export async function buildIncomeSummaryXlsx(
   data: IncomeSummaryReportData,
   userId: string,
-): Buffer {
-  const wb = XLSX.utils.book_new();
+): Promise<Buffer> {
+  const wb = newWorkbook();
 
   // Summary
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Summary',
-      rows: [
-        ['Section', 'Amount (₹)'],
-        ['Salary Gross', rs(data.salary.grossPaisa)],
-        ['Salary Taxable', rs(data.salary.taxablePaisa)],
-        ['Salary TDS', rs(data.salary.tdsPaisa)],
-        ['LTCG', rs(data.capitalGains.ltcgPaisa)],
-        ['STCG', rs(data.capitalGains.stcgPaisa)],
-        ['CG Tax', rs(data.capitalGains.totalTaxPaisa)],
-        ['Interest', rs(data.otherIncome.interestPaisa)],
-        ['Dividends', rs(data.otherIncome.dividendsPaisa)],
-        ['Other', rs(data.otherIncome.otherPaisa)],
-        ['Grand Total', rs(data.totals.grandTotalPaisa)],
-      ],
-    }),
-    'Summary',
-  );
+  appendSheet(wb, {
+    name: 'Summary',
+    rows: [
+      ['Section', 'Amount (₹)'],
+      ['Salary Gross', rs(data.salary.grossPaisa)],
+      ['Salary Taxable', rs(data.salary.taxablePaisa)],
+      ['Salary TDS', rs(data.salary.tdsPaisa)],
+      ['LTCG', rs(data.capitalGains.ltcgPaisa)],
+      ['STCG', rs(data.capitalGains.stcgPaisa)],
+      ['CG Tax', rs(data.capitalGains.totalTaxPaisa)],
+      ['Interest', rs(data.otherIncome.interestPaisa)],
+      ['Dividends', rs(data.otherIncome.dividendsPaisa)],
+      ['Other', rs(data.otherIncome.otherPaisa)],
+      ['Grand Total', rs(data.totals.grandTotalPaisa)],
+    ],
+  });
 
   // Salary
   const salaryRows: (string | number)[][] = [
@@ -51,42 +46,34 @@ export function buildIncomeSummaryXlsx(
       rs(e.grossPaisa),
     ]),
   ];
-  XLSX.utils.book_append_sheet(wb, makeSheet({ name: 'Salary', rows: salaryRows }), 'Salary');
+  appendSheet(wb, { name: 'Salary', rows: salaryRows });
 
   // Capital Gains
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Capital Gains',
-      rows: [
-        ['Type', 'Amount (₹)'],
-        ['LTCG', rs(data.capitalGains.ltcgPaisa)],
-        ['STCG', rs(data.capitalGains.stcgPaisa)],
-        ['Total Tax', rs(data.capitalGains.totalTaxPaisa)],
-        ['Entries', data.capitalGains.entries],
-      ],
-    }),
-    'Capital Gains',
-  );
+  appendSheet(wb, {
+    name: 'Capital Gains',
+    rows: [
+      ['Type', 'Amount (₹)'],
+      ['LTCG', rs(data.capitalGains.ltcgPaisa)],
+      ['STCG', rs(data.capitalGains.stcgPaisa)],
+      ['Total Tax', rs(data.capitalGains.totalTaxPaisa)],
+      ['Entries', data.capitalGains.entries],
+    ],
+  });
 
   // Other Income
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Other Income',
-      rows: [
-        ['Source', 'Amount (₹)'],
-        ['Interest', rs(data.otherIncome.interestPaisa)],
-        ['Dividends', rs(data.otherIncome.dividendsPaisa)],
-        ['Rental', rs(data.otherIncome.rentalPaisa)],
-        ['Other', rs(data.otherIncome.otherPaisa)],
-        ['Total', rs(data.otherIncome.totalPaisa)],
-      ],
-    }),
-    'Other Income',
-  );
+  appendSheet(wb, {
+    name: 'Other Income',
+    rows: [
+      ['Source', 'Amount (₹)'],
+      ['Interest', rs(data.otherIncome.interestPaisa)],
+      ['Dividends', rs(data.otherIncome.dividendsPaisa)],
+      ['Rental', rs(data.otherIncome.rentalPaisa)],
+      ['Other', rs(data.otherIncome.otherPaisa)],
+      ['Total', rs(data.otherIncome.totalPaisa)],
+    ],
+  });
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({
       reportId: 'income-summary',
@@ -94,7 +81,6 @@ export function buildIncomeSummaryXlsx(
       fy: data.fy,
       userId,
     }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

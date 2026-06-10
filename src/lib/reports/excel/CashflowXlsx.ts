@@ -8,17 +8,24 @@
  *   Metadata
  */
 
-import * as XLSX from 'xlsx';
 import type { CashflowReportData, CashflowRow } from '../data/fetchCashflow';
-import { makeSheet, metadataSheet, rs, writeWorkbook } from './_helpers';
+import {
+  appendSheet,
+  metadataSheet,
+  newWorkbook,
+  rs,
+  writeWorkbook,
+  type SheetSpec,
+} from './_helpers';
 
 function gridSheet(
+  name: string,
   monthLabels: string[],
   rows: CashflowRow[],
   totalLabel: string,
   monthlyTotals: number[],
   total: number,
-): XLSX.WorkSheet {
+): SheetSpec {
   const header = ['Line Item', ...monthLabels, 'Total (₹)'];
   const dataRows: (string | number)[][] = rows.map((r) => [
     r.label,
@@ -30,55 +37,51 @@ function gridSheet(
     ...monthlyTotals.map((v) => rs(v)),
     rs(total),
   ];
-  return makeSheet({
-    name: 'Cashflow',
-    rows: [header, ...dataRows, totalRow],
-  });
+  return { name, rows: [header, ...dataRows, totalRow] };
 }
 
-export function buildCashflowXlsx(data: CashflowReportData, userId: string): Buffer {
-  const wb = XLSX.utils.book_new();
+export async function buildCashflowXlsx(
+  data: CashflowReportData,
+  userId: string,
+): Promise<Buffer> {
+  const wb = newWorkbook();
   const monthLabels = data.months.map((m) => m.label);
 
-  XLSX.utils.book_append_sheet(
-    wb,
-    makeSheet({
-      name: 'Summary',
-      rows: [
-        ['Metric', 'Value (₹)'],
-        ['Income (FY Total)', rs(data.totals.incomeTotalPaisa)],
-        ['Expenses (FY Total)', rs(data.totals.expenseTotalPaisa)],
-        ['Net (Income − Expenses)', rs(data.totals.netTotalPaisa)],
-      ],
-    }),
-    'Summary',
-  );
+  appendSheet(wb, {
+    name: 'Summary',
+    rows: [
+      ['Metric', 'Value (₹)'],
+      ['Income (FY Total)', rs(data.totals.incomeTotalPaisa)],
+      ['Expenses (FY Total)', rs(data.totals.expenseTotalPaisa)],
+      ['Net (Income − Expenses)', rs(data.totals.netTotalPaisa)],
+    ],
+  });
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     gridSheet(
+      'Income',
       monthLabels,
       data.income,
       'Income Total',
       data.totals.incomeMonthly,
       data.totals.incomeTotalPaisa,
     ),
-    'Income',
   );
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     gridSheet(
+      'Expenses',
       monthLabels,
       data.expenses,
       'Expense Total',
       data.totals.expenseMonthly,
       data.totals.expenseTotalPaisa,
     ),
-    'Expenses',
   );
 
-  XLSX.utils.book_append_sheet(
+  appendSheet(
     wb,
     metadataSheet({
       reportId: 'cashflow',
@@ -86,7 +89,6 @@ export function buildCashflowXlsx(data: CashflowReportData, userId: string): Buf
       fy: data.fy,
       userId,
     }),
-    'Metadata',
   );
 
   return writeWorkbook(wb);

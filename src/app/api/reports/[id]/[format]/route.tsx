@@ -185,37 +185,37 @@ export async function GET(
       switch (id) {
         case 'networth': {
           const data = await fetchNetWorth({ userId });
-          buf = buildNetWorthXlsx(data, userId);
+          buf = await buildNetWorthXlsx(data, userId);
           break;
         }
         case 'income-summary': {
           const data = await fetchIncomeSummary({ userId, fy });
-          buf = buildIncomeSummaryXlsx(data, userId);
+          buf = await buildIncomeSummaryXlsx(data, userId);
           break;
         }
         case 'section80': {
           const data = await fetchSection80({ userId, fy });
-          buf = buildSection80Xlsx(data, userId);
+          buf = await buildSection80Xlsx(data, userId);
           break;
         }
         case 'capital-gains': {
           const data = await fetchCapitalGains({ userId, fy });
-          buf = buildCapitalGainsXlsx(data, userId);
+          buf = await buildCapitalGainsXlsx(data, userId);
           break;
         }
         case 'form80g': {
           const data = await fetchForm80g({ userId, fy });
-          buf = buildForm80gXlsx(data, userId);
+          buf = await buildForm80gXlsx(data, userId);
           break;
         }
         case 'retirement': {
           const data = await fetchRetirementProjection({ userId });
-          buf = buildRetirementXlsx(data, userId);
+          buf = await buildRetirementXlsx(data, userId);
           break;
         }
         case 'cashflow': {
           const data = await fetchCashflow({ userId, fy });
-          buf = buildCashflowXlsx(data, userId);
+          buf = await buildCashflowXlsx(data, userId);
           break;
         }
         default:
