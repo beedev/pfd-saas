@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   cashflowEvents,
   db,
@@ -19,7 +20,8 @@ import {
   type CashflowSourceKind,
   type CashflowTaxTreatment,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 const VALID_KINDS: CashflowSourceKind[] = [
   'INSURANCE_MATURITY', 'ANNUITY', 'PENSION', 'NPS_LUMPSUM', 'NPS_ANNUITY',
@@ -39,8 +41,8 @@ function rupeesToPaisa(n: unknown): number | undefined {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -53,7 +55,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(cashflowEvents.id, numericId),
-          eq(cashflowEvents.userId, session.user.id),
+          eq(cashflowEvents.userId, userId),
         ),
       )
       .limit(1);
@@ -65,24 +67,26 @@ export async function GET(_request: NextRequest, { params }: Params) {
   }
 }
 
-interface PatchBody {
-  name?: string;
-  sourceKind?: CashflowSourceKind;
-  sourceId?: number | null;
-  startDate?: string;
-  endDate?: string | null;
-  amountRupees?: number;
-  frequency?: CashflowFrequency;
-  growthPctPerYear?: number;
-  taxTreatment?: CashflowTaxTreatment;
-  goalId?: number | null;
-  autoDerived?: boolean;
-  notes?: string | null;
-}
+// Field-diff PATCH — every key optional; absent keys leave the row untouched.
+// nullable() appears only where the handler previously tolerated null.
+const patchSchema = z.object({
+  name: z.string().optional(),
+  sourceKind: z.enum(VALID_KINDS).optional(),
+  sourceId: z.number().nullable().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().nullable().optional(),
+  amountRupees: z.number().finite().optional(),
+  frequency: z.enum(VALID_FREQUENCIES).optional(),
+  growthPctPerYear: z.number().finite().optional(),
+  taxTreatment: z.enum(VALID_TAX_TREATMENTS).optional(),
+  goalId: z.number().nullable().optional(),
+  autoDerived: z.boolean().optional(),
+  notes: z.string().nullable().optional(),
+});
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -95,23 +99,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(cashflowEvents.id, numericId),
-          eq(cashflowEvents.userId, session.user.id),
+          eq(cashflowEvents.userId, userId),
         ),
       )
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const body = (await request.json()) as PatchBody;
-
-    if (body.sourceKind !== undefined && !VALID_KINDS.includes(body.sourceKind)) {
-      return NextResponse.json({ error: 'Invalid sourceKind' }, { status: 400 });
-    }
-    if (body.frequency !== undefined && !VALID_FREQUENCIES.includes(body.frequency)) {
-      return NextResponse.json({ error: 'Invalid frequency' }, { status: 400 });
-    }
-    if (body.taxTreatment !== undefined && !VALID_TAX_TREATMENTS.includes(body.taxTreatment)) {
-      return NextResponse.json({ error: 'Invalid taxTreatment' }, { status: 400 });
-    }
+    const parsed = await parseBody(request, patchSchema);
+    if (parsed.error) return parsed.error;
+    const body = parsed.data;
 
     const update: Partial<typeof cashflowEvents.$inferInsert> = { updatedAt: new Date() };
     if (typeof body.name === 'string' && body.name.trim()) update.name = body.name.trim();
@@ -136,7 +132,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(cashflowEvents.id, numericId),
-          eq(cashflowEvents.userId, session.user.id),
+          eq(cashflowEvents.userId, userId),
         ),
       )
       .returning();
@@ -148,8 +144,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -161,7 +157,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(cashflowEvents.id, numericId),
-          eq(cashflowEvents.userId, session.user.id),
+          eq(cashflowEvents.userId, userId),
         ),
       );
     return NextResponse.json({ success: true });

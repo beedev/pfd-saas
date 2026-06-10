@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, desc } from 'drizzle-orm';
-import { db, incomeTaxPaid } from '@/db';
-import { auth } from '@/auth';
+import { z } from 'zod';
+import { db, incomeTaxPaid, type TaxPaymentType } from '@/db';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
@@ -13,7 +15,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(incomeTaxPaid)
-      .where(and(eq(incomeTaxPaid.financialYear, fy), eq(incomeTaxPaid.userId, session.user.id)))
+      .where(and(eq(incomeTaxPaid.financialYear, fy), eq(incomeTaxPaid.userId, userId)))
       .orderBy(desc(incomeTaxPaid.paymentDate));
 
     const total = rows.reduce((s, r) => s + r.amount, 0);
@@ -25,21 +27,29 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  try {
-    const body = await request.json();
-    const { financialYear, paymentType, amount, paymentDate, referenceNumber, notes } = body;
+const createSchema = z.object({
+  financialYear: z.string().min(1),
+  paymentType: z.string().min(1),
+  // Pre-zod check was truthiness, which rejected amount === 0 — preserved.
+  amount: z.number().finite().refine((v) => v !== 0, 'amount is required'),
+  paymentDate: z.string().min(1),
+  referenceNumber: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
 
-    if (!financialYear || !paymentType || !amount || !paymentDate) {
-      return NextResponse.json({ error: 'financialYear, paymentType, amount, paymentDate required' }, { status: 400 });
-    }
+export async function POST(request: NextRequest) {
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
+  try {
+    const parsed = await parseBody(request, createSchema);
+    if (parsed.error) return parsed.error;
+    const { financialYear, paymentType, amount, paymentDate, referenceNumber, notes } = parsed.data;
 
     const result = await db.insert(incomeTaxPaid).values({
-      userId: session.user.id,
+      userId,
       financialYear,
-      paymentType,
+      // Cast preserves pre-zod behaviour: TS-only enum hint, never validated.
+      paymentType: paymentType as TaxPaymentType,
       amount: Math.round(amount * 100),
       paymentDate,
       referenceNumber: referenceNumber || null,
@@ -54,12 +64,12 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const id = Number(new URL(request.url).searchParams.get('id'));
     if (!Number.isFinite(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-    await db.delete(incomeTaxPaid).where(and(eq(incomeTaxPaid.id, id), eq(incomeTaxPaid.userId, session.user.id)));
+    await db.delete(incomeTaxPaid).where(and(eq(incomeTaxPaid.id, id), eq(incomeTaxPaid.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[tax-paid DELETE]', err);

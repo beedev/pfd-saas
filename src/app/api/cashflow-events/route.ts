@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { and, asc, eq, gte, isNull, lte, or } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   cashflowEvents,
   db,
@@ -26,7 +27,8 @@ import {
   type CashflowSourceKind,
   type CashflowTaxTreatment,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 const VALID_KINDS: CashflowSourceKind[] = [
   'INSURANCE_MATURITY', 'ANNUITY', 'PENSION', 'NPS_LUMPSUM', 'NPS_ANNUITY',
@@ -61,14 +63,14 @@ function findPgError(err: unknown): { code?: string; detail?: string } {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const yearParam = searchParams.get('year');
     const kindParam = searchParams.get('source_kind');
 
-    const filters = [eq(cashflowEvents.userId, session.user.id)];
+    const filters = [eq(cashflowEvents.userId, userId)];
     if (yearParam) {
       const y = Number(yearParam);
       if (!Number.isInteger(y) || y < 1900 || y > 2200) {
@@ -106,49 +108,33 @@ export async function GET(request: NextRequest) {
   }
 }
 
-interface CreateBody {
-  name?: string;
-  sourceKind?: CashflowSourceKind;
-  sourceId?: number | null;
-  startDate?: string;
-  endDate?: string | null;
-  amountRupees?: number;
-  frequency?: CashflowFrequency;
-  growthPctPerYear?: number;
-  taxTreatment?: CashflowTaxTreatment;
-  goalId?: number | null;
-  notes?: string | null;
-}
+const createSchema = z.object({
+  name: z.string().refine((s) => s.trim().length > 0, 'name is required'),
+  sourceKind: z.enum(VALID_KINDS),
+  sourceId: z.number().nullable().optional(),
+  startDate: z.string().min(1),
+  endDate: z.string().nullable().optional(),
+  amountRupees: z.number().finite(),
+  frequency: z.enum(VALID_FREQUENCIES),
+  growthPctPerYear: z.number().finite().nullable().optional(),
+  // null was tolerated pre-zod (fell through to the TAXABLE default).
+  taxTreatment: z.enum(VALID_TAX_TREATMENTS).nullable().optional(),
+  goalId: z.number().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = (await request.json()) as CreateBody;
-
-    if (!body.name || !body.name.trim()) {
-      return NextResponse.json({ error: 'name is required' }, { status: 400 });
-    }
-    if (!body.sourceKind || !VALID_KINDS.includes(body.sourceKind)) {
-      return NextResponse.json({ error: 'Valid sourceKind is required' }, { status: 400 });
-    }
-    if (!body.startDate) {
-      return NextResponse.json({ error: 'startDate is required' }, { status: 400 });
-    }
-    if (!body.frequency || !VALID_FREQUENCIES.includes(body.frequency)) {
-      return NextResponse.json({ error: 'Valid frequency is required' }, { status: 400 });
-    }
-    if (typeof body.amountRupees !== 'number' || !Number.isFinite(body.amountRupees)) {
-      return NextResponse.json({ error: 'amountRupees is required' }, { status: 400 });
-    }
-    if (body.taxTreatment && !VALID_TAX_TREATMENTS.includes(body.taxTreatment)) {
-      return NextResponse.json({ error: 'Invalid taxTreatment' }, { status: 400 });
-    }
+    const parsed = await parseBody(request, createSchema);
+    if (parsed.error) return parsed.error;
+    const body = parsed.data;
 
     const result = await db
       .insert(cashflowEvents)
       .values({
-        userId: session.user.id,
+        userId: userId,
         name: body.name.trim(),
         sourceKind: body.sourceKind,
         sourceId: body.sourceId ?? null,
@@ -156,10 +142,7 @@ export async function POST(request: NextRequest) {
         endDate: body.endDate ?? null,
         amountPaisa: Math.round(body.amountRupees * 100),
         frequency: body.frequency,
-        growthPctPerYear:
-          typeof body.growthPctPerYear === 'number' && Number.isFinite(body.growthPctPerYear)
-            ? body.growthPctPerYear
-            : 0,
+        growthPctPerYear: body.growthPctPerYear ?? 0,
         taxTreatment: body.taxTreatment ?? 'TAXABLE',
         goalId: body.goalId ?? null,
         autoDerived: false,

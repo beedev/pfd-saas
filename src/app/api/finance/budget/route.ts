@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { db, budgetCategories, budgetEntries, creditCardExpenses, liabilities, investmentTransactions, chitFundInstallments } from '@/db';
 import { eq, and, gte, lte, lt, asc, sql } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 type CardStatus = 'paid' | 'unpaid' | 'partial';
 
@@ -25,8 +27,8 @@ function deriveStatus(actual: number, planned: number): CardStatus | null {
 // GET - Get budget entries for a period range
 // Query params: from (MMYYYY), to (MMYYYY)
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const from = searchParams.get('from');
@@ -36,7 +38,7 @@ export async function GET(request: NextRequest) {
     const categories = await db
       .select()
       .from(budgetCategories)
-      .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, session.user.id)))
+      .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, userId)))
       .orderBy(asc(budgetCategories.type), asc(budgetCategories.sortOrder));
 
     // Get budget entries with optional period filter
@@ -56,11 +58,11 @@ export async function GET(request: NextRequest) {
         and(
           gte(budgetEntries.period, from),
           lte(budgetEntries.period, to),
-          eq(budgetEntries.userId, session.user.id),
+          eq(budgetEntries.userId, userId),
         )
       ) as typeof entriesQuery;
     } else {
-      entriesQuery = entriesQuery.where(eq(budgetEntries.userId, session.user.id)) as typeof entriesQuery;
+      entriesQuery = entriesQuery.where(eq(budgetEntries.userId, userId)) as typeof entriesQuery;
     }
 
     const entries = await entriesQuery;
@@ -78,13 +80,13 @@ export async function GET(request: NextRequest) {
           eq(liabilities.type, 'CREDIT_CARD'),
           gte(creditCardExpenses.period, from),
           lte(creditCardExpenses.period, to),
-          eq(creditCardExpenses.userId, session.user.id),
-          eq(liabilities.userId, session.user.id),
+          eq(creditCardExpenses.userId, userId),
+          eq(liabilities.userId, userId),
         )
       : and(
           eq(liabilities.type, 'CREDIT_CARD'),
-          eq(creditCardExpenses.userId, session.user.id),
-          eq(liabilities.userId, session.user.id),
+          eq(creditCardExpenses.userId, userId),
+          eq(liabilities.userId, userId),
         );
 
     const ccRows = await db
@@ -144,7 +146,7 @@ export async function GET(request: NextRequest) {
             eq(investmentTransactions.type, 'SIP_EXECUTION'),
             gte(investmentTransactions.transactionDate, fromDate),
             lt(investmentTransactions.transactionDate, toDate),
-            eq(investmentTransactions.userId, session.user.id),
+            eq(investmentTransactions.userId, userId),
           ),
         );
       const sipActual = Number(sipRow[0]?.total ?? 0);
@@ -156,7 +158,7 @@ export async function GET(request: NextRequest) {
           and(
             gte(chitFundInstallments.paidOn, fromDate),
             lt(chitFundInstallments.paidOn, toDate),
-            eq(chitFundInstallments.userId, session.user.id),
+            eq(chitFundInstallments.userId, userId),
           ),
         );
       const chitActual = Number(chitRow[0]?.total ?? 0);
@@ -216,20 +218,38 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Amounts here are stored as sent (no rupee→paisa conversion in this route).
+const upsertEntrySchema = z.object({
+  // Pre-zod check was truthiness, so 0 was rejected — preserved.
+  categoryId: z.number().refine((v) => v !== 0, 'categoryId is required'),
+  period: z.string().min(1),
+  plannedAmount: z.number().finite().nullable().optional(),
+  actualAmount: z.number().finite().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+// PUT skips (rather than rejects) entries missing categoryId/period, so the
+// bulk item shape keeps those fields optional and the skip logic survives.
+const bulkUpdateSchema = z.object({
+  entries: z.array(
+    z.object({
+      categoryId: z.number().nullable().optional(),
+      period: z.string().nullable().optional(),
+      plannedAmount: z.number().finite().nullable().optional(),
+      actualAmount: z.number().finite().nullable().optional(),
+      notes: z.string().nullable().optional(),
+    }),
+  ),
+});
+
 // POST - Create or update budget entry
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = await request.json();
-    const { categoryId, period, plannedAmount, actualAmount, notes } = body;
-
-    if (!categoryId || !period) {
-      return NextResponse.json(
-        { error: 'categoryId and period are required' },
-        { status: 400 }
-      );
-    }
+    const parsed = await parseBody(request, upsertEntrySchema);
+    if (parsed.error) return parsed.error;
+    const { categoryId, period, plannedAmount, actualAmount, notes } = parsed.data;
 
     // Check if entry exists
     const existing = await db
@@ -239,7 +259,7 @@ export async function POST(request: NextRequest) {
         and(
           eq(budgetEntries.categoryId, categoryId),
           eq(budgetEntries.period, period),
-          eq(budgetEntries.userId, session.user.id),
+          eq(budgetEntries.userId, userId),
         )
       );
 
@@ -254,12 +274,12 @@ export async function POST(request: NextRequest) {
           notes: notes !== undefined ? notes : existing[0].notes,
           updatedAt: new Date(),
         })
-        .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, session.user.id)))
+        .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, userId)))
         .returning();
     } else {
       // Create new
       result = await db.insert(budgetEntries).values({
-        userId: session.user.id,
+        userId: userId,
         categoryId,
         period,
         plannedAmount: plannedAmount ?? 0,
@@ -280,18 +300,12 @@ export async function POST(request: NextRequest) {
 
 // PUT - Bulk update budget entries
 export async function PUT(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = await request.json();
-    const { entries } = body;
-
-    if (!Array.isArray(entries)) {
-      return NextResponse.json(
-        { error: 'entries array is required' },
-        { status: 400 }
-      );
-    }
+    const parsed = await parseBody(request, bulkUpdateSchema);
+    if (parsed.error) return parsed.error;
+    const { entries } = parsed.data;
 
     const results = [];
 
@@ -308,7 +322,7 @@ export async function PUT(request: NextRequest) {
           and(
             eq(budgetEntries.categoryId, categoryId),
             eq(budgetEntries.period, period),
-            eq(budgetEntries.userId, session.user.id),
+            eq(budgetEntries.userId, userId),
           )
         );
 
@@ -322,11 +336,11 @@ export async function PUT(request: NextRequest) {
             notes: notes !== undefined ? notes : existing[0].notes,
             updatedAt: new Date(),
           })
-          .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, session.user.id)))
+          .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, userId)))
           .returning();
       } else {
         result = await db.insert(budgetEntries).values({
-          userId: session.user.id,
+          userId: userId,
           categoryId,
           period,
           plannedAmount: plannedAmount ?? 0,

@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { asc, desc, eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   db,
   subscriptions,
   type SubscriptionBillingFrequency,
   type SubscriptionCategory,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 const VALID_CATEGORIES: SubscriptionCategory[] = [
   'STREAMING',
@@ -30,15 +32,13 @@ const VALID_FREQUENCIES: SubscriptionBillingFrequency[] = [
 ];
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const rows = await db
       .select()
       .from(subscriptions)
-      .where(eq(subscriptions.userId, session.user.id))
+      .where(eq(subscriptions.userId, userId))
       .orderBy(
         // ACTIVE first, then PAUSED, then CANCELLED
         sql`CASE ${subscriptions.status}
@@ -58,53 +58,31 @@ export async function GET() {
   }
 }
 
-interface CreateBody {
-  name?: string;
-  provider?: string;
-  category?: SubscriptionCategory;
-  planName?: string;
-  amountRupees?: number;
-  billingFrequency?: SubscriptionBillingFrequency;
-  startDate?: string;
-  nextRenewalDate?: string;
-  paymentMethod?: string;
-  autoRenew?: boolean;
-  url?: string;
-  notes?: string;
-}
+const createSchema = z.object({
+  name: z.string().refine((s) => s.trim().length > 0, 'name is required'),
+  provider: z.string().refine((s) => s.trim().length > 0, 'provider is required'),
+  category: z.enum(VALID_CATEGORIES),
+  planName: z.string().nullable().optional(),
+  amountRupees: z.number().finite(),
+  billingFrequency: z.enum(VALID_FREQUENCIES),
+  startDate: z.string().min(1),
+  nextRenewalDate: z.string().nullable().optional(),
+  paymentMethod: z.string().nullable().optional(),
+  autoRenew: z.boolean().nullable().optional(),
+  url: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = (await request.json()) as CreateBody;
+    const parsed = await parseBody(request, createSchema);
+    if (parsed.error) return parsed.error;
+    const body = parsed.data;
 
-    if (!body.name || !body.name.trim()) {
-      return NextResponse.json({ error: 'name is required' }, { status: 400 });
-    }
-    if (!body.provider || !body.provider.trim()) {
-      return NextResponse.json({ error: 'provider is required' }, { status: 400 });
-    }
-    if (!body.category || !VALID_CATEGORIES.includes(body.category)) {
-      return NextResponse.json(
-        { error: `category must be one of ${VALID_CATEGORIES.join(', ')}` },
-        { status: 400 },
-      );
-    }
-    if (typeof body.amountRupees !== 'number' || !Number.isFinite(body.amountRupees)) {
-      return NextResponse.json({ error: 'amountRupees is required' }, { status: 400 });
-    }
-    if (!body.billingFrequency || !VALID_FREQUENCIES.includes(body.billingFrequency)) {
-      return NextResponse.json(
-        { error: `billingFrequency must be one of ${VALID_FREQUENCIES.join(', ')}` },
-        { status: 400 },
-      );
-    }
-    if (!body.startDate) {
-      return NextResponse.json({ error: 'startDate is required' }, { status: 400 });
-    }
+    // Cross-field rule kept out of the schema to preserve the exact
+    // single-message 400 the UI expects.
     if (body.billingFrequency !== 'LIFETIME' && !body.nextRenewalDate) {
       return NextResponse.json(
         { error: 'nextRenewalDate is required for non-LIFETIME subscriptions' },
@@ -117,7 +95,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(subscriptions)
       .values({
-        userId: session.user.id,
+        userId,
         name: body.name.trim(),
         provider: body.provider.trim(),
         category: body.category,

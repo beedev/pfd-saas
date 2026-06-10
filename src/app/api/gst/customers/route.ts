@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, customers } from '@/db';
+import { db, customers, type SupplyType } from '@/db';
 import { desc, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
+import { customerBodySchema } from './schema';
 
 // GET - List all customers
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const allCustomers = await db
       .select()
       .from(customers)
-      .where(eq(customers.userId, session.user.id))
+      .where(eq(customers.userId, userId))
       .orderBy(desc(customers.createdAt));
 
     return NextResponse.json({ customers: allCustomers });
@@ -28,10 +30,11 @@ export async function GET() {
 
 // POST - Create new customer
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = await request.json();
+    const parsed = await parseBody(request, customerBodySchema);
+    if (parsed.error) return parsed.error;
     const {
       name,
       gstin,
@@ -45,15 +48,7 @@ export async function POST(request: NextRequest) {
       phone,
       tdsRatePct,
       tdsSection,
-    } = body;
-
-    // Validate required fields
-    if (!name || !stateCode) {
-      return NextResponse.json(
-        { error: 'Name and state code are required' },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     // Validate state code
     if (!isValidStateCode(stateCode)) {
@@ -87,9 +82,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate supply type
-    const validSupplyTypes = ['REGULAR', 'EXPORT_WITH_IGST', 'EXPORT_LUT', 'SEZ'];
-    const validatedSupplyType = validSupplyTypes.includes(supplyType) ? supplyType : 'REGULAR';
+    // Validate supply type (unknown values silently coerce to REGULAR, as before)
+    const validSupplyTypes: readonly string[] = ['REGULAR', 'EXPORT_WITH_IGST', 'EXPORT_LUT', 'SEZ'];
+    const validatedSupplyType: SupplyType =
+      supplyType && validSupplyTypes.includes(supplyType) ? (supplyType as SupplyType) : 'REGULAR';
 
     // Sprint A.1 — TDS deduction config. Normalise to safe defaults so
     // legacy clients that don't send these fields still get usable values
@@ -104,7 +100,7 @@ export async function POST(request: NextRequest) {
         : '194J';
 
     const result = await db.insert(customers).values({
-      userId: session.user.id,
+      userId,
       name,
       gstin: validatedGstin,
       pan: pan?.toUpperCase().trim() || null,

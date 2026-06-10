@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   db,
   subscriptions,
@@ -7,7 +8,8 @@ import {
   type SubscriptionCategory,
   type SubscriptionStatus,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -41,10 +43,8 @@ function todayISO(): string {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -54,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(subscriptions)
-      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, session.user.id)))
+      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, userId)))
       .limit(1);
     if (!rows.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -66,27 +66,28 @@ export async function GET(_request: NextRequest, { params }: Params) {
   }
 }
 
-interface PatchBody {
-  name?: string;
-  provider?: string;
-  category?: SubscriptionCategory;
-  planName?: string | null;
-  amountRupees?: number;
-  billingFrequency?: SubscriptionBillingFrequency;
-  startDate?: string;
-  nextRenewalDate?: string | null;
-  paymentMethod?: string | null;
-  autoRenew?: boolean;
-  url?: string | null;
-  status?: SubscriptionStatus;
-  notes?: string | null;
-}
+// Field-diff PATCH — every key optional. Enums are nullable because the
+// old truthiness guards let null through (it then fell back to the
+// current DB value via `??` / typeof checks); that tolerance is kept.
+const patchSchema = z.object({
+  name: z.string().nullable().optional(),
+  provider: z.string().nullable().optional(),
+  category: z.enum(VALID_CATEGORIES).nullable().optional(),
+  planName: z.string().nullable().optional(),
+  amountRupees: z.number().finite().nullable().optional(),
+  billingFrequency: z.enum(VALID_FREQUENCIES).nullable().optional(),
+  startDate: z.string().nullable().optional(),
+  nextRenewalDate: z.string().nullable().optional(),
+  paymentMethod: z.string().nullable().optional(),
+  autoRenew: z.boolean().nullable().optional(),
+  url: z.string().nullable().optional(),
+  status: z.enum(VALID_STATUSES).nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -96,23 +97,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(subscriptions)
-      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, session.user.id)))
+      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, userId)))
       .limit(1);
     if (!existing.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     const current = existing[0];
-    const body = (await request.json()) as PatchBody;
-
-    if (body.category && !VALID_CATEGORIES.includes(body.category)) {
-      return NextResponse.json({ error: 'Invalid category' }, { status: 400 });
-    }
-    if (body.billingFrequency && !VALID_FREQUENCIES.includes(body.billingFrequency)) {
-      return NextResponse.json({ error: 'Invalid billingFrequency' }, { status: 400 });
-    }
-    if (body.status && !VALID_STATUSES.includes(body.status)) {
-      return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
-    }
+    const parsed = await parseBody(request, patchSchema);
+    if (parsed.error) return parsed.error;
+    const body = parsed.data;
 
     // Status transition side-effects on cancellation_date
     let cancellationDate: string | null = current.cancellationDate;
@@ -172,7 +165,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
             : current.notes,
         updatedAt: new Date(),
       })
-      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, session.user.id)))
+      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, userId)))
       .returning();
 
     return NextResponse.json({ subscription: result[0] });
@@ -183,10 +176,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -195,7 +186,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     }
     await db
       .delete(subscriptions)
-      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, session.user.id)));
+      .where(and(eq(subscriptions.id, numericId), eq(subscriptions.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete subscription:', err);

@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { db, invoices, invoiceItems, customers, businessProfile } from '@/db';
 import { and, desc, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 import { syncInvoiceTdsCredit } from '@/lib/finance/derive-invoice-tds';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 
 // GET - List all invoices (supports ?fy=2026-27 or ?period=MMYYYY)
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period'); // MMYYYY format
@@ -23,7 +25,7 @@ export async function GET(request: NextRequest) {
       })
       .from(invoices)
       .leftJoin(customers, eq(invoices.customerId, customers.id))
-      .where(eq(invoices.userId, session.user.id))
+      .where(eq(invoices.userId, userId))
       .orderBy(desc(invoices.invoiceDate));
 
     let filteredResults = results;
@@ -56,12 +58,33 @@ export async function GET(request: NextRequest) {
   }
 }
 
+const invoiceItemSchema = z.object({
+  sacCode: z.string(),
+  description: z.string(),
+  quantity: z.number().finite(),
+  unitPrice: z.number().finite(),
+  // 0/5/12/18/28 membership is checked below via isValidTaxRate so the
+  // specific error message survives.
+  taxRate: z.number().finite(),
+});
+
+const createInvoiceSchema = z.object({
+  invoiceNumber: z.string().min(1),
+  invoiceDate: z.string().min(1),
+  // Pre-zod check was truthiness, so 0 was rejected — preserved.
+  customerId: z.number().refine((v) => v !== 0, 'customerId is required'),
+  placeOfSupply: z.string().min(1),
+  items: z.array(invoiceItemSchema).min(1),
+  notes: z.string().nullable().optional(),
+});
+
 // POST - Create new invoice
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = await request.json();
+    const parsed = await parseBody(request, createInvoiceSchema);
+    if (parsed.error) return parsed.error;
     const {
       invoiceNumber,
       invoiceDate,
@@ -69,21 +92,13 @@ export async function POST(request: NextRequest) {
       placeOfSupply,
       items,
       notes,
-    } = body;
-
-    // Validate required fields
-    if (!invoiceNumber || !invoiceDate || !customerId || !placeOfSupply || !items?.length) {
-      return NextResponse.json(
-        { error: 'Invoice number, date, customer, place of supply, and items are required' },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     // Get business profile for supplier state
     const profile = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
@@ -97,7 +112,7 @@ export async function POST(request: NextRequest) {
     const customer = await db
       .select()
       .from(customers)
-      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, userId)))
       .limit(1);
 
     if (customer.length === 0) {
@@ -133,17 +148,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const processedItems = items.map((item: {
-      sacCode: string;
-      description: string;
-      quantity: number;
-      unitPrice: number;
-      taxRate: TaxRate;
-    }) => {
+    const processedItems = items.map((item) => {
+      const itemTaxRate = item.taxRate as TaxRate; // membership checked above
       const taxableAmount = rupeesToPaisa(item.quantity * item.unitPrice);
       const taxResult = calculateTax({
         taxableAmountPaisa: taxableAmount,
-        taxRate: item.taxRate,
+        taxRate: itemTaxRate,
         isInterState,
       });
 
@@ -160,12 +170,12 @@ export async function POST(request: NextRequest) {
         quantity: item.quantity,
         unitPrice: rupeesToPaisa(item.unitPrice),
         taxableAmount: taxableAmount,
-        taxRate: item.taxRate,
-        cgstRate: isInterState ? 0 : item.taxRate / 2,
+        taxRate: itemTaxRate,
+        cgstRate: isInterState ? 0 : itemTaxRate / 2,
         cgstAmount: taxResult.cgstAmount,
-        sgstRate: isInterState ? 0 : item.taxRate / 2,
+        sgstRate: isInterState ? 0 : itemTaxRate / 2,
         sgstAmount: taxResult.sgstAmount,
-        igstRate: isInterState ? item.taxRate : 0,
+        igstRate: isInterState ? itemTaxRate : 0,
         igstAmount: taxResult.igstAmount,
         totalAmount: itemTotal,
       };
@@ -184,7 +194,7 @@ export async function POST(request: NextRequest) {
 
     // Create invoice
     const invoiceResult = await db.insert(invoices).values({
-      userId: session.user.id,
+      userId: userId,
       invoiceNumber,
       invoiceDate: new Date(invoiceDate).toISOString(),
       customerName: customer[0].name,
@@ -210,7 +220,7 @@ export async function POST(request: NextRequest) {
     // Create invoice items
     for (const item of processedItems) {
       await db.insert(invoiceItems).values({
-        userId: session.user.id,
+        userId: userId,
         invoiceId,
         ...item,
       });
@@ -220,18 +230,18 @@ export async function POST(request: NextRequest) {
     const completeInvoice = await db
       .select()
       .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)))
       .limit(1);
 
     const invoiceItemsResult = await db
       .select()
       .from(invoiceItems)
-      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, userId)));
 
     // Sprint A.2 — DRAFTs are not eligible for TDS derivation today, but
     // call sync so the sole entry point covers any future state machine.
     try {
-      await syncInvoiceTdsCredit(session.user.id, invoiceId);
+      await syncInvoiceTdsCredit(userId, invoiceId);
     } catch (err) {
       console.error('[invoices POST] tds derivation failed', err);
     }

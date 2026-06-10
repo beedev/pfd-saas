@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, customers } from '@/db';
+import { db, customers, type SupplyType } from '@/db';
 import { and, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
+import { customerBodySchema } from '../schema';
 
 // GET - Fetch single customer
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const customerId = parseInt(id, 10);
@@ -23,7 +25,7 @@ export async function GET(
     const result = await db
       .select()
       .from(customers)
-      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, userId)))
       .limit(1);
 
     if (result.length === 0) {
@@ -45,8 +47,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const customerId = parseInt(id, 10);
@@ -55,7 +57,8 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
     }
 
-    const body = await request.json();
+    const parsed = await parseBody(request, customerBodySchema);
+    if (parsed.error) return parsed.error;
     const {
       name,
       gstin,
@@ -69,15 +72,7 @@ export async function PUT(
       phone,
       tdsRatePct,
       tdsSection,
-    } = body;
-
-    // Validate required fields
-    if (!name || !stateCode) {
-      return NextResponse.json(
-        { error: 'Name and state code are required' },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     // Validate state code
     if (!isValidStateCode(stateCode)) {
@@ -111,9 +106,10 @@ export async function PUT(
       }
     }
 
-    // Validate supply type
-    const validSupplyTypes = ['REGULAR', 'EXPORT_WITH_IGST', 'EXPORT_LUT', 'SEZ'];
-    const validatedSupplyType = validSupplyTypes.includes(supplyType) ? supplyType : 'REGULAR';
+    // Validate supply type (unknown values silently coerce to REGULAR, as before)
+    const validSupplyTypes: readonly string[] = ['REGULAR', 'EXPORT_WITH_IGST', 'EXPORT_LUT', 'SEZ'];
+    const validatedSupplyType: SupplyType =
+      supplyType && validSupplyTypes.includes(supplyType) ? (supplyType as SupplyType) : 'REGULAR';
 
     // Sprint A.1 — TDS deduction config. Only patch when the client
     // actually sends the field; absent → keep existing DB value.
@@ -142,12 +138,12 @@ export async function PUT(
         ...tdsPatch,
         updatedAt: new Date(),
       })
-      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)));
+      .where(and(eq(customers.id, customerId), eq(customers.userId, userId)));
 
     const updated = await db
       .select()
       .from(customers)
-      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, userId)))
       .limit(1);
 
     return NextResponse.json({ customer: updated[0] });
@@ -165,8 +161,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const customerId = parseInt(id, 10);
@@ -175,7 +171,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid customer ID' }, { status: 400 });
     }
 
-    await db.delete(customers).where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)));
+    await db.delete(customers).where(and(eq(customers.id, customerId), eq(customers.userId, userId)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

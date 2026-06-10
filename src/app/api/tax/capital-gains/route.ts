@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, desc } from 'drizzle-orm';
-import { db, capitalGains } from '@/db';
-import { auth } from '@/auth';
+import { z } from 'zod';
+import { db, capitalGains, type CapGainAssetType, type HoldingPeriod } from '@/db';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { parseBody } from '@/lib/api/parse-body';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
@@ -13,7 +15,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select()
       .from(capitalGains)
-      .where(and(eq(capitalGains.financialYear, fy), eq(capitalGains.userId, session.user.id)))
+      .where(and(eq(capitalGains.financialYear, fy), eq(capitalGains.userId, userId)))
       .orderBy(desc(capitalGains.saleDate));
 
     const ltcgTotal = rows.filter((r) => r.holdingPeriod === 'LTCG').reduce((s, r) => s + r.capitalGain, 0);
@@ -31,19 +33,30 @@ export async function GET(request: NextRequest) {
   }
 }
 
+const createSchema = z.object({
+  financialYear: z.string().min(1),
+  assetType: z.string().min(1),
+  assetName: z.string().min(1),
+  purchaseDate: z.string().nullable().optional(),
+  saleDate: z.string().min(1),
+  purchasePrice: z.number().finite(),
+  salePrice: z.number().finite(),
+  holdingPeriod: z.string().min(1),
+  exemption: z.number().finite().nullable().optional(),
+  taxRate: z.number().finite(),
+  notes: z.string().nullable().optional(),
+});
+
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const body = await request.json();
+    const parsed = await parseBody(request, createSchema);
+    if (parsed.error) return parsed.error;
     const {
       financialYear, assetType, assetName, purchaseDate, saleDate,
       purchasePrice, salePrice, holdingPeriod, exemption, taxRate, notes,
-    } = body;
-
-    if (!financialYear || !assetType || !assetName || !saleDate || purchasePrice === undefined || salePrice === undefined || !holdingPeriod || taxRate === undefined) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
+    } = parsed.data;
 
     const purchasePaisa = Math.round(purchasePrice * 100);
     const salePaisa = Math.round(salePrice * 100);
@@ -53,16 +66,18 @@ export async function POST(request: NextRequest) {
     const taxPaisa = Math.round(taxableGainPaisa * taxRate / 100);
 
     const result = await db.insert(capitalGains).values({
-      userId: session.user.id,
+      userId,
       financialYear,
-      assetType,
+      // Casts preserve pre-zod behaviour: these text columns carry TS-only
+      // enum hints and the handler never validated membership.
+      assetType: assetType as CapGainAssetType,
       assetName,
       purchaseDate: purchaseDate || null,
       saleDate,
       purchasePrice: purchasePaisa,
       salePrice: salePaisa,
       capitalGain: gainPaisa,
-      holdingPeriod,
+      holdingPeriod: holdingPeriod as HoldingPeriod,
       exemptionApplied: exemptionPaisa,
       taxableGain: taxableGainPaisa,
       taxRate,
@@ -78,12 +93,12 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const id = Number(new URL(request.url).searchParams.get('id'));
     if (!Number.isFinite(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-    await db.delete(capitalGains).where(and(eq(capitalGains.id, id), eq(capitalGains.userId, session.user.id)));
+    await db.delete(capitalGains).where(and(eq(capitalGains.id, id), eq(capitalGains.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[capital-gains DELETE]', err);
