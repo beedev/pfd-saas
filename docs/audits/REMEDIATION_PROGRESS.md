@@ -19,7 +19,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [x] S10 financialYear regex validation in tax/documents (commit 357130d)
 - [x] A2 tax-doc storage → uploads/<userId>/finance/... + refcounted unlink; legacy paths still resolve, no file migration needed (commit 357130d)
 - [x] S7 xlsx → exceljs (5f4fd2e) — parser + 7 report writers; equivalence-tested vs TaxCalc_2027.xlsx; xlsx uninstalled, last HIGH advisory gone
-- [ ] A1 drizzle meta snapshots 0028–0037 reconstruction
+- [x] A1 snapshot chain rebuilt via 0038 snapshot-sync; second generate run clean (80af714)
 
 ## P2
 - [ ] S11 portability import per-column zod validation
@@ -27,8 +27,8 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [~] S13 security headers in next.config — nosniff/XFO/Referrer/HSTS done (c47fc6b); CSP deferred (needs browser testing)
 - [U] S14 nodemailer — advisory now covers <=8.0.4, NO fix available upstream; revisit when nodemailer ships a patch
 - [ ] S15 pg_hba trust → scram-sha-256
-- [ ] A3 business_profile.gstin unique → (user_id, gstin) migration
-- [ ] A4 tds_credits: declare partial unique idx in schema + payment_date type align
+- [x] A3 gstin → (user_id, gstin) via migration 0038; applies on next container recreate (80af714)
+- [x] A4 tds_credits partial idx declared + payment_date date mode:string (80af714)
 - [ ] A5 consolidate FY-window helpers (11 sites)
 - [ ] A6 extract itr3-summary.ts lib
 - [ ] A7 retirement-shared.ts extraction (4 routes) + 24(b) vintage into section-24b.ts
@@ -47,3 +47,5 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - 2026-06-10: 23a5e53 deps (S5,S6,S21p) · 357130d tax-docs cluster (S8,S9,S10,A2) · c47fc6b P3 batch (S13p,S16-S20) — builds green; smoke pending user-enabled dev server
 - 2026-06-10: 5f4fd2e S7 xlsx→exceljs (14 files, equivalence-tested) — all HIGHs now closed
 - next up: A1 snapshot reconstruction + A3 gstin + A4 tds_credits as one migration-cluster (fix schema A4/A3 first, then drizzle-kit generate snapshot-sync 0038, trim duplicate DDL); then A5-A8 extractions, S11/S12, S15, S22/S23, A9-A12
+- 2026-06-10: 80af714 migration cluster A1+A3+A4 — snapshot chain healed, drift zero
+- next up: small-mechanical batch (S15, S22, S23, S18-rest, A10, A11, A12), then extractions A5/A6/A8, then A7, S11, S12, A9
