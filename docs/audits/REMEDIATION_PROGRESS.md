@@ -29,10 +29,10 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [x] S15 pg_hba → scram-sha-256, both boot paths safe (2f7e142)
 - [x] A3 gstin → (user_id, gstin) via migration 0038; applies on next container recreate (80af714)
 - [x] A4 tds_credits partial idx declared + payment_date date mode:string (80af714)
-- [ ] A5 consolidate FY-window helpers (11 sites)
-- [ ] A6 extract itr3-summary.ts lib
+- [x] A5 FY-window consolidated, 11 sites, -255 lines (3ea7fbe)
+- [x] A6 itr3-summary.ts extracted, payload identical (3ea7fbe)
 - [ ] A7 retirement-shared.ts extraction (4 routes) + 24(b) vintage into section-24b.ts
-- [ ] A8 upload path ordering standardize userId-first + rewrite script
+- [x] A8 userId-first on 6 sites + confirm-route reconstructions + CLAUDE.md (3ea7fbe); residual: portability dir (fold into S11 batch)
 
 ## P3
 - [x] S16 amfi (c47fc6b) · [x] S17 wipe-demo-data parameterize (c47fc6b) · [x] S18 timingSafeEqual (c47fc6b) + pairing rate limit (2f7e142) · [x] S19 health generic error (c47fc6b) · [x] S20 .dockerignore (c47fc6b) · [~] S21 npm audit fix applied 17→11 vulns (23a5e53); drizzle-kit esbuild chain needs breaking bump — deferred · [x] S22 build ARG (2f7e142) · [x] S23 exact pins (2f7e142)
@@ -52,3 +52,5 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - 2026-06-10: 2f7e142 small-mechanical batch (S15,S18r,S22,S23,A10-A12) + orphaned schema-hash artifact committed
 - follow-up noted by agent: 4th PF 8.25 copy in goal-corpus.ts DEFAULT_RETURN_PCT_BY_CLASS; rate-table drift between asset-class-returns defaults and constants file (pre-existing)
 - next up: extractions A5 (fyBounds x11), A6 (itr3-summary lib), A8 (upload path ordering); then A7, A9, S11, S12
+- 2026-06-10: 3ea7fbe extraction batch A5+A6+A8 — build green
+- next up: S11 portability per-column zod validation + portability upload dir userId-first; then A7 retirement-shared dedup (+4th PF copy, rate-table drift); then S12 parseBody + A9 requireUserId
