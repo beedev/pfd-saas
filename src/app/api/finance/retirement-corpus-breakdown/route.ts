@@ -49,13 +49,13 @@ import {
   realEstate,
   retirementAssetSelection,
   retirementAssumptions,
-  type RetirementAssetSelection,
 } from '@/db';
 import { auth } from '@/auth';
 import { PF_ANNUAL_RATE_PCT } from '@/lib/finance/asset-growth-rates-constants';
-
-/** Same set the asset-picker exposes for corpus contribution. */
-const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
+import {
+  MATURING_POLICY_TYPES,
+  findRetirementSelection,
+} from '@/lib/finance/retirement-shared';
 
 interface Component {
   itemName: string;
@@ -82,14 +82,6 @@ interface ExcludedFromCorpus {
     todayPaisa: number;
     note: string;
   }>;
-}
-
-function findSelection(
-  rows: RetirementAssetSelection[],
-  assetClass: string,
-  sourceId: number,
-): RetirementAssetSelection | undefined {
-  return rows.find((r) => r.assetClass === assetClass && r.sourceId === sourceId);
 }
 
 /** Compound a single principal at an annual rate for N years (no contribution leg).
@@ -157,7 +149,7 @@ export async function GET(_request: NextRequest) {
     {
       const components: Component[] = [];
       for (const a of nps) {
-        const sel = findSelection(selections, 'NPS', a.id);
+        const sel = findRetirementSelection(selections, 'NPS', a.id);
         const included = sel ? !!sel.included : true;
         if (!included) continue;
         const lumpPct = (sel?.npsLumpsumPct ?? 60) / 100;
@@ -197,7 +189,7 @@ export async function GET(_request: NextRequest) {
     {
       const components: Component[] = [];
       for (const a of pf) {
-        const sel = findSelection(selections, 'PF', a.id);
+        const sel = findRetirementSelection(selections, 'PF', a.id);
         const included = sel ? !!sel.included : true;
         if (!included) continue;
         const corpusAtRetirement = compound(
@@ -251,7 +243,7 @@ export async function GET(_request: NextRequest) {
     }> = [];
     const heldOutsideCorpus: ExcludedFromCorpus['realEstate'] = [];
     for (const p of props) {
-      const sel = findSelection(selections, 'REAL_ESTATE', p.id);
+      const sel = findRetirementSelection(selections, 'REAL_ESTATE', p.id);
       const treatment = (p.retirementTreatment ?? 'sell') as
         | 'sell'
         | 'rental_only'
@@ -347,7 +339,7 @@ export async function GET(_request: NextRequest) {
             : p.sumAssured || 0;
         if (payoutPaisa <= 0) continue;
 
-        const sel = findSelection(selections, 'INSURANCE_POLICIES', p.id);
+        const sel = findRetirementSelection(selections, 'INSURANCE_POLICIES', p.id);
         const included = sel ? !!sel.included : true;
         if (!included) continue;
 

@@ -24,6 +24,21 @@ export const PF_ANNUAL_RATE_PCT = 8.25;
  * because an MF wrapping equity carries a fee drag vs. direct equity,
  * so a slightly lower MF_EQUITY (11) vs EQUITY (12 in STOCKS below) is
  * appropriate. See Sprint 5.7.
+ *
+ * DRIFT NOTE (audit A7, 2026-06 — determined from git history, numbers
+ * deliberately left untouched): GOLD 8 / NPS 9 / REAL_ESTATE 5 here do
+ * NOT match the per-user seed in
+ * src/app/api/settings/asset-class-returns/route.ts (GOLD 9 / NPS 9.5 /
+ * REAL_ESTATE 6 — which matches goal-corpus.ts
+ * DEFAULT_RETURN_PCT_BY_CLASS). This is ACCIDENTAL drift, not two
+ * intentional rate sets: this constant was introduced (Sprint 5.5b,
+ * f5f47f4) claiming "values match the seed", but the seed already
+ * carried 9 / 9.5 / 6 at that point. In effect the lower values here
+ * only apply BEFORE the lazy per-user seed runs (first GET of
+ * /api/settings/asset-class-returns) or for keys the seed never inserts
+ * (EQUITY / DEBT / CASH). Reconciling the numbers would change
+ * projections for un-seeded users, so it is out of scope for a
+ * behavior-preserving pass.
  */
 export const DEFAULT_GROWTH_RATES = {
   EQUITY: 10,

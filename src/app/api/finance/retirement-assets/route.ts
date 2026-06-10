@@ -25,12 +25,14 @@ import {
   realEstate,
   smallSavingsAccounts,
   mutualFunds,
-  type RetirementAssetSelection,
 } from '@/db';
 import { auth } from '@/auth';
 import { getGrowthRates, getMfRate } from '@/lib/finance/asset-growth-rates';
+import {
+  MATURING_POLICY_TYPES,
+  findRetirementSelection,
+} from '@/lib/finance/retirement-shared';
 
-const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
 const ANNUITY_FREQ_TO_PER_YEAR: Record<string, number> = {
   MONTHLY: 12,
   QUARTERLY: 4,
@@ -90,14 +92,6 @@ interface AssetClassRow {
   }>;
 }
 
-function findRow(
-  rows: RetirementAssetSelection[],
-  assetClass: string,
-  sourceId: number,
-): RetirementAssetSelection | undefined {
-  return rows.find((r) => r.assetClass === assetClass && r.sourceId === sourceId);
-}
-
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
@@ -115,7 +109,7 @@ export async function GET() {
 
     // ─── NPS ────────────────────────────────────────────────────────────
     const npsItems: RetirementItem[] = nps.map((a) => {
-      const sel = findRow(selections, 'NPS', a.id);
+      const sel = findRetirementSelection(selections, 'NPS', a.id);
       return {
         id: a.id,
         label: `NPS ${a.tier === 'TIER1' ? 'Tier I' : 'Tier II'}`,
@@ -129,7 +123,7 @@ export async function GET() {
 
     // ─── PF ─────────────────────────────────────────────────────────────
     const pfItems: RetirementItem[] = pf.map((a) => {
-      const sel = findRow(selections, 'PF', a.id);
+      const sel = findRetirementSelection(selections, 'PF', a.id);
       return {
         id: a.id,
         label: `${a.accountType} · ${a.accountHolder}`,
@@ -146,7 +140,7 @@ export async function GET() {
     const ssItems: RetirementItem[] = smallSavings
       .filter((a) => a.status === 'ACTIVE' || a.status === 'EXTENDED')
       .map((a) => {
-        const sel = findRow(selections, 'SMALL_SAVINGS', a.id);
+        const sel = findRetirementSelection(selections, 'SMALL_SAVINGS', a.id);
         return {
           id: a.id,
           label: `${a.schemeType} · ${a.holderName}`,
@@ -169,7 +163,7 @@ export async function GET() {
         const perYear =
           ANNUITY_FREQ_TO_PER_YEAR[p.annuityFrequency ?? 'YEARLY'] ?? 1;
         const annualPaisa = (p.annuityAmount ?? 0) * perYear;
-        const sel = findRow(selections, 'ANNUITY_POLICIES', p.id);
+        const sel = findRetirementSelection(selections, 'ANNUITY_POLICIES', p.id);
         return {
           id: p.id,
           label: `${p.insurer} ${p.policyType.replace('_', ' ').toLowerCase()}`,
@@ -205,7 +199,7 @@ export async function GET() {
       .filter((p) => p.payoutPaisa > 0)
       .sort((a, b) => (a.maturityDate ?? '9999').localeCompare(b.maturityDate ?? '9999'))
       .map((p) => {
-        const sel = findRow(selections, 'INSURANCE_POLICIES', p.id);
+        const sel = findRetirementSelection(selections, 'INSURANCE_POLICIES', p.id);
         return {
           id: p.id,
           label: `${p.insurer} ${p.policyType.replace('_', ' ').toLowerCase()}`,
@@ -225,7 +219,7 @@ export async function GET() {
       .map((f) => {
         const category = (f.category ?? 'UNKNOWN') as 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
         const returnPct = getMfRate(category, rates);
-        const sel = findRow(selections, 'MUTUAL_FUNDS', f.id);
+        const sel = findRetirementSelection(selections, 'MUTUAL_FUNDS', f.id);
         return {
           id: f.id,
           label: f.schemeName,
@@ -277,7 +271,7 @@ export async function GET() {
     // from the /retirement asset-picker without changing the property's
     // strategic intent on the real-estate detail page.
     const reItems: RetirementItem[] = props.map((p) => {
-      const sel = findRow(selections, 'REAL_ESTATE', p.id);
+      const sel = findRetirementSelection(selections, 'REAL_ESTATE', p.id);
       const monthlyRent = p.monthlyRent ?? 0;
       const treatment = (p.retirementTreatment ?? 'sell') as
         | 'sell'

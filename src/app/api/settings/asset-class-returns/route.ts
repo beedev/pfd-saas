@@ -25,6 +25,17 @@ import { PF_ANNUAL_RATE_PCT } from '@/lib/finance/asset-growth-rates-constants';
 // Seed defaults — must match the constant in lib/finance/goal-corpus.ts
 // so newly-onboarded users get the same starting point a vanilla
 // projection would have used.
+//
+// DRIFT NOTE (audit A7, 2026-06): these seeds do NOT match
+// DEFAULT_GROWTH_RATES in lib/finance/asset-growth-rates-constants.ts
+// (GOLD 9 vs 8, NPS 9.5 vs 9, REAL_ESTATE 6 vs 5) even though that file
+// historically claimed alignment. Git history shows the mismatch is
+// accidental drift — the seed (28a8199) and the constants (f5f47f4)
+// were authored a day apart with different numbers from the start. The
+// seed values below ARE aligned with goal-corpus.ts; the constants file
+// only matters before this lazy seed runs. Numbers deliberately left
+// untouched (behavior-preserving pass); see the matching note in
+// asset-growth-rates-constants.ts.
 const DEFAULTS: Array<{ assetClass: string; returnPct: number }> = [
   { assetClass: 'STOCKS', returnPct: 12 },
   { assetClass: 'MUTUAL_FUNDS', returnPct: 11 },

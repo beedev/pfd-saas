@@ -57,7 +57,10 @@ import {
 } from '@/db';
 import { compareRegimes } from '@/lib/finance/tax-slabs';
 import { computeHraExemption } from '@/lib/finance/hra-exemption';
-import { computeSection24bDeduction } from '@/lib/finance/section-24b';
+import {
+  computeSection24bDeduction,
+  isDisbursedOnOrAfterVintageCutoff,
+} from '@/lib/finance/section-24b';
 import { computeSection80EeaDeduction } from '@/lib/finance/section-80eea';
 import { computeSection80d } from '@/lib/finance/section-80d';
 import {
@@ -67,9 +70,6 @@ import {
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 import { auth } from '@/auth';
-
-/** 1-Apr-1999 cutoff for sec 24(b) — pre = ₹30k cap, post = ₹2L. */
-const SEC_24B_VINTAGE_CUTOFF = '1999-04-01';
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -271,9 +271,7 @@ export async function GET(request: NextRequest) {
       }
       const interestPaid = p.homeLoanInterestPaidPaisa ?? 0;
       if (interestPaid > 0) {
-        const post1999 =
-          !p.homeLoanDisbursedDate ||
-          p.homeLoanDisbursedDate >= SEC_24B_VINTAGE_CUTOFF;
+        const post1999 = isDisbursedOnOrAfterVintageCutoff(p.homeLoanDisbursedDate);
         const sec24b = computeSection24bDeduction({
           homeLoanInterestPaidPaisa: interestPaid,
           isSelfOccupied: p.isSelfOccupied,
@@ -309,9 +307,9 @@ export async function GET(request: NextRequest) {
       const firstSelfOccupied = properties.find((p) => p.isSelfOccupied);
       if (firstSelfOccupied) {
         const userInterest = firstSelfOccupied.homeLoanInterestPaidPaisa ?? 0;
-        const post1999 =
-          !firstSelfOccupied.homeLoanDisbursedDate ||
-          firstSelfOccupied.homeLoanDisbursedDate >= SEC_24B_VINTAGE_CUTOFF;
+        const post1999 = isDisbursedOnOrAfterVintageCutoff(
+          firstSelfOccupied.homeLoanDisbursedDate,
+        );
         const oldContribution = computeSection24bDeduction({
           homeLoanInterestPaidPaisa: userInterest,
           isSelfOccupied: true,

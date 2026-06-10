@@ -26,6 +26,22 @@
  *    cap is computed separately in `section-80eea.ts`.
  */
 
+/** 1-Apr-1999 disbursal cutoff for sec 24(b) — pre = ₹30k cap, post = ₹2L. */
+export const SEC_24B_VINTAGE_CUTOFF = '1999-04-01';
+
+/**
+ * Vintage rule for `loanDisbursedAfter1Apr1999`: a loan counts as
+ * post-cutoff when its disbursal date is unknown (benefit of the doubt
+ * — the overwhelmingly common modern case) or falls on/after
+ * 1-Apr-1999. ISO yyyy-mm-dd strings compare lexicographically, so a
+ * plain string comparison is exact.
+ */
+export function isDisbursedOnOrAfterVintageCutoff(
+  disbursedDate: string | null | undefined,
+): boolean {
+  return !disbursedDate || disbursedDate >= SEC_24B_VINTAGE_CUTOFF;
+}
+
 /** ₹2,00,000 cap in paisa for self-occupied post-Apr-1999 loans. */
 const SELF_OCCUPIED_POST_1999_CAP_PAISA = 2_00_000 * 100;
 /** ₹30,000 cap in paisa for self-occupied pre-Apr-1999 loans. */

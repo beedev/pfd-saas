@@ -34,8 +34,7 @@ import {
   fixedDeposits,
 } from '@/db';
 import { auth } from '@/auth';
-
-const MATURING_POLICY_TYPES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP', 'MONEY_BACK'];
+import { MATURING_POLICY_TYPES } from '@/lib/finance/retirement-shared';
 
 type Liquidity = 'liquid' | 'semi-liquid' | 'locked';
 

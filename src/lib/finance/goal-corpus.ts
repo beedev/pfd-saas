@@ -26,6 +26,7 @@ import {
   epfAccounts,
   assetClassReturns,
 } from '@/db';
+import { PF_ANNUAL_RATE_PCT } from './asset-growth-rates-constants';
 
 export interface CorpusContext {
   inclusions: Array<{
@@ -101,7 +102,7 @@ export const DEFAULT_RETURN_PCT_BY_CLASS: Record<string, number> = {
   MF_HYBRID: 9,
   GOLD: 9,
   NPS: 9.5,
-  PF: 8.25,
+  PF: PF_ANNUAL_RATE_PCT,
   SMALL_SAVINGS: 7.5,
   FIXED_DEPOSITS: 7,
   CHIT_FUNDS: 6,
