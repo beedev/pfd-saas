@@ -18,7 +18,7 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 - [x] S9 upload size cap + type allowlist (tax/documents 25MB, form-16/26as 5MB PDF-only) (commit 357130d)
 - [x] S10 financialYear regex validation in tax/documents (commit 357130d)
 - [x] A2 tax-doc storage → uploads/<userId>/finance/... + refcounted unlink; legacy paths still resolve, no file migration needed (commit 357130d)
-- [ ] S7 xlsx@0.18.5 → exceljs (yeswanth-parser) + re-verify field mapping
+- [x] S7 xlsx → exceljs (5f4fd2e) — parser + 7 report writers; equivalence-tested vs TaxCalc_2027.xlsx; xlsx uninstalled, last HIGH advisory gone
 - [ ] A1 drizzle meta snapshots 0028–0037 reconstruction
 
 ## P2
@@ -45,4 +45,5 @@ Rules: local commits only (NO push), no :3001 container recreate, build + smoke 
 ## Log
 - 2026-06-10: checkpoint created; starting P0 (S5+S6)
 - 2026-06-10: 23a5e53 deps (S5,S6,S21p) · 357130d tax-docs cluster (S8,S9,S10,A2) · c47fc6b P3 batch (S13p,S16-S20) — builds green; smoke pending user-enabled dev server
-- next up: S7 xlsx→exceljs, then A1 snapshots, then P2 migrations (A3,A4) + arch extractions (A5-A8)
+- 2026-06-10: 5f4fd2e S7 xlsx→exceljs (14 files, equivalence-tested) — all HIGHs now closed
+- next up: A1 snapshot reconstruction + A3 gstin + A4 tds_credits as one migration-cluster (fix schema A4/A3 first, then drizzle-kit generate snapshot-sync 0038, trim duplicate DDL); then A5-A8 extractions, S11/S12, S15, S22/S23, A9-A12
