@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb, numeric, date } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -713,7 +713,7 @@ export const businessProfile = pgTable('business_profile', {
   id: serial('id').primaryKey(),
   businessName: text('business_name').notNull(),
   tradeName: text('trade_name'),
-  gstin: text('gstin').notNull().unique(),
+  gstin: text('gstin').notNull(),
   pan: text('pan').notNull(),
   stateCode: text('state_code').notNull(),
   address: text('address'),
@@ -729,6 +729,9 @@ export const businessProfile = pgTable('business_profile', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('business_profile_user_id_idx').on(table.userId),
+  // GSTIN must be unique per tenant, not globally — two users may
+  // legitimately register the same business GSTIN in their own scope.
+  uniqueIndex('business_profile_gstin_user_unique').on(table.userId, table.gstin),
 ]);
 
 // Supply types for customers (determines GST treatment)
@@ -2795,8 +2798,10 @@ export const tdsCredits = pgTable('tds_credits', {
   sourceKind: text('source_kind').$type<TdsCreditSourceKind>(),
   sourceId: integer('source_id'),
   /** ISO date when the TDS was deducted. For GST_INVOICE rows this is
-   *  the invoice_date. Used to bucket into quarterly 26AS comparisons. */
-  paymentDate: text('payment_date'),
+   *  the invoice_date. Used to bucket into quarterly 26AS comparisons.
+   *  Pg type is `date` (per migration 0036) — mode 'string' keeps the
+   *  runtime contract identical to the old text() declaration. */
+  paymentDate: date('payment_date', { mode: 'string' }),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -2804,6 +2809,11 @@ export const tdsCredits = pgTable('tds_credits', {
   index('tds_credits_fy_idx').on(table.financialYear),
   index('tds_credits_category_idx').on(table.category),
   index('tds_credits_user_id_idx').on(table.userId),
+  // Partial unique idempotency key for auto-derived rows (migration 0036).
+  // Only non-null (source_kind, source_id) pairs are constrained.
+  uniqueIndex('tds_credits_source_unique')
+    .on(table.userId, table.sourceKind, table.sourceId)
+    .where(sql`source_kind IS NOT NULL AND source_id IS NOT NULL`),
 ]);
 
 export type TdsCreditsRow = typeof tdsCredits.$inferSelect;
