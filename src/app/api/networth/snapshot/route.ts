@@ -1,24 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
-import {
-  db,
-  priceSnapshots,
-  holdings,
-  mutualFunds,
-  goldHoldings,
-  npsAccounts,
-  epfAccounts,
-  smallSavingsAccounts,
-  realEstate,
-  insurancePolicies,
-  liabilities,
-  chitFunds,
-  fixedDeposits,
-} from '@/db';
+import { db, priceSnapshots } from '@/db';
 import { auth } from '@/auth';
+import { computeNetWorth } from '@/lib/assets/registry';
 
 const SOURCE = 'NETWORTH_SNAPSHOT';
-const CASH_VALUE_POLICIES = ['WHOLE_LIFE', 'ENDOWMENT', 'ULIP'];
 
 export async function GET() {
   const session = await auth();
@@ -42,61 +28,18 @@ export async function POST(_request: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const [stocks, mfs, gold, nps, pf, ss, re, ins, debts, chits, fds] = await Promise.all([
-      db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
-      db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
-      db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
-      db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
-      db.select().from(epfAccounts).where(eq(epfAccounts.userId, session.user.id)),
-      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
-      db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
-      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
-      db.select().from(liabilities).where(eq(liabilities.userId, session.user.id)),
-      db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
-      db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
-    ]);
+    // Asset fetch + valuation now lives in the asset registry — one entry
+    // per class — instead of 11 hardcoded selects + reduces here.
+    const { breakdown, totalAssetsPaisa, liabilitiesPaisa, netWorthPaisa } =
+      await computeNetWorth(session.user.id);
 
-    const stocksPaisa = stocks.reduce((s, h) => s + (h.currentValue || 0), 0);
-    const mfPaisa = mfs.reduce((s, f) => s + (f.currentValue || 0), 0);
-    const goldPaisa = gold.reduce((s, g) => s + (g.currentValue || 0), 0);
-    const npsPaisa = nps.reduce((s, n) => s + (n.totalValue || 0), 0);
-    const pfPaisa = pf.reduce((s, p) => s + (p.totalBalance || 0), 0);
-    // Small Savings (PPF/VPF/NSC/KVP/SSY/SCSS) — current_balance is the
-    // post-interest book value; trusted because users mark interest
-    // credits as transactions or refresh from projection math.
-    const ssPaisa = ss.reduce((s, a) => s + (a.currentBalancePaisa || 0), 0);
-    const rePaisa = re.reduce((s, r) => s + (r.currentValuation || 0), 0);
-    const insPaisa = ins
-      .filter((p) => CASH_VALUE_POLICIES.includes(p.policyType))
-      .reduce((s, p) => s + (p.investmentValue || 0), 0);
-    const liaPaisa = debts.reduce((s, d) => s + (d.currentBalance || 0), 0);
-    // Matches the home-page net-worth tile: sum netContribution across all chit
-    // funds (including WON ones — their dividend value still counts).
-    const chitPaisa = chits.reduce((s, c) => s + (c.netContribution || 0), 0);
-    // Fixed Deposits: principal of ACTIVE FDs (same conservative convention as
-    // chits — accrued interest isn't booked here; projected maturity lives in
-    // /projections Liquid Assets).
-    const fdPaisa = fds
-      .filter((f) => f.status === 'ACTIVE')
-      .reduce((s, f) => s + (f.principalPaisa || 0), 0);
-
-    const totalAssets =
-      stocksPaisa + mfPaisa + goldPaisa + npsPaisa + pfPaisa + ssPaisa + rePaisa + insPaisa + chitPaisa + fdPaisa;
-    const netWorth = totalAssets - liaPaisa;
+    const totalAssets = totalAssetsPaisa;
+    const liaPaisa = liabilitiesPaisa;
+    const netWorth = netWorthPaisa;
 
     const today = new Date().toISOString().slice(0, 10);
     const rows = [
-      { symbol: 'STOCKS_TOTAL', name: 'Stocks', price: stocksPaisa },
-      { symbol: 'MF_TOTAL', name: 'Mutual Funds', price: mfPaisa },
-      { symbol: 'GOLD_TOTAL', name: 'Gold', price: goldPaisa },
-      { symbol: 'NPS_TOTAL', name: 'NPS', price: npsPaisa },
-      { symbol: 'PF_TOTAL', name: 'Provident Fund (EPF)', price: pfPaisa },
-      { symbol: 'SS_TOTAL', name: 'Small Savings', price: ssPaisa },
-      { symbol: 'RE_TOTAL', name: 'Real Estate', price: rePaisa },
-      { symbol: 'INS_TOTAL', name: 'Insurance (cash)', price: insPaisa },
-      { symbol: 'CHIT_TOTAL', name: 'Chit Funds', price: chitPaisa },
-      { symbol: 'FD_TOTAL', name: 'Fixed Deposits', price: fdPaisa },
-      { symbol: 'LIA_TOTAL', name: 'Liabilities', price: liaPaisa },
+      ...breakdown.map((b) => ({ symbol: b.snapshotSymbol, name: b.label, price: b.valuePaisa })),
       { symbol: 'NET_WORTH', name: 'Net Worth', price: netWorth },
     ];
 
