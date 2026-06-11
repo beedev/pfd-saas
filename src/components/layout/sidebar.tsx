@@ -173,6 +173,7 @@ const navigation: NavSection[] = [
     section: 'Settings',
     items: [
       { name: 'Settings', href: '/settings', icon: Settings },
+      { name: 'Tax Rates & Rules', href: '/settings/tax-rules', icon: Calculator },
       { name: 'FY Close', href: '/settings/fy-close', icon: CalendarCheck },
     ],
   },
