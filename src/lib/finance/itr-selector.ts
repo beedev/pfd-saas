@@ -31,30 +31,40 @@ export interface ItrSelectionResult {
 }
 
 export function selectItrForm(a: ItrWizardAnswers): ItrSelectionResult {
-  // Presumptive income → ITR-4, but only if total ≤ ₹50L.
-  if (a.hasPresumptive && a.totalIncomePaisa <= FIFTY_LAKH_PAISA) {
+  // ITR-4 (Sugam) disqualifiers: capital gains (any), more than one house
+  // property, foreign income/assets, or total income above ₹50L. Sugam is
+  // ONLY for simple presumptive filers — these must be checked BEFORE the
+  // ITR-4 rule fires, not after.
+  const itr4Disqualifiers: string[] = [];
+  if (a.hasCapitalGains) itr4Disqualifiers.push('capital gains');
+  if (a.numHouseProperties > 1) itr4Disqualifiers.push(`${a.numHouseProperties} house properties`);
+  if (a.hasForeignIncome) itr4Disqualifiers.push('foreign income/assets');
+  if (a.totalIncomePaisa > FIFTY_LAKH_PAISA) itr4Disqualifiers.push('total income over ₹50L');
+
+  // Presumptive income → ITR-4, but ONLY when no Sugam disqualifier applies.
+  if (a.hasPresumptive && itr4Disqualifiers.length === 0) {
     return {
       form: 'ITR-4',
       reasoning:
-        'Presumptive income under 44AD/44ADA/44AE with total income ≤ ₹50L qualifies for ITR-4 (Sugam).',
+        'Presumptive income under 44AD/44ADA/44AE, total ≤ ₹50L, no capital gains and at most one house property — qualifies for ITR-4 (Sugam).',
     };
   }
 
-  // Any other business income → ITR-3.
+  // Presumptive income WITH a disqualifier → ITR-3 (presumptive business
+  // income is declared within ITR-3; Sugam is unavailable).
+  if (a.hasPresumptive) {
+    return {
+      form: 'ITR-3',
+      reasoning: `Presumptive income but ${itr4Disqualifiers.join(' / ')} disqualifies ITR-4 (Sugam) — declare presumptive income within ITR-3.`,
+    };
+  }
+
+  // Any other business / professional income → ITR-3.
   if (a.hasBusinessIncome) {
     return {
       form: 'ITR-3',
       reasoning:
         'Business or professional income present (e.g. GST-registered consulting). Requires ITR-3.',
-    };
-  }
-
-  // Presumptive but >₹50L crosses the Sugam threshold — falls to ITR-3.
-  if (a.hasPresumptive) {
-    return {
-      form: 'ITR-3',
-      reasoning:
-        'Presumptive income but total income exceeds ₹50L — ITR-4 is unavailable, file ITR-3.',
     };
   }
 
