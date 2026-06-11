@@ -166,7 +166,10 @@ export async function GET(request: NextRequest) {
           eq(investmentTransactions.userId, session.user.id),
         ),
       );
-    const sipActual = sipActualRow[0]?.total ?? 0;
+    // Postgres returns SUM(bigint) as a STRING; the sql<number> cast is
+    // compile-time only. Coerce to a real number so callers don't end up
+    // string-concatenating (budget "Paid" total was 9.7e+53).
+    const sipActual = Number(sipActualRow[0]?.total ?? 0);
 
     const chitActualRow = await db
       .select({ total: sql<number>`COALESCE(SUM(${chitFundInstallments.installmentPaid}), 0)` })
@@ -178,7 +181,7 @@ export async function GET(request: NextRequest) {
           eq(chitFundInstallments.userId, session.user.id),
         ),
       );
-    const chitActual = chitActualRow[0]?.total ?? 0;
+    const chitActual = Number(chitActualRow[0]?.total ?? 0);
 
     const rows: MonthlyRow[] = categories.map((cat) => {
       const entry = entries.find((e) => e.categoryId === cat.id);

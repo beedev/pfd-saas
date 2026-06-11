@@ -139,8 +139,13 @@ export default function MonthlyExpensesPage() {
   const incomeRows = useMemo(() => rows.filter((r) => r.categoryType === 'INCOME'), [rows]);
   const expenseRows = useMemo(() => rows.filter((r) => r.categoryType === 'EXPENSE'), [rows]);
 
-  const totalPlanned = expenseRows.reduce((s, r) => s + r.plannedAmount, 0);
-  const totalPaid = expenseRows.reduce((s, r) => s + (r.status === 'paid' || r.status === 'partial' ? r.actualAmount : 0), 0);
+  // Number() guards against a bigint that arrived as a string (a SQL SUM
+  // serialises to string) — otherwise `s + value` concatenates.
+  const totalPlanned = expenseRows.reduce((s, r) => s + Number(r.plannedAmount), 0);
+  const totalPaid = expenseRows.reduce(
+    (s, r) => s + (r.status === 'paid' || r.status === 'partial' ? Number(r.actualAmount) : 0),
+    0,
+  );
   const paidPct = totalPlanned > 0 ? Math.round((totalPaid / totalPlanned) * 100) : 0;
 
   return (
