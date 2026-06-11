@@ -74,6 +74,12 @@ function schemeName(stream: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** CAMS scheme name — the fund line carrying an ISIN. */
+function schemeNameCams(stream: string): string | null {
+  const m = stream.match(/\b([A-Z][\w '&().\-/]{8,89})\s*,?\s*ISIN[:\s]+([A-Z0-9]{12})/);
+  return m ? `${m[1].trim()} (${m[2]})` : null;
+}
+
 function rowsFromTotals(
   stcgPaisa: number,
   ltgWithIndexPaisa: number,
@@ -130,13 +136,43 @@ export function parseCgStatementStream(stream: string): CgStatementParsed {
   }
 
   if (broker === 'CAMS') {
-    // The CAMS table doesn't survive text extraction cleanly; we can't map
-    // the gain columns reliably. Detect + flag rather than invent a figure.
+    // CAMS (Investrak) per-scheme totals: text extraction reorders the
+    // columns, but the per-scheme summary block is a stable template —
+    //   "Paid Out : <idcw> <LT-without-index> Reinvested <amount> <units>
+    //    Total <Short-Term> <LT-with-index>"
+    // The gain (LT-without-index = equity 112A) sits right after the IDCW
+    // "Paid Out" figure; Short-Term + LT-with-index follow "Total". One
+    // match per scheme — summed for multi-scheme statements.
+    const re = new RegExp(
+      `Paid Out\\s*:\\s*${NUM}\\s+(${NUM})\\s+Reinvested[^A-Za-z]*?Total\\s+(${NUM})\\s+(${NUM})`,
+      'g',
+    );
+    let stcg = 0;
+    let ltgWithout = 0;
+    let ltgWith = 0;
+    let matched = 0;
+    for (const m of stream.matchAll(re)) {
+      matched++;
+      ltgWithout += toPaisa(m[1]);
+      stcg += toPaisa(m[2]);
+      ltgWith += toPaisa(m[3]);
+    }
+    if (matched === 0) {
+      return {
+        type: 'cg-statement', broker, fy, rows: [],
+        totalLtcgPaisa: 0, totalStcgPaisa: 0,
+        warnings: [
+          'Recognised a CAMS Investment Gain/(Loss) statement but could not read its scheme totals — please verify and add via /tax/ltcg-stcg.',
+        ],
+      };
+    }
+    const rows = rowsFromTotals(stcg, ltgWith, ltgWithout, saleDate, schemeNameCams(stream));
     return {
-      type: 'cg-statement', broker, fy, rows: [],
-      totalLtcgPaisa: 0, totalStcgPaisa: 0,
+      type: 'cg-statement', broker, fy, rows,
+      totalStcgPaisa: stcg,
+      totalLtcgPaisa: ltgWith + ltgWithout,
       warnings: [
-        'Recognised a CAMS Investment Gain/(Loss) statement. Its column layout is not machine-readable from the PDF text, so capital gains were NOT auto-extracted — please read the scheme-level Short Term / Long Term totals and add them via /tax/ltcg-stcg.',
+        `Parsed ${matched} scheme total(s) from a CAMS statement using the standard Investrak template — please confirm the figures against the PDF before filing.`,
       ],
     };
   }
