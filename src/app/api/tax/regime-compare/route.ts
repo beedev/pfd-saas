@@ -223,14 +223,25 @@ export async function GET(request: NextRequest) {
       rentPaidAnnualPaisa += (r.rentPaidMonthlyPaisa ?? 0) * 12;
     }
 
-    // HRA exemption — OLD regime ONLY. Subtracted from salary
-    // pre-slab. NEW regime does not allow this exemption.
-    const hraExemptionPaisa = computeHraExemption({
+    // HRA exemption — OLD regime ONLY. Subtracted from salary pre-slab.
+    // NEW regime does not allow this exemption.
+    //   • Books path: compute the 10(13A) min() from the user-entered
+    //     components (basic+DA, HRA received, rent paid) — granular and
+    //     preferred when present.
+    //   • Form 16 fallback: when no books components exist (salary is
+    //     Form-16-authoritative), trust the employer-computed exemption
+    //     reported on Form 16 Part B. Otherwise the OLD regime would
+    //     silently drop a real HRA exemption to ₹0.
+    const hraFromBooksPaisa = computeHraExemption({
       hraReceivedPaisa: hraReceivedTotalPaisa,
       basicPlusDaPaisa: basicPlusDaTotalPaisa,
       rentPaidPaisa: rentPaidAnnualPaisa,
       isMetro,
     });
+    const hraExemptionPaisa =
+      hraFromBooksPaisa > 0
+        ? hraFromBooksPaisa
+        : (salaryResolved.hraExemptionPaisa ?? 0);
 
     // Other sources — exclude rows flagged tax-exempt (PPF interest etc.).
     const otherPaisa = others

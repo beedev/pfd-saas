@@ -56,7 +56,7 @@ const hasPart = (partsPresent: string | null, p: 'A' | 'B'): boolean =>
 export async function resolveSalaryIncome(
   userId: string,
   fy: string,
-): Promise<ResolvedAmount & { grossSalaryPaisa: number }> {
+): Promise<ResolvedAmount & { grossSalaryPaisa: number; hraExemptionPaisa: number }> {
   const f16 = await db
     .select()
     .from(form16Uploads)
@@ -66,6 +66,10 @@ export async function resolveSalaryIncome(
     return {
       valuePaisa: sum(withB, (r) => r.taxableSalaryPaisa),
       grossSalaryPaisa: sum(withB, (r) => r.grossSalaryPaisa),
+      // Form 16 Part B reports the employer-computed sec-10(13A) HRA
+      // exemption directly. When the books don't carry HRA components
+      // (basic/HRA/rent), this is the authoritative OLD-regime figure.
+      hraExemptionPaisa: sum(withB, (r) => r.hraExemptionPaisa ?? 0),
       source: 'form16',
       detail: `Form 16 Part B (${withB.length})`,
     };
@@ -77,6 +81,7 @@ export async function resolveSalaryIncome(
   return {
     valuePaisa: sum(sal, (r) => r.taxableSalaryPaisa),
     grossSalaryPaisa: sum(sal, (r) => r.grossSalaryPaisa),
+    hraExemptionPaisa: 0,
     source: 'books',
     detail: `salary_income (${sal.length})`,
   };
