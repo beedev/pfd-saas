@@ -38,7 +38,7 @@ import {
 
 /* ─── types mirrored from server ──────────────────────────────────────── */
 
-type DocType = 'lic' | 'chit' | 'mf-sip' | 'unknown';
+type DocType = 'lic' | 'chit' | 'mf-sip' | 'cg-statement' | 'unknown';
 type LicPaymentMode = 'Yly' | 'Hly' | 'Qly' | 'Mly' | 'Sly';
 type PolicyType =
   | 'TERM_LIFE'
@@ -107,12 +107,32 @@ interface MfSipParsed {
   warnings: string[];
 }
 
+type CgBroker = 'ZERODHA' | 'GROWW' | 'CAMS' | 'KFINTECH' | 'UNKNOWN';
+
+interface CgStatementRow {
+  assetType: string;
+  holdingPeriod: 'LTCG' | 'STCG';
+  saleDate: string | null;
+  capitalGainPaisa: number;
+  scrip: string | null;
+}
+
+interface CgStatementParsed {
+  type: 'cg-statement';
+  broker: CgBroker;
+  fy: string | null;
+  rows: CgStatementRow[];
+  totalLtcgPaisa: number;
+  totalStcgPaisa: number;
+  warnings: string[];
+}
+
 interface UnknownParsed {
   type: 'unknown';
   warnings: string[];
 }
 
-type Parsed = LicParsed | ChitParsed | MfSipParsed | UnknownParsed;
+type Parsed = LicParsed | ChitParsed | MfSipParsed | CgStatementParsed | UnknownParsed;
 
 interface ParseResponse {
   detectedType: DocType;
@@ -155,7 +175,18 @@ const TYPE_LABEL: Record<DocType, string> = {
   lic: 'LIC Premium Statement',
   chit: 'Chit Fund Account Copy',
   'mf-sip': 'Mutual Fund Statement',
+  'cg-statement': 'Capital-Gains Statement',
   unknown: 'Unknown',
+};
+
+const CG_ASSET_LABEL: Record<string, string> = {
+  EQUITY: 'Equity (stocks)',
+  EQUITY_MF: 'Equity MF',
+  DEBT: 'Debt',
+  DEBT_MF: 'Debt MF',
+  STOCKS: 'Stocks',
+  GOLD: 'Gold',
+  REAL_ESTATE: 'Real estate',
 };
 
 /* ─── component ───────────────────────────────────────────────────────── */
@@ -226,6 +257,14 @@ function ImportPage() {
         );
       } else if (r.parsed.type === 'mf-sip') {
         toast.info('MF SIP parser is a stub — upload a sample to enable it');
+      } else if (r.parsed.type === 'cg-statement') {
+        if (r.parsed.rows.length > 0) {
+          toast.success(
+            `${r.parsed.broker} capital-gains: ${r.parsed.rows.length} row(s)`
+          );
+        } else {
+          toast.warning('Capital-gains statement recognised but no rows extracted — review warnings');
+        }
       } else {
         toast.error('Could not detect document type');
       }
@@ -309,6 +348,37 @@ function ImportPage() {
     }
   };
 
+  /* ─── Capital-gains commit ─── */
+  const handleCgCommit = async () => {
+    if (!response || response.parsed.type !== 'cg-statement') return;
+    const { fy, rows } = response.parsed;
+    if (!fy) {
+      toast.error('Could not determine the financial year from this statement');
+      return;
+    }
+    if (rows.length === 0) {
+      toast.error('No capital-gains rows to import');
+      return;
+    }
+    setIsCommitting(true);
+    try {
+      const res = await fetch('/api/investments/import/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'cg-statement', fy, rows }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Commit failed');
+      toast.success(`Imported ${data.inserted} capital-gains row(s)`);
+      router.push('/tax/ltcg-stcg');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Commit failed';
+      toast.error(msg);
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -339,7 +409,7 @@ function ImportPage() {
           <div className="flex flex-col gap-3">
             <input
               type="file"
-              accept="application/pdf,.pdf"
+              accept="application/pdf,.pdf,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={handleFileChange}
               className="text-sm text-[var(--dxp-text-secondary)] file:mr-4 file:cursor-pointer file:rounded file:border-0 file:bg-amber-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-amber-700"
             />
@@ -431,6 +501,15 @@ function ImportPage() {
         <ChitPreview
           parsed={response.parsed}
           onCommit={handleChitCommit}
+          isCommitting={isCommitting}
+        />
+      )}
+
+      {/* Capital-gains preview */}
+      {response?.parsed.type === 'cg-statement' && (
+        <CgPreview
+          parsed={response.parsed}
+          onCommit={handleCgCommit}
           isCommitting={isCommitting}
         />
       )}
@@ -753,6 +832,143 @@ function ChitPreview({
               )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+/* ─── Capital-gains preview component ─────────────────────────────────── */
+
+function CgPreview({
+  parsed,
+  onCommit,
+  isCommitting,
+}: {
+  parsed: CgStatementParsed;
+  onCommit: () => void;
+  isCommitting: boolean;
+}) {
+  const hasRows = parsed.rows.length > 0;
+
+  const columns: Column<CgStatementRow>[] = [
+    {
+      key: 'assetType',
+      header: 'Asset type',
+      render: (_v, r) => (
+        <span className="text-sm text-[var(--dxp-text)]">
+          {CG_ASSET_LABEL[r.assetType] ?? r.assetType}
+        </span>
+      ),
+    },
+    {
+      key: 'holdingPeriod',
+      header: 'Holding',
+      render: (_v, r) => (
+        <Badge variant={r.holdingPeriod === 'LTCG' ? 'info' : 'warning'}>
+          {r.holdingPeriod}
+        </Badge>
+      ),
+    },
+    {
+      key: 'capitalGainPaisa',
+      header: 'Gain',
+      render: (_v, r) => (
+        <span
+          className={`font-mono text-sm font-semibold ${
+            r.capitalGainPaisa < 0 ? 'text-red-600' : 'text-[var(--dxp-text)]'
+          }`}
+        >
+          {formatINR(r.capitalGainPaisa)}
+        </span>
+      ),
+    },
+    {
+      key: 'scrip',
+      header: 'Scrip',
+      render: (_v, r) => (
+        <span className="text-xs text-[var(--dxp-text-secondary)]">{r.scrip ?? '—'}</span>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <StatsDisplay
+        currency="INR"
+        locale="en-IN"
+        columns={2}
+        stats={[
+          {
+            label: 'STCG total',
+            value: parsed.totalStcgPaisa / 100,
+            format: 'currency',
+            delta: { value: 0, label: `${parsed.broker} · FY ${parsed.fy ?? '—'}` },
+          },
+          { label: 'LTCG total', value: parsed.totalLtcgPaisa / 100, format: 'currency' },
+        ]}
+      />
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+              <FileText className="h-5 w-5 text-amber-600" />
+              2. Review parsed rows
+            </h3>
+            <div className="flex items-center gap-2 text-xs text-[var(--dxp-text-secondary)]">
+              <Badge variant="brand">{parsed.broker}</Badge>
+              <span className="font-mono">FY {parsed.fy ?? '—'}</span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <DataTable<CgStatementRow>
+            columns={columns}
+            data={parsed.rows}
+            emptyMessage="No capital-gains rows could be extracted from this statement"
+          />
+          <p className="mt-4 text-xs text-[var(--dxp-text-secondary)]">
+            Each row is logged as a capital-gains entry for FY {parsed.fy ?? '—'}. The
+            authoritative netting and sec-112A (₹1.25L equity LTCG) exemption is applied by
+            the aggregate engine on the LTCG/STCG page — the per-row tax shown there is a
+            display estimate.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            3. Confirm import
+          </h3>
+        </CardHeader>
+        <CardContent>
+          <div className="flex justify-end">
+            <Button
+              variant="primary"
+              onClick={onCommit}
+              disabled={!hasRows || !parsed.fy || isCommitting}
+            >
+              {isCommitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Importing…
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="mr-2 h-4 w-4" /> Import {parsed.rows.length}{' '}
+                  capital-gains rows
+                </>
+              )}
+            </Button>
+          </div>
+          {!hasRows && (
+            <p className="mt-2 text-right text-xs text-amber-700">
+              Nothing to import — see the parser warnings above. Add gains manually via
+              /tax/ltcg-stcg.
+            </p>
+          )}
         </CardContent>
       </Card>
     </>

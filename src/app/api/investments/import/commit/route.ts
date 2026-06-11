@@ -16,12 +16,16 @@ import {
   db,
   insurancePolicies,
   chitFunds,
+  capitalGains,
   type PolicyType,
+  type CapGainAssetType,
+  type HoldingPeriod,
 } from '@/db';
 import { auth } from '@/auth';
 import type {
   LicPaymentMode,
   ChitParsed,
+  CgStatementRow,
 } from '@/lib/services/statement-parsers';
 import { calculateChitXirrFromSummary } from '@/lib/finance/chit-xirr';
 
@@ -258,6 +262,108 @@ async function commitChit(body: ChitCommitBody, userId: string) {
   return { inserted: 1, updated: 0, chitId: inserted[0].id, xirr: computedXirr };
 }
 
+/* ─── Capital-gains commit ────────────────────────────────────────────── */
+
+interface CgCommitBody {
+  type: 'cg-statement';
+  fy: string;
+  rows: CgStatementRow[];
+}
+
+const FY_RE = /^\d{4}-\d{2}$/;
+
+/**
+ * Map a cg-statement assetType string onto a valid CapGainAssetType.
+ * The cg parsers emit EQUITY / EQUITY_MF / DEBT / DEBT_MF; the schema's
+ * union has no plain EQUITY/DEBT, so direct equity → STOCKS and bare
+ * DEBT → DEBT_MF (closest valid). Anything unrecognised → OTHER.
+ */
+function mapCapGainAssetType(raw: string): CapGainAssetType {
+  switch (raw.toUpperCase()) {
+    case 'EQUITY':
+      return 'STOCKS';
+    case 'EQUITY_MF':
+      return 'EQUITY_MF';
+    case 'DEBT':
+    case 'DEBT_MF':
+      return 'DEBT_MF';
+    case 'STOCKS':
+    case 'GOLD':
+    case 'REAL_ESTATE':
+      return raw.toUpperCase() as CapGainAssetType;
+    default:
+      return 'OTHER';
+  }
+}
+
+/** Whether a mapped asset class is taxed as equity (STT-paid) capital gains. */
+function isEquityClass(assetType: CapGainAssetType): boolean {
+  return assetType === 'STOCKS' || assetType === 'EQUITY_MF';
+}
+
+/**
+ * Per-(assetType, holdingPeriod) display tax rate (%). The authoritative
+ * netting + sec-112A exemption happens in the aggregate engine
+ * (capital-gains-tax.ts) — these are per-row estimates only.
+ *   • equity LTCG (112A) → 12.5%
+ *   • equity STCG (111A) → 20%
+ *   • debt/other LTCG    → 12.5%
+ *   • debt/other STCG    → 0% (taxed at slab; not modelled per-row)
+ */
+function displayTaxRate(assetType: CapGainAssetType, holdingPeriod: HoldingPeriod): number {
+  const equity = isEquityClass(assetType);
+  if (holdingPeriod === 'LTCG') return 12.5;
+  // STCG
+  return equity ? 20 : 0;
+}
+
+async function commitCgStatement(body: CgCommitBody, userId: string) {
+  const fy = body.fy;
+  if (!fy || !FY_RE.test(fy)) {
+    throw new Error('fy is required and must match YYYY-YY (e.g. 2025-26)');
+  }
+  if (!Array.isArray(body.rows) || body.rows.length === 0) {
+    throw new Error('rows array is required and must be non-empty');
+  }
+
+  const fallbackSaleDate = `${Number(fy.slice(0, 4)) + 1}-03-31`;
+
+  const values = body.rows.map((row) => {
+    const assetType = mapCapGainAssetType(row.assetType);
+    const holdingPeriod = row.holdingPeriod;
+    const capitalGain = row.capitalGainPaisa;
+    // Only the net gain is known from a summary statement — synthesise a
+    // purchase/sale pair so salePrice − purchasePrice === capitalGain, both ≥0.
+    const purchasePrice = capitalGain >= 0 ? 0 : -capitalGain;
+    const salePrice = capitalGain >= 0 ? capitalGain : 0;
+    const taxableGain = Math.max(0, capitalGain);
+    const taxRate = displayTaxRate(assetType, holdingPeriod);
+    const taxAmount = Math.round((taxableGain * taxRate) / 100);
+
+    return {
+      userId,
+      financialYear: fy,
+      assetType,
+      assetName: row.scrip || 'Capital gains (imported)',
+      saleDate: row.saleDate || fallbackSaleDate,
+      purchasePrice,
+      salePrice,
+      capitalGain,
+      holdingPeriod,
+      taxableGain,
+      taxRate,
+      taxAmount,
+      notes: 'Imported from capital-gains statement',
+    };
+  });
+
+  await db.transaction(async (tx) => {
+    await tx.insert(capitalGains).values(values);
+  });
+
+  return { inserted: values.length };
+}
+
 /* ─── dispatcher ──────────────────────────────────────────────────────── */
 
 export async function POST(request: NextRequest) {
@@ -267,6 +373,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as
       | LicCommitBody
       | ChitCommitBody
+      | CgCommitBody
       | { type: 'mf-sip' };
 
     if (!body || !('type' in body)) {
@@ -281,6 +388,10 @@ export async function POST(request: NextRequest) {
       case 'chit': {
         const result = await commitChit(body, session.user.id);
         return NextResponse.json({ type: 'chit', ...result });
+      }
+      case 'cg-statement': {
+        const result = await commitCgStatement(body, session.user.id);
+        return NextResponse.json({ type: 'cg-statement', ...result });
       }
       case 'mf-sip':
         return NextResponse.json(
