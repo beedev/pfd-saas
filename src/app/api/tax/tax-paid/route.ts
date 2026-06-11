@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db, incomeTaxPaid, type TaxPaymentType } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseBody } from '@/lib/api/parse-body';
+import { resolveTaxPaid } from '@/lib/finance/form16-tax-source';
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -18,9 +19,25 @@ export async function GET(request: NextRequest) {
       .where(and(eq(incomeTaxPaid.financialYear, fy), eq(incomeTaxPaid.userId, userId)))
       .orderBy(desc(incomeTaxPaid.paymentDate));
 
-    const total = rows.reduce((s, r) => s + r.amount, 0);
+    const manualTotalPaisa = rows.reduce((s, r) => s + r.amount, 0);
 
-    return NextResponse.json({ payments: rows, totalPaisa: total });
+    // Tax paid is more than manual advance/self-assessment entries — TDS
+    // deducted (Form 16 / 26AS) is tax paid on your behalf. resolveTaxPaid
+    // folds in the authoritative salary TDS + other-section TDS + manual.
+    const taxPaid = await resolveTaxPaid(userId, fy);
+
+    return NextResponse.json({
+      payments: rows,
+      manualTotalPaisa,
+      tds: {
+        salaryTdsPaisa: taxPaid.salaryTds.valuePaisa,
+        salaryTdsSource: taxPaid.salaryTds.source,
+        salaryTdsDetail: taxPaid.salaryTds.detail,
+        otherTdsPaisa: taxPaid.otherTdsPaisa,
+      },
+      // Overall total = salary TDS (Form 16/26AS) + other TDS + manual payments.
+      totalPaisa: taxPaid.totalPaisa,
+    });
   } catch (err) {
     console.error('[tax-paid GET]', err);
     return NextResponse.json({ error: 'Failed' }, { status: 500 });

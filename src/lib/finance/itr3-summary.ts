@@ -29,15 +29,24 @@ import {
 } from '@/db';
 import { aggregateLoanTaxDeductions } from './loan-tax';
 import { financialYearBoundsIso } from './tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from './form16-tax-source';
 
 export async function computeItr3Summary(userId: string, fy: string) {
   const { start: startDate, end: endDate } = financialYearBoundsIso(fy);
 
-  // Schedule S — salary employers
+  // Schedule S — salary employers. The per-row `rows` list stays
+  // books-sourced (Schedule-S detail), but the headline gross / taxable /
+  // TDS totals are Form-16 authoritative (resolver): when a Part-B / Part-A
+  // Form 16 exists for the FY its figures override the salary_income books,
+  // else they equal the books sums (behaviour unchanged).
   const salaries = await db.select().from(salaryIncome).where(and(eq(salaryIncome.financialYear, fy), eq(salaryIncome.userId, userId)));
-  const totalGrossSalary = salaries.reduce((s, r) => s + r.grossSalaryPaisa, 0);
-  const totalTaxableSalary = salaries.reduce((s, r) => s + r.taxableSalaryPaisa, 0);
-  const totalSalaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+  const [salaryResolved, salaryTdsResolved] = await Promise.all([
+    resolveSalaryIncome(userId, fy),
+    resolveSalaryTds(userId, fy),
+  ]);
+  const totalGrossSalary = salaryResolved.grossSalaryPaisa;
+  const totalTaxableSalary = salaryResolved.valuePaisa;
+  const totalSalaryTds = salaryTdsResolved.valuePaisa;
 
   // Schedule BP — consulting from GST invoices
   // Filter: invoiceDate within FY, status not CANCELLED, type = TAX (or whatever issued invoices)
@@ -184,6 +193,10 @@ export async function computeItr3Summary(userId: string, fy: string) {
         totalGrossSalary,
         totalTaxableSalary,
         totalSalaryTds,
+        grossSource: salaryResolved.source,
+        grossDetail: salaryResolved.detail,
+        tdsSource: salaryTdsResolved.source,
+        tdsDetail: salaryTdsResolved.detail,
         rows: salaries,
       },
       businessProfession: {
@@ -227,6 +240,8 @@ export async function computeItr3Summary(userId: string, fy: string) {
       },
       tds: {
         salaryTds: totalSalaryTds,
+        salaryTdsSource: salaryTdsResolved.source,
+        salaryTdsDetail: salaryTdsResolved.detail,
         nonSalaryTds: totalNonSalaryTds,
         tds2Count,
         tds3Count,

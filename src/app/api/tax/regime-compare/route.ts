@@ -64,6 +64,7 @@ import {
 import { computeSection80EeaDeduction } from '@/lib/finance/section-80eea';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { deriveDeductions } from '@/lib/finance/deduction-engine';
+import { resolveSalaryIncome } from '@/lib/finance/form16-tax-source';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 import { auth } from '@/auth';
 
@@ -106,6 +107,7 @@ export async function GET(request: NextRequest) {
     const userId = session.user.id;
     const [
       salaries,
+      salaryResolved,
       others,
       caps,
       properties,
@@ -118,6 +120,7 @@ export async function GET(request: NextRequest) {
         .select()
         .from(salaryIncome)
         .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, fy))),
+      resolveSalaryIncome(userId, fy),
       db
         .select()
         .from(otherSourcesIncome)
@@ -190,33 +193,18 @@ export async function GET(request: NextRequest) {
         ? { totalInterestPaisa: 0, totalPrincipalPaisa: 0, perLiability: [] as Array<unknown> }
         : loanAgg;
 
-    // Salary — Sprint 5.1a. Prefer component-sum when ANY component is
-    // populated; fall back to gross_salary_paisa for legacy rows.
-    let salaryPaisa = 0;
+    // Salary — gross is Form-16 authoritative (resolver). When a Part-B
+    // Form 16 exists for the FY its gross-salary figure overrides the
+    // manually-kept salary_income books; the resolver's grossSalaryPaisa
+    // equals the books gross sum when no Form 16 is present (behaviour
+    // unchanged). HRA components (basic/DA/HRA/rent) stay books-sourced —
+    // Form 16 Part B doesn't break gross into these components, so the HRA
+    // exemption math still relies on the user-entered components.
+    const salaryPaisa = salaryResolved.grossSalaryPaisa;
     let basicPlusDaTotalPaisa = 0;
     let hraReceivedTotalPaisa = 0;
     let rentPaidAnnualPaisa = 0;
     for (const r of salaries) {
-      const componentSum =
-        (r.basicPaisa ?? 0) +
-        (r.daPaisa ?? 0) +
-        (r.hraReceivedPaisa ?? 0) +
-        (r.ltaPaisa ?? 0) +
-        (r.conveyancePaisa ?? 0) +
-        (r.childrenEdAllowancePaisa ?? 0) +
-        (r.medicalPaisa ?? 0) +
-        (r.otherAllowancesPaisa ?? 0);
-      if (componentSum > 0) {
-        salaryPaisa += componentSum;
-      } else {
-        // Backward-compat: legacy row only has gross_salary_paisa set.
-        if (r.grossSalaryPaisa > 0) {
-          console.warn(
-            `[regime-compare] legacy salary row id=${r.id} fy=${fy} — gross set but components all 0; HRA exemption will be 0 for this row.`,
-          );
-        }
-        salaryPaisa += r.grossSalaryPaisa ?? 0;
-      }
       basicPlusDaTotalPaisa += (r.basicPaisa ?? 0) + (r.daPaisa ?? 0);
       hraReceivedTotalPaisa += r.hraReceivedPaisa ?? 0;
       // Stored as MONTHLY rent — annualise.
@@ -449,6 +437,8 @@ export async function GET(request: NextRequest) {
       fy,
       income: {
         salary: salaryPaisa,
+        salarySource: salaryResolved.source,
+        salaryDetail: salaryResolved.detail,
         hraExemption: hraExemptionPaisa,
         other: otherPaisa,
         business: businessPaisa,

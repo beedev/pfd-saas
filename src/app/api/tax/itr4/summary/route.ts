@@ -41,6 +41,7 @@ import { auth } from '@/auth';
 import { computeItr4Summary } from '@/lib/finance/itr4-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from '@/lib/finance/form16-tax-source';
 
 const ITR4_CAP_PAISA = 50 * 100 * 100000;
 
@@ -142,6 +143,13 @@ export async function GET(request: NextRequest) {
       db.select().from(liabilities).where(eq(liabilities.userId, userId)),
     ]);
 
+    // Form-16-authoritative salary gross + TDS (resolver). Falls back to
+    // salary_income books when no Part-B / Part-A Form 16 exists for the FY.
+    const [salaryResolved, salaryTdsResolved] = await Promise.all([
+      resolveSalaryIncome(userId, fy),
+      resolveSalaryTds(userId, fy),
+    ]);
+
     if (slabs.length === 0 || configs.length === 0) {
       return NextResponse.json(
         { error: `Tax slabs for FY ${fy} not seeded yet` },
@@ -159,15 +167,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const salaryGross = salaries.reduce(
-      (s, r) => s + (r.grossSalaryPaisa ?? 0),
-      0,
-    );
+    const salaryGross = salaryResolved.grossSalaryPaisa;
     const salaryExemptions = salaries.reduce(
       (s, r) => s + (r.exemptionsPaisa ?? 0),
       0,
     );
-    const salaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+    const salaryTds = salaryTdsResolved.valuePaisa;
 
     const otherIncome = otherRows
       .filter((r) => !r.isTaxExempt)
@@ -325,9 +330,13 @@ export async function GET(request: NextRequest) {
         salary: {
           employerCount: salaries.length,
           grossPaisa: salaryGross,
+          grossSource: salaryResolved.source,
+          grossDetail: salaryResolved.detail,
           exemptionsPaisa: salaryExemptions,
           taxableSalaryPaisa: salaryGross - salaryExemptions,
           tdsPaisa: salaryTds,
+          tdsSource: salaryTdsResolved.source,
+          tdsDetail: salaryTdsResolved.detail,
         },
         presumptive: {
           rows: presumptiveRows.map((r, idx) => ({
