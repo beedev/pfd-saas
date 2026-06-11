@@ -103,6 +103,18 @@ if [ ! -f "$SECRETS/cron_secret" ]; then
 fi
 export CRON_SECRET=$(cat "$SECRETS/cron_secret")
 
+# ─── Telegram bot token (optional, persisted in the volume) ───────────
+# If a -e TELEGRAM_BOT_TOKEN was passed, persist it so future redeploys
+# don't need it again. Otherwise load a previously-persisted token. When
+# neither exists, Telegram sends are simply skipped (no error).
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  printf '%s' "$TELEGRAM_BOT_TOKEN" > "$SECRETS/telegram_bot_token"
+  chmod 600 "$SECRETS/telegram_bot_token"
+  chown postgres:postgres "$SECRETS/telegram_bot_token"
+elif [ -f "$SECRETS/telegram_bot_token" ]; then
+  export TELEGRAM_BOT_TOKEN=$(cat "$SECRETS/telegram_bot_token")
+fi
+
 # ─── Start postgres in background ────────────────────────────────────
 # `-l /dev/stdout` fails on Alpine because postgres can't open /dev/stdout
 # with the permissions it wants. Use a regular log file under /data
