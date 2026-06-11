@@ -41,6 +41,10 @@ export interface Section80dInput {
   rows: Section80dRow[];
   isSrCitizen: boolean;
   parentsAreSrCitizens: boolean;
+  /** FY-configurable caps (tax_rules). Default to the historical
+   *  ₹25k / ₹50k when the caller doesn't inject them. */
+  baseCapPaisa?: number;
+  seniorCapPaisa?: number;
 }
 
 export interface Section80dResult {
@@ -51,6 +55,8 @@ export interface Section80dResult {
 
 export function computeSection80d(input: Section80dInput): Section80dResult {
   const { rows, isSrCitizen, parentsAreSrCitizens } = input;
+  const baseCap = input.baseCapPaisa ?? BASE_CAP_PAISA;
+  const seniorCap = input.seniorCapPaisa ?? SR_CITIZEN_CAP_PAISA;
 
   let selfFamilyPaid = 0;
   let parentsPaid = 0;
@@ -60,8 +66,8 @@ export function computeSection80d(input: Section80dInput): Section80dResult {
     else if (r.bucket === 'PARENTS') parentsPaid += a;
   }
 
-  const selfFamilyCap = isSrCitizen ? SR_CITIZEN_CAP_PAISA : BASE_CAP_PAISA;
-  const parentsCap = parentsAreSrCitizens ? SR_CITIZEN_CAP_PAISA : BASE_CAP_PAISA;
+  const selfFamilyCap = isSrCitizen ? seniorCap : baseCap;
+  const parentsCap = parentsAreSrCitizens ? seniorCap : baseCap;
 
   const selfFamilyDeduction = Math.min(selfFamilyPaid, selfFamilyCap);
   const parentsDeduction = Math.min(parentsPaid, parentsCap);

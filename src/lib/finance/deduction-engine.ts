@@ -56,6 +56,7 @@ import { computeSection80d } from './section-80d';
 import { computeSection80g, type EightyGCategory } from './section-80g';
 import { aggregateLoanTaxDeductions } from './loan-tax';
 import { SECTION_CAPS, type TaxSection } from './tax-constants';
+import { getTaxRules } from './tax-rules';
 
 /** Annualise a premium given its frequency. Mirrors tax/summary +
  *  regime-compare so the derived 80C / 80D figures agree across surfaces.
@@ -78,8 +79,6 @@ function annualisePremium(amount: number, freq: string | null): number {
   }
 }
 
-const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
-const EIGHTY_CCD_1B_CAP_PAISA = 50_000 * 100;
 
 const LIFE_TYPES = ['TERM_LIFE', 'WHOLE_LIFE', 'ENDOWMENT', 'ULIP'];
 const HEALTH_TYPES = ['HEALTH', 'CRITICAL_ILLNESS'];
@@ -150,6 +149,8 @@ export async function deriveDeductions(
     adjustedGrossForEightyGPaisa?: number;
   },
 ): Promise<DeductionResult> {
+  // FY-configurable caps (tax_rules table ▸ code-constant fallback).
+  const rules = await getTaxRules(fy);
   const [
     deductions,
     mfs,
@@ -253,13 +254,13 @@ export async function deriveDeductions(
     { source: 'Sovereign Gold Bonds', amountPaisa: sgbPaisa },
   ].filter((s) => s.amountPaisa > 0);
   const eightyCRaw = eightyCSources.reduce((s, x) => s + x.amountPaisa, 0);
-  const eightyCApplied = Math.min(eightyCRaw, EIGHTY_C_CAP_PAISA);
+  const eightyCApplied = Math.min(eightyCRaw, rules.eightyCCapPaisa);
 
   // ─── 80CCD(1B) — NPS Tier-I, separate ₹50k cap ────────────────────
   const npsTier1Paisa = npsRows
     .filter((n) => n.tier === 'TIER1')
     .reduce((s, n) => s + (n.totalContributed ?? 0), 0);
-  const eightyCcd1bApplied = Math.min(npsTier1Paisa, EIGHTY_CCD_1B_CAP_PAISA);
+  const eightyCcd1bApplied = Math.min(npsTier1Paisa, rules.eightyCcd1bCapPaisa);
   const eightyCcd1bSources: DeductionSource[] = npsTier1Paisa > 0
     ? [{ source: 'NPS Tier-I contributed', amountPaisa: npsTier1Paisa }]
     : [];
@@ -289,6 +290,8 @@ export async function deriveDeductions(
     rows: eightyDBucketRows,
     isSrCitizen,
     parentsAreSrCitizens,
+    baseCapPaisa: rules.eightyDBaseCapPaisa,
+    seniorCapPaisa: rules.eightyDSeniorCapPaisa,
   });
   const eightyDLegacyPaisa = deductions
     .filter((r) => normaliseSection(r.section) === '80D' && !r.eightyDBucket)
