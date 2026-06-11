@@ -5,161 +5,32 @@
  *   - multipart/form-data with file + fy → parse PDF, store as 'PDF'
  *   - application/json body with fields → store as 'MANUAL'
  *
- * Parser is best-effort. Form 16 Part A (TRACES-generated) has a
- * reasonably stable structure that yields quarterly TDS + employer
- * TAN + name. Part B varies a lot across employers — we extract what
- * we can and leave 0s where we can't. The /tax/form-16/[id] edit page
- * is the canonical place to correct anything.
- *
- * Failure to parse is non-fatal — the upload still persists so the
- * user can fall back to manual editing.
+ * The Part-B parser lives in lib/services/statement-parsers/form16.ts
+ * (row-anchored; see that file). Failure to parse is non-fatal — the
+ * upload still persists so the user can fall back to the /tax/form-16/[id]
+ * edit page, which is the canonical place to correct anything.
  *
  * Multi-tenant: every row is user-scoped. Uploaded PDFs land under
  *   uploads/<userId>/form-16/<fy>-<epoch>.pdf
- * (note: tenant-folder-first, matching form-26as convention).
+ * The two-part MERGE keys on (userId, employerTan, fy) so a second part
+ * (either order) fills the missing half of an existing row instead of
+ * creating a duplicate.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, form16Uploads } from '@/db';
 import { auth } from '@/auth';
-import { extractPdfText } from '@/lib/services/statement-parsers/pdf-text';
+import { extractPdfText, extractPdfRows } from '@/lib/services/statement-parsers/pdf-text';
+import {
+  parseForm16,
+  rupeesNumberToPaisa,
+  type Form16ParseResult,
+} from '@/lib/services/statement-parsers/form16';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-
-// ─── small utils ────────────────────────────────────────────────────────
-
-function rupeesNumberToPaisa(n: number | null | undefined): number {
-  if (n == null || !Number.isFinite(n)) return 0;
-  return Math.round(n * 100);
-}
-
-/** Find the next rupee-formatted number within `window` chars after the
- *  first match of any marker. Returns paisa, or null if nothing matched. */
-function findAmountAfter(text: string, markers: string[], window = 200): number | null {
-  const numRe = /(?:₹|Rs\.?|INR)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/g;
-  for (const marker of markers) {
-    const idx = text.toLowerCase().indexOf(marker.toLowerCase());
-    if (idx < 0) continue;
-    const chunk = text.slice(idx, idx + window);
-    const matches = [...chunk.matchAll(numRe)];
-    for (const m of matches) {
-      const v = parseFloat(m[1].replace(/,/g, ''));
-      if (Number.isFinite(v) && v >= 100) return rupeesNumberToPaisa(v);
-    }
-  }
-  return null;
-}
-
-/** Pull the employer TAN — TAN is 4 letters + 5 digits + 1 letter. */
-function findTan(text: string): string | null {
-  const labelled = text.match(
-    /(?:TAN|TAN of (?:the )?Deductor|Tax Deduction.*Number)[^A-Z0-9]{0,20}([A-Z]{4}[0-9]{5}[A-Z])/i,
-  );
-  if (labelled) return labelled[1].toUpperCase();
-  const any = text.match(/\b([A-Z]{4}[0-9]{5}[A-Z])\b/);
-  return any ? any[1].toUpperCase() : null;
-}
-
-/** Pull the employer name — try a few label patterns; conservative. */
-function findEmployerName(text: string): string | null {
-  const m = text.match(
-    /Name (?:and address )?of (?:the )?(?:Employer|Deductor)[\s:]*([A-Z0-9][^\n]{2,80})/i,
-  );
-  if (!m) return null;
-  return m[1].split(/\s+(?:PAN|TAN|Address|TAN of)/i)[0].trim().slice(0, 120);
-}
-
-interface ParseResult {
-  employerName: string | null;
-  employerTan: string | null;
-  grossSalaryPaisa: number | null;
-  exemptAllowancesPaisa: number | null;
-  standardDeductionPaisa: number | null;
-  professionalTaxPaisa: number | null;
-  taxableSalaryPaisa: number | null;
-  totalTdsPaisa: number | null;
-  quarterlyTdsQ1Paisa: number | null;
-  quarterlyTdsQ2Paisa: number | null;
-  quarterlyTdsQ3Paisa: number | null;
-  quarterlyTdsQ4Paisa: number | null;
-  notes: string;
-}
-
-function parseForm16(text: string): ParseResult {
-  const notes: string[] = [];
-
-  const employerName = findEmployerName(text);
-  if (!employerName) notes.push('Could not locate employer name.');
-
-  const employerTan = findTan(text);
-  if (!employerTan) notes.push('Could not locate employer TAN.');
-
-  // Part B headline buckets — labels vary, try a few.
-  const grossSalaryPaisa = findAmountAfter(text, [
-    'Gross Salary',
-    'Salary as per provisions',
-    'Total amount of salary received',
-    'Total Salary',
-  ]);
-  const exemptAllowancesPaisa = findAmountAfter(text, [
-    'Less: Allowances to the extent exempt',
-    'Allowances exempt under section 10',
-    'Exempt under section 10',
-  ]);
-  const standardDeductionPaisa = findAmountAfter(text, [
-    'Standard deduction under section 16(ia)',
-    'Standard deduction',
-  ]);
-  const professionalTaxPaisa = findAmountAfter(text, [
-    'Tax on employment under section 16(iii)',
-    'Professional tax',
-  ]);
-  const taxableSalaryPaisa = findAmountAfter(text, [
-    'Income chargeable under the head Salaries',
-    'Income from Salaries',
-    'Taxable salary',
-  ]);
-
-  // Part A — quarterly TDS.
-  const totalTdsPaisa = findAmountAfter(text, [
-    'Total (Rs.)',
-    'Total Tax Deducted',
-    'Total TDS',
-    'Grand Total',
-  ]);
-  const quarterlyTdsQ1Paisa = findAmountAfter(text, ['Quarter 1', 'Q1', 'Q-1'], 240);
-  const quarterlyTdsQ2Paisa = findAmountAfter(text, ['Quarter 2', 'Q2', 'Q-2'], 240);
-  const quarterlyTdsQ3Paisa = findAmountAfter(text, ['Quarter 3', 'Q3', 'Q-3'], 240);
-  const quarterlyTdsQ4Paisa = findAmountAfter(text, ['Quarter 4', 'Q4', 'Q-4'], 240);
-
-  if (totalTdsPaisa == null) notes.push('Could not locate total TDS.');
-  if (
-    quarterlyTdsQ1Paisa == null &&
-    quarterlyTdsQ2Paisa == null &&
-    quarterlyTdsQ3Paisa == null &&
-    quarterlyTdsQ4Paisa == null
-  ) {
-    notes.push('Quarterly TDS breakdown not detected — Part A may be in image form.');
-  }
-
-  return {
-    employerName,
-    employerTan,
-    grossSalaryPaisa,
-    exemptAllowancesPaisa,
-    standardDeductionPaisa,
-    professionalTaxPaisa,
-    taxableSalaryPaisa,
-    totalTdsPaisa,
-    quarterlyTdsQ1Paisa,
-    quarterlyTdsQ2Paisa,
-    quarterlyTdsQ3Paisa,
-    quarterlyTdsQ4Paisa,
-    notes: notes.join(' '),
-  };
-}
 
 // ─── handlers ───────────────────────────────────────────────────────────
 
@@ -198,15 +69,25 @@ export async function POST(request: NextRequest) {
           sourceKind: 'MANUAL',
           sourceFilename: null,
           grossSalaryPaisa: rupeesNumberToPaisa(body.grossSalaryRupees ?? 0),
+          hraExemptionPaisa: rupeesNumberToPaisa(body.hraExemptionRupees ?? 0),
           exemptAllowancesPaisa: rupeesNumberToPaisa(body.exemptAllowancesRupees ?? 0),
           standardDeductionPaisa: rupeesNumberToPaisa(body.standardDeductionRupees ?? 0),
           professionalTaxPaisa: rupeesNumberToPaisa(body.professionalTaxRupees ?? 0),
           taxableSalaryPaisa: rupeesNumberToPaisa(body.taxableSalaryRupees ?? 0),
+          totalTaxableIncomePaisa: rupeesNumberToPaisa(body.totalTaxableIncomeRupees ?? 0),
+          taxOnTotalIncomePaisa: rupeesNumberToPaisa(body.taxOnTotalIncomeRupees ?? 0),
+          netTaxPayablePaisa: rupeesNumberToPaisa(body.netTaxPayableRupees ?? 0),
           totalTdsPaisa: rupeesNumberToPaisa(body.totalTdsRupees ?? 0),
           quarterlyTdsQ1Paisa: rupeesNumberToPaisa(body.quarterlyTdsQ1Rupees ?? 0),
           quarterlyTdsQ2Paisa: rupeesNumberToPaisa(body.quarterlyTdsQ2Rupees ?? 0),
           quarterlyTdsQ3Paisa: rupeesNumberToPaisa(body.quarterlyTdsQ3Rupees ?? 0),
           quarterlyTdsQ4Paisa: rupeesNumberToPaisa(body.quarterlyTdsQ4Rupees ?? 0),
+          partsPresent: [
+            body.taxableSalaryRupees || body.grossSalaryRupees ? 'B' : null,
+            body.totalTdsRupees || body.quarterlyTdsQ1Rupees ? 'A' : null,
+          ]
+            .filter(Boolean)
+            .join(','),
           notes: body.notes || null,
         })
         .returning();
@@ -245,43 +126,122 @@ export async function POST(request: NextRequest) {
     await fs.promises.writeFile(absPath, buffer);
     const relPath = path.relative(process.cwd(), absPath);
 
-    let parsed: ParseResult | null = null;
+    let parsed: Form16ParseResult | null = null;
     let rawText: string | null = null;
     let parseError: string | null = null;
     try {
-      rawText = await extractPdfText(buffer);
-      parsed = parseForm16(rawText);
+      const [rows, flat] = await Promise.all([
+        extractPdfRows(buffer),
+        extractPdfText(buffer),
+      ]);
+      rawText = flat;
+      parsed = parseForm16(rows, flat);
     } catch (err) {
       parseError = `Parse failed: ${err instanceof Error ? err.message : 'unknown'}`;
       console.error('[tax/form-16/upload parse]', err);
     }
 
-    const [row] = await db
-      .insert(form16Uploads)
-      .values({
-        userId,
-        fy,
-        // Fall back to "Unknown" — user is expected to fix via edit page.
-        employerName: parsed?.employerName || 'Unknown — please edit',
-        employerTan: parsed?.employerTan || 'UNKNOWN',
-        sourceKind: 'PDF',
-        sourceFilename: relPath,
-        grossSalaryPaisa: parsed?.grossSalaryPaisa ?? 0,
-        exemptAllowancesPaisa: parsed?.exemptAllowancesPaisa ?? 0,
-        standardDeductionPaisa: parsed?.standardDeductionPaisa ?? 0,
-        professionalTaxPaisa: parsed?.professionalTaxPaisa ?? 0,
-        taxableSalaryPaisa: parsed?.taxableSalaryPaisa ?? 0,
-        totalTdsPaisa: parsed?.totalTdsPaisa ?? 0,
-        quarterlyTdsQ1Paisa: parsed?.quarterlyTdsQ1Paisa ?? 0,
-        quarterlyTdsQ2Paisa: parsed?.quarterlyTdsQ2Paisa ?? 0,
-        quarterlyTdsQ3Paisa: parsed?.quarterlyTdsQ3Paisa ?? 0,
-        quarterlyTdsQ4Paisa: parsed?.quarterlyTdsQ4Paisa ?? 0,
-        rawText,
-        notes: parseError || parsed?.notes || null,
-      })
-      .returning();
+    // ── Merge model ──
+    // One record per (userId, employer TAN, FY). Part A supplies TDS; Part
+    // B supplies salary/tax. Uploading the second part (either order) fills
+    // in the missing half instead of creating a duplicate. We only set the
+    // fields the parsed part actually carries (non-null), so a Part A
+    // upload never zeroes Part B's salary and vice versa.
+    const part = parsed?.sourcePart ?? 'UNKNOWN';
+    const tan = parsed?.employerTan || null;
 
-    return NextResponse.json({ upload: row, parsed, manual: false }, { status: 201 });
+    /** Only-if-present: undefined values are skipped by Drizzle .set(). */
+    const onlyIf = <T,>(v: T | null | undefined): T | undefined => (v == null ? undefined : v);
+    const provided = {
+      employerName: onlyIf(parsed?.employerName),
+      grossSalaryPaisa: onlyIf(parsed?.grossSalaryPaisa),
+      hraExemptionPaisa: onlyIf(parsed?.hraExemptionPaisa),
+      exemptAllowancesPaisa: onlyIf(parsed?.exemptAllowancesPaisa),
+      standardDeductionPaisa: onlyIf(parsed?.standardDeductionPaisa),
+      professionalTaxPaisa: onlyIf(parsed?.professionalTaxPaisa),
+      taxableSalaryPaisa: onlyIf(parsed?.taxableSalaryPaisa),
+      totalTaxableIncomePaisa: onlyIf(parsed?.totalTaxableIncomePaisa),
+      taxOnTotalIncomePaisa: onlyIf(parsed?.taxOnTotalIncomePaisa),
+      netTaxPayablePaisa: onlyIf(parsed?.netTaxPayablePaisa),
+      totalTdsPaisa: onlyIf(parsed?.totalTdsPaisa),
+      quarterlyTdsQ1Paisa: onlyIf(parsed?.quarterlyTdsQ1Paisa),
+      quarterlyTdsQ2Paisa: onlyIf(parsed?.quarterlyTdsQ2Paisa),
+      quarterlyTdsQ3Paisa: onlyIf(parsed?.quarterlyTdsQ3Paisa),
+      quarterlyTdsQ4Paisa: onlyIf(parsed?.quarterlyTdsQ4Paisa),
+    };
+
+    const mergeParts = (prev: string, p: string): string => {
+      const set = new Set((prev || '').split(',').filter(Boolean));
+      if (p === 'A' || p === 'B') set.add(p);
+      return [...set].sort().join(',');
+    };
+
+    const existing =
+      tan && tan !== 'UNKNOWN' && part !== 'UNKNOWN'
+        ? (
+            await db
+              .select()
+              .from(form16Uploads)
+              .where(
+                and(
+                  eq(form16Uploads.userId, userId),
+                  eq(form16Uploads.employerTan, tan),
+                  eq(form16Uploads.fy, fy),
+                ),
+              )
+              .limit(1)
+          )[0]
+        : undefined;
+
+    let row;
+    let merged = false;
+    if (existing) {
+      merged = true;
+      [row] = await db
+        .update(form16Uploads)
+        .set({
+          ...provided,
+          sourceKind: 'PDF',
+          sourceFilename: relPath,
+          partsPresent: mergeParts(existing.partsPresent ?? '', part),
+          rawText,
+          notes: parseError || parsed?.notes || existing.notes || null,
+        })
+        .where(and(eq(form16Uploads.id, existing.id), eq(form16Uploads.userId, userId)))
+        .returning();
+    } else {
+      [row] = await db
+        .insert(form16Uploads)
+        .values({
+          userId,
+          fy,
+          // Fall back to "Unknown" — user is expected to fix via edit page.
+          employerName: parsed?.employerName || 'Unknown — please edit',
+          employerTan: parsed?.employerTan || 'UNKNOWN',
+          sourceKind: 'PDF',
+          sourceFilename: relPath,
+          partsPresent: part === 'A' || part === 'B' ? part : '',
+          grossSalaryPaisa: parsed?.grossSalaryPaisa ?? 0,
+          hraExemptionPaisa: parsed?.hraExemptionPaisa ?? 0,
+          exemptAllowancesPaisa: parsed?.exemptAllowancesPaisa ?? 0,
+          standardDeductionPaisa: parsed?.standardDeductionPaisa ?? 0,
+          professionalTaxPaisa: parsed?.professionalTaxPaisa ?? 0,
+          taxableSalaryPaisa: parsed?.taxableSalaryPaisa ?? 0,
+          totalTaxableIncomePaisa: parsed?.totalTaxableIncomePaisa ?? 0,
+          taxOnTotalIncomePaisa: parsed?.taxOnTotalIncomePaisa ?? 0,
+          netTaxPayablePaisa: parsed?.netTaxPayablePaisa ?? 0,
+          totalTdsPaisa: parsed?.totalTdsPaisa ?? 0,
+          quarterlyTdsQ1Paisa: parsed?.quarterlyTdsQ1Paisa ?? 0,
+          quarterlyTdsQ2Paisa: parsed?.quarterlyTdsQ2Paisa ?? 0,
+          quarterlyTdsQ3Paisa: parsed?.quarterlyTdsQ3Paisa ?? 0,
+          quarterlyTdsQ4Paisa: parsed?.quarterlyTdsQ4Paisa ?? 0,
+          rawText,
+          notes: parseError || parsed?.notes || null,
+        })
+        .returning();
+    }
+
+    return NextResponse.json({ upload: row, parsed, merged, manual: false }, { status: 201 });
   } catch (err) {
     console.error('[tax/form-16/upload POST]', err);
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });

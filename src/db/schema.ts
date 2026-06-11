@@ -2732,10 +2732,21 @@ export const form16Uploads = pgTable('form_16_uploads', {
 
   // Part B headline numbers (all in paisa).
   grossSalaryPaisa: bigint('gross_salary_paisa', { mode: 'number' }).default(0),
+  // HRA exemption — sec 10(13A), line 2(e). A component of exempt_allowances.
+  hraExemptionPaisa: bigint('hra_exemption_paisa', { mode: 'number' }).notNull().default(0),
   exemptAllowancesPaisa: bigint('exempt_allowances_paisa', { mode: 'number' }).default(0),
   standardDeductionPaisa: bigint('standard_deduction_paisa', { mode: 'number' }).default(0),
   professionalTaxPaisa: bigint('professional_tax_paisa', { mode: 'number' }).default(0),
+  // Line 6 — income chargeable under the head "Salaries" (after sec-16,
+  // before Chapter VI-A).
   taxableSalaryPaisa: bigint('taxable_salary_paisa', { mode: 'number' }).default(0),
+  // Line 12 — total taxable income (after Chapter VI-A); the figure tax
+  // is actually computed on.
+  totalTaxableIncomePaisa: bigint('total_taxable_income_paisa', { mode: 'number' }).notNull().default(0),
+  // Line 13 — tax on total income (before cess/surcharge/rebate).
+  taxOnTotalIncomePaisa: bigint('tax_on_total_income_paisa', { mode: 'number' }).notNull().default(0),
+  // Line 21 — net tax payable (the final liability on this certificate).
+  netTaxPayablePaisa: bigint('net_tax_payable_paisa', { mode: 'number' }).notNull().default(0),
 
   // Part A — TDS by quarter.
   totalTdsPaisa: bigint('total_tds_paisa', { mode: 'number' }).default(0),
@@ -2743,6 +2754,10 @@ export const form16Uploads = pgTable('form_16_uploads', {
   quarterlyTdsQ2Paisa: bigint('quarterly_tds_q2_paisa', { mode: 'number' }).default(0),
   quarterlyTdsQ3Paisa: bigint('quarterly_tds_q3_paisa', { mode: 'number' }).default(0),
   quarterlyTdsQ4Paisa: bigint('quarterly_tds_q4_paisa', { mode: 'number' }).default(0),
+
+  // Which Form 16 halves have been merged into this record: '', 'A',
+  // 'B', or 'A,B'. Part A supplies TDS; Part B supplies salary/tax.
+  partsPresent: text('parts_present').notNull().default(''),
 
   // Diagnostic — extracted text + free-form notes.
   rawText: text('raw_text'),

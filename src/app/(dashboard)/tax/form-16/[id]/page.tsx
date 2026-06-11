@@ -27,10 +27,14 @@ interface Form16Upload {
   sourceFilename: string | null;
   sourceKind: 'PDF' | 'MANUAL';
   grossSalaryPaisa: number | null;
+  hraExemptionPaisa: number | null;
   exemptAllowancesPaisa: number | null;
   standardDeductionPaisa: number | null;
   professionalTaxPaisa: number | null;
   taxableSalaryPaisa: number | null;
+  totalTaxableIncomePaisa: number | null;
+  taxOnTotalIncomePaisa: number | null;
+  netTaxPayablePaisa: number | null;
   totalTdsPaisa: number | null;
   quarterlyTdsQ1Paisa: number | null;
   quarterlyTdsQ2Paisa: number | null;
@@ -63,10 +67,14 @@ export default function Form16DetailPage({ params }: { params: Promise<{ id: str
     employerName: '',
     employerTan: '',
     grossSalaryRupees: '',
+    hraExemptionRupees: '',
     exemptAllowancesRupees: '',
     standardDeductionRupees: '',
     professionalTaxRupees: '',
     taxableSalaryRupees: '',
+    totalTaxableIncomeRupees: '',
+    taxOnTotalIncomeRupees: '',
+    netTaxPayableRupees: '',
     totalTdsRupees: '',
     quarterlyTdsQ1Rupees: '',
     quarterlyTdsQ2Rupees: '',
@@ -95,10 +103,14 @@ export default function Form16DetailPage({ params }: { params: Promise<{ id: str
         employerName: u.employerName,
         employerTan: u.employerTan,
         grossSalaryRupees: paisaToRupees(u.grossSalaryPaisa),
+        hraExemptionRupees: paisaToRupees(u.hraExemptionPaisa),
         exemptAllowancesRupees: paisaToRupees(u.exemptAllowancesPaisa),
         standardDeductionRupees: paisaToRupees(u.standardDeductionPaisa),
         professionalTaxRupees: paisaToRupees(u.professionalTaxPaisa),
         taxableSalaryRupees: paisaToRupees(u.taxableSalaryPaisa),
+        totalTaxableIncomeRupees: paisaToRupees(u.totalTaxableIncomePaisa),
+        taxOnTotalIncomeRupees: paisaToRupees(u.taxOnTotalIncomePaisa),
+        netTaxPayableRupees: paisaToRupees(u.netTaxPayablePaisa),
         totalTdsRupees: paisaToRupees(u.totalTdsPaisa),
         quarterlyTdsQ1Rupees: paisaToRupees(u.quarterlyTdsQ1Paisa),
         quarterlyTdsQ2Rupees: paisaToRupees(u.quarterlyTdsQ2Paisa),
@@ -109,10 +121,14 @@ export default function Form16DetailPage({ params }: { params: Promise<{ id: str
       if (u.sourceKind === 'PDF') {
         setInitialFromPdf({
           grossSalary: (u.grossSalaryPaisa ?? 0) > 0,
+          hraExemption: (u.hraExemptionPaisa ?? 0) > 0,
           exemptAllowances: (u.exemptAllowancesPaisa ?? 0) > 0,
           standardDeduction: (u.standardDeductionPaisa ?? 0) > 0,
           professionalTax: (u.professionalTaxPaisa ?? 0) > 0,
           taxableSalary: (u.taxableSalaryPaisa ?? 0) > 0,
+          totalTaxableIncome: (u.totalTaxableIncomePaisa ?? 0) > 0,
+          taxOnTotalIncome: (u.taxOnTotalIncomePaisa ?? 0) > 0,
+          netTaxPayable: (u.netTaxPayablePaisa ?? 0) > 0,
           totalTds: (u.totalTdsPaisa ?? 0) > 0,
           q1: (u.quarterlyTdsQ1Paisa ?? 0) > 0,
           q2: (u.quarterlyTdsQ2Paisa ?? 0) > 0,
@@ -256,7 +272,10 @@ export default function Form16DetailPage({ params }: { params: Promise<{ id: str
           <MoneyField label="Gross salary" editing={editing} value={form.grossSalaryRupees}
             display={fmtINR(upload.grossSalaryPaisa ?? 0)} fromPdf={initialFromPdf.grossSalary}
             onChange={(v) => setForm((f) => ({ ...f, grossSalaryRupees: v }))} />
-          <MoneyField label="Exempt allowances (sec 10)" editing={editing} value={form.exemptAllowancesRupees}
+          <MoneyField label="HRA exemption (sec 10(13A))" editing={editing} value={form.hraExemptionRupees}
+            display={fmtINR(upload.hraExemptionPaisa ?? 0)} fromPdf={initialFromPdf.hraExemption}
+            onChange={(v) => setForm((f) => ({ ...f, hraExemptionRupees: v }))} />
+          <MoneyField label="Exempt allowances total (sec 10)" editing={editing} value={form.exemptAllowancesRupees}
             display={fmtINR(upload.exemptAllowancesPaisa ?? 0)} fromPdf={initialFromPdf.exemptAllowances}
             onChange={(v) => setForm((f) => ({ ...f, exemptAllowancesRupees: v }))} />
           <MoneyField label="Standard deduction (sec 16ia)" editing={editing} value={form.standardDeductionRupees}
@@ -265,9 +284,30 @@ export default function Form16DetailPage({ params }: { params: Promise<{ id: str
           <MoneyField label="Professional tax (sec 16iii)" editing={editing} value={form.professionalTaxRupees}
             display={fmtINR(upload.professionalTaxPaisa ?? 0)} fromPdf={initialFromPdf.professionalTax}
             onChange={(v) => setForm((f) => ({ ...f, professionalTaxRupees: v }))} />
-          <MoneyField label="Taxable salary" editing={editing} value={form.taxableSalaryRupees}
+          <MoneyField label="Income under 'Salaries' (line 6)" editing={editing} value={form.taxableSalaryRupees}
             display={fmtINR(upload.taxableSalaryPaisa ?? 0)} fromPdf={initialFromPdf.taxableSalary}
-            onChange={(v) => setForm((f) => ({ ...f, taxableSalaryRupees: v }))} bold />
+            onChange={(v) => setForm((f) => ({ ...f, taxableSalaryRupees: v }))} />
+        </CardContent>
+      </Card>
+
+      {/* Part B — Tax computation */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-bold">Part B — Tax computation</h2>
+          <p className="text-xs text-[var(--dxp-text-muted)] mt-1">
+            Total taxable income is what tax is computed on (after Chapter VI-A).
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <MoneyField label="Total taxable income (line 12)" editing={editing} value={form.totalTaxableIncomeRupees}
+            display={fmtINR(upload.totalTaxableIncomePaisa ?? 0)} fromPdf={initialFromPdf.totalTaxableIncome}
+            onChange={(v) => setForm((f) => ({ ...f, totalTaxableIncomeRupees: v }))} bold />
+          <MoneyField label="Tax on total income (line 13)" editing={editing} value={form.taxOnTotalIncomeRupees}
+            display={fmtINR(upload.taxOnTotalIncomePaisa ?? 0)} fromPdf={initialFromPdf.taxOnTotalIncome}
+            onChange={(v) => setForm((f) => ({ ...f, taxOnTotalIncomeRupees: v }))} />
+          <MoneyField label="Net tax payable (line 21)" editing={editing} value={form.netTaxPayableRupees}
+            display={fmtINR(upload.netTaxPayablePaisa ?? 0)} fromPdf={initialFromPdf.netTaxPayable}
+            onChange={(v) => setForm((f) => ({ ...f, netTaxPayableRupees: v }))} />
         </CardContent>
       </Card>
 

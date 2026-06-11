@@ -44,15 +44,20 @@ interface Form16Upload {
   sourceFilename: string | null;
   sourceKind: 'PDF' | 'MANUAL';
   grossSalaryPaisa: number | null;
+  hraExemptionPaisa: number | null;
   exemptAllowancesPaisa: number | null;
   standardDeductionPaisa: number | null;
   professionalTaxPaisa: number | null;
   taxableSalaryPaisa: number | null;
+  totalTaxableIncomePaisa: number | null;
+  taxOnTotalIncomePaisa: number | null;
+  netTaxPayablePaisa: number | null;
   totalTdsPaisa: number | null;
   quarterlyTdsQ1Paisa: number | null;
   quarterlyTdsQ2Paisa: number | null;
   quarterlyTdsQ3Paisa: number | null;
   quarterlyTdsQ4Paisa: number | null;
+  partsPresent: string | null;
   notes: string | null;
 }
 
@@ -320,9 +325,9 @@ export default function Form16ListPage() {
                     <tr className="text-left text-xs uppercase tracking-wide text-[var(--dxp-text-muted)] border-b border-[var(--dxp-border)]">
                       <th className="py-2 pr-2">Employer</th>
                       <th className="py-2 pr-2">TAN</th>
-                      <th className="py-2 pr-2">Source</th>
+                      <th className="py-2 pr-2">Parts</th>
                       <th className="py-2 pr-2 text-right">Gross</th>
-                      <th className="py-2 pr-2 text-right">Taxable</th>
+                      <th className="py-2 pr-2 text-right">Taxable income</th>
                       <th className="py-2 pr-2 text-right">TDS</th>
                       <th className="py-2 pr-2"></th>
                     </tr>
@@ -337,10 +342,29 @@ export default function Form16ListPage() {
                         </td>
                         <td className="py-2 pr-2 font-mono text-xs">{u.employerTan}</td>
                         <td className="py-2 pr-2">
-                          <Badge variant={u.sourceKind === 'PDF' ? 'info' : 'success'}>{u.sourceKind}</Badge>
+                          {(() => {
+                            const parts = new Set((u.partsPresent ?? '').split(',').filter(Boolean));
+                            const hasA = parts.has('A');
+                            const hasB = parts.has('B');
+                            return (
+                              <div className="flex items-center gap-1">
+                                <Badge variant={hasA ? 'success' : 'default'} title="Part A — TDS">
+                                  A{hasA ? '' : '?'}
+                                </Badge>
+                                <Badge variant={hasB ? 'success' : 'default'} title="Part B — salary">
+                                  B{hasB ? '' : '?'}
+                                </Badge>
+                                {hasA !== hasB && (
+                                  <span className="text-[10px] text-amber-600" title="Upload the other part to complete this Form 16">
+                                    upload {hasA ? 'B' : 'A'}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-2 pr-2 text-right font-mono">{fmtINR(u.grossSalaryPaisa ?? 0)}</td>
-                        <td className="py-2 pr-2 text-right font-mono">{fmtINR(u.taxableSalaryPaisa ?? 0)}</td>
+                        <td className="py-2 pr-2 text-right font-mono">{fmtINR(u.totalTaxableIncomePaisa || u.taxableSalaryPaisa || 0)}</td>
                         <td className="py-2 pr-2 text-right font-mono">{fmtINR(u.totalTdsPaisa ?? 0)}</td>
                         <td className="py-2 pr-2">
                           <div className="flex gap-1">

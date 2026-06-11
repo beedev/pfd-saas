@@ -274,6 +274,13 @@
       "when": 1781079312834,
       "tag": "0038_snapshot_sync_gstin_user_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1781079312835,
+      "tag": "0039_form16_parts_and_fields",
+      "breakpoints": true
     }
   ]
 }

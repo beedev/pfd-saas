@@ -86,10 +86,14 @@ export async function PATCH(
     // Money fields — body sends rupees, we store paisa.
     const moneyFields: Array<[string, string]> = [
       ['grossSalaryRupees', 'grossSalaryPaisa'],
+      ['hraExemptionRupees', 'hraExemptionPaisa'],
       ['exemptAllowancesRupees', 'exemptAllowancesPaisa'],
       ['standardDeductionRupees', 'standardDeductionPaisa'],
       ['professionalTaxRupees', 'professionalTaxPaisa'],
       ['taxableSalaryRupees', 'taxableSalaryPaisa'],
+      ['totalTaxableIncomeRupees', 'totalTaxableIncomePaisa'],
+      ['taxOnTotalIncomeRupees', 'taxOnTotalIncomePaisa'],
+      ['netTaxPayableRupees', 'netTaxPayablePaisa'],
       ['totalTdsRupees', 'totalTdsPaisa'],
       ['quarterlyTdsQ1Rupees', 'quarterlyTdsQ1Paisa'],
       ['quarterlyTdsQ2Rupees', 'quarterlyTdsQ2Paisa'],

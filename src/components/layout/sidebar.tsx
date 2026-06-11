@@ -104,7 +104,6 @@ const navigation: NavSection[] = [
   {
     section: 'Planning',
     items: [
-      { name: 'Income', href: '/income', icon: Banknote },
       { name: 'Subscriptions', href: '/subscriptions', icon: Tag },
       { name: 'Budget', href: '/budget', icon: Wallet },
       { name: 'Monthly Expenses', href: '/budget/monthly', icon: Wallet },
@@ -124,6 +123,7 @@ const navigation: NavSection[] = [
   {
     section: 'Income Tax',
     items: [
+      { name: 'Income', href: '/income', icon: Banknote },
       { name: 'Deductions', href: '/tax', icon: Receipt },
       // Sprint C — reconciliation triangle (books vs Form 16 vs 26AS)
       { name: 'Reconciliation', href: '/tax/reconciliation', icon: Calculator },
