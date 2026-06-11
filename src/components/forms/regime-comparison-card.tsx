@@ -1,41 +1,51 @@
 'use client';
 
 /**
- * Regime comparison card — Sprint 4 Phase 1b.
+ * Regime comparison card.
  *
- * Side-by-side view of OLD vs NEW tax-regime computation for the
- * selected FY. Reads from /api/tax/regime-compare and renders:
- *   • OLD column   — slab tax + rebate + cess + total + effective rate
- *   • NEW column   — same shape
- *   • Recommendation banner — which one to file under + savings delta
+ * Side-by-side OLD vs NEW tax computation for the selected FY, reading
+ * /api/tax/regime-compare. Each column "shows the math" like a tax notice:
+ *   gross slab income → HRA/24(b)/80EEA (OLD) → Chapter VI-A (expandable
+ *   to the per-section breakdown) → taxable income → per-band slab ladder
+ *   → rebate/surcharge/cess → capital-gains tax add-on → total.
  *
- * The page-level FY selector controls which year to compare. When FY
- * changes, the card refetches.
- *
- * NOT yet handled in this card (deferred to Sprint 4.2+):
- *   • Surcharge brackets (>50L income)
- *   • LTCG/STCG separately taxed (surfaced as a side note)
- *   • Per-deduction regime-eligibility (NEW regime currently shows
- *     ₹0 deductions; OLD shows everything — Phase 2 refines this)
+ * The page-level FY selector controls which year to compare; the card
+ * refetches on FY change (and on the parent's refreshTick via remount key).
  */
 
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardContent, Badge, Button } from '@dxp/ui';
-import { Scale, ArrowRight, Loader2, Info } from 'lucide-react';
+import { Scale, ArrowRight, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+
+interface SlabBand {
+  lowerPaisa: number;
+  upperPaisa: number | null;
+  ratePct: number;
+  taxPaisa: number;
+}
 
 interface ComputeResult {
   taxablePaisa: number;
   taxBeforeRebatePaisa: number;
   rebatePaisa: number;
   taxAfterRebatePaisa: number;
-  // Sprint 5.1b — surcharge fields (optional for backward-compat)
   surchargePaisa?: number;
   marginalReliefPaisa?: number;
   effectiveSurchargePaisa?: number;
   cessPaisa: number;
   totalTaxPaisa: number;
   effectiveRatePct: number;
+  bands?: SlabBand[];
+  // Capital-gains add-on (flat-rate, same in both regimes)
+  capitalGainsTaxPaisa?: number;
+  capitalGainsCessPaisa?: number;
+  capitalGainsTotalPaisa?: number;
+}
+
+interface DeductionBreakdownRow {
+  label: string;
+  amountPaisa: number;
 }
 
 interface RegimeCompareResponse {
@@ -45,18 +55,18 @@ interface RegimeCompareResponse {
     hraExemption?: number;
     other: number;
     business: number;
-    // Sprint 5.1a — rental split into gross + maintenance + 24(b) + 80EEA
     rentalGross?: number;
-    rentalStdMaintenance?: number;
     sec24b?: number;
     sec80eea?: number;
-    oldHpNet?: number;
-    newHpNet?: number;
     gross: number;
     grossNew?: number;
     capitalGainsTaxable: number;
   };
-  deductions: { oldRegime: number; newRegime: number };
+  deductions: {
+    oldRegime: number;
+    newRegime: number;
+    breakdown?: DeductionBreakdownRow[];
+  };
   comparison: {
     old: ComputeResult;
     new: ComputeResult;
@@ -71,6 +81,15 @@ function formatINR(paisa: number): string {
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(paisa / 100);
+}
+
+/** Compact rupee bound for band labels: ₹4L, ₹1.25Cr, ₹50,000. */
+function formatBound(paisa: number | null): string {
+  if (paisa === null) return '+';
+  const rs = paisa / 100;
+  if (rs >= 1_00_00_000) return `₹${(rs / 1_00_00_000).toLocaleString('en-IN', { maximumFractionDigits: 2 })}Cr`;
+  if (rs >= 1_00_000) return `₹${(rs / 1_00_000).toLocaleString('en-IN', { maximumFractionDigits: 2 })}L`;
+  return `₹${rs.toLocaleString('en-IN')}`;
 }
 
 export function RegimeComparisonCard({ fy }: { fy: string }) {
@@ -140,6 +159,7 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
 
   const recommended = data.comparison.recommendation;
   const other: 'NEW' | 'OLD' = recommended === 'NEW' ? 'OLD' : 'NEW';
+  const cgTaxablePaisa = data.income.capitalGainsTaxable;
 
   return (
     <Card>
@@ -152,12 +172,11 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             </h3>
             <p className="text-xs text-[var(--dxp-text-secondary)]">
               Gross slab-able income: <strong>{formatINR(data.income.gross)}</strong>
-              {data.income.capitalGainsTaxable > 0 && (
-                <> · Capital gains (taxed separately): <strong>{formatINR(data.income.capitalGainsTaxable)}</strong></>
+              {cgTaxablePaisa > 0 && (
+                <> · Capital gains (taxed separately): <strong>{formatINR(cgTaxablePaisa)}</strong></>
               )}
             </p>
           </div>
-          {/* Income breakdown chips */}
           <div className="flex flex-wrap gap-1 text-[10px]">
             {data.income.salary > 0 && (
               <Badge variant="default">Salary {formatINR(data.income.salary)}</Badge>
@@ -175,9 +194,6 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
         </div>
       </CardHeader>
       <CardContent>
-        {/* Sprint 5.2 (B) — promoted recommendation banner. Sits ABOVE
-            the side-by-side columns so the answer is visible before the
-            justification. */}
         <div className="mb-4 rounded-md border border-emerald-300 bg-emerald-50/60 p-3">
           <div className="flex items-start gap-2">
             <ArrowRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-700" />
@@ -195,14 +211,14 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
           </div>
         </div>
 
-        {/* Side-by-side regime columns */}
         <div className="grid gap-4 md:grid-cols-2">
           <RegimeColumn
             regime="NEW"
             isRecommended={recommended === 'NEW'}
             result={data.comparison.new}
+            grossSlabPaisa={data.income.grossNew ?? data.income.gross}
             deductionsPaisa={data.deductions.newRegime}
-            // NEW regime: HRA/24b/80EEA = 0 by law
+            deductionBreakdown={recommended === 'NEW' ? [] : []}
             hraExemptionPaisa={0}
             sec24bPaisa={0}
             sec80eeaPaisa={0}
@@ -213,7 +229,9 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             regime="OLD"
             isRecommended={recommended === 'OLD'}
             result={data.comparison.old}
+            grossSlabPaisa={data.income.gross}
             deductionsPaisa={data.deductions.oldRegime}
+            deductionBreakdown={data.deductions.breakdown ?? []}
             hraExemptionPaisa={data.income.hraExemption ?? 0}
             sec24bPaisa={data.income.sec24b ?? 0}
             sec80eeaPaisa={data.income.sec80eea ?? 0}
@@ -222,12 +240,11 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
           />
         </div>
 
-        {/* Honesty footnote — what the engine doesn't yet do */}
         <p className="mt-3 text-[10px] text-[var(--dxp-text-muted)]">
           <Info className="mr-1 inline h-3 w-3" />
-          Engine handles standard deduction, slabs, 87A rebate, 4% cess. Does NOT yet handle:
-          surcharge (income &gt;₹50L), LTCG/STCG separately taxed, per-deduction regime
-          eligibility. Calculation is an estimate — actual liability depends on ITR final.
+          Handles standard deduction, slabs, 87A rebate, 4% cess, surcharge (income &gt;₹50L),
+          and capital-gains tax at flat rates. Calculation is an estimate — actual liability
+          depends on your final ITR.
         </p>
       </CardContent>
     </Card>
@@ -238,7 +255,9 @@ function RegimeColumn({
   regime,
   isRecommended,
   result,
+  grossSlabPaisa,
   deductionsPaisa,
+  deductionBreakdown,
   hraExemptionPaisa,
   sec24bPaisa,
   sec80eeaPaisa,
@@ -248,37 +267,41 @@ function RegimeColumn({
   regime: 'NEW' | 'OLD';
   isRecommended: boolean;
   result: ComputeResult;
+  grossSlabPaisa: number;
   deductionsPaisa: number;
+  deductionBreakdown: DeductionBreakdownRow[];
   hraExemptionPaisa: number;
   sec24bPaisa: number;
   sec80eeaPaisa: number;
   onSetDefault: () => void;
   savingPreference: boolean;
 }) {
+  const [showDeductions, setShowDeductions] = useState(false);
+  const cgTotalPaisa = result.capitalGainsTotalPaisa ?? 0;
+  const cgTaxPaisa = result.capitalGainsTaxPaisa ?? 0;
+  const cgCessPaisa = result.capitalGainsCessPaisa ?? 0;
+
   return (
     <div
       className={`rounded-md border p-3 ${
-        isRecommended
-          ? 'border-emerald-400 bg-emerald-50/30'
-          : 'border-[var(--dxp-border)]'
+        isRecommended ? 'border-emerald-400 bg-emerald-50/30' : 'border-[var(--dxp-border)]'
       }`}
     >
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h4 className="font-bold text-[var(--dxp-text)]">{regime} regime</h4>
           {isRecommended && <Badge variant="success">Recommended</Badge>}
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onSetDefault}
-          disabled={savingPreference}
-        >
+        <Button variant="secondary" size="sm" onClick={onSetDefault} disabled={savingPreference}>
           Set as default
         </Button>
       </div>
+      <p className="mb-2 text-[11px] text-[var(--dxp-text-muted)]">
+        {regime === 'OLD'
+          ? 'Allows full Chapter VI-A + HRA + Sec 24(b) + 80EEA.'
+          : 'Higher std deduction (₹75k), simpler rebates; very few Sec-80 allowed.'}
+      </p>
 
-      {/* Headline tax number */}
       <p className="text-2xl font-bold tabular-nums text-[var(--dxp-text)]">
         {formatINR(result.totalTaxPaisa)}
       </p>
@@ -286,28 +309,111 @@ function RegimeColumn({
         Effective rate {result.effectiveRatePct.toFixed(2)}% on gross income
       </p>
 
-      {/* Computation breakdown */}
       <dl className="mt-3 space-y-1 text-xs">
-        <Row
-          label="HRA exemption (sec 10(13A))"
-          value={hraExemptionPaisa > 0 ? `− ${formatINR(hraExemptionPaisa)}` : '₹0'}
-          muted={hraExemptionPaisa === 0}
-          valueClassName={hraExemptionPaisa > 0 ? 'text-emerald-700' : undefined}
-        />
-        <Row
-          label="Sec 24(b) home loan interest"
-          value={sec24bPaisa > 0 ? `− ${formatINR(sec24bPaisa)}` : '₹0'}
-          muted={sec24bPaisa === 0}
-          valueClassName={sec24bPaisa > 0 ? 'text-emerald-700' : undefined}
-        />
-        <Row
-          label="Sec 80EEA additional interest"
-          value={sec80eeaPaisa > 0 ? `− ${formatINR(sec80eeaPaisa)}` : '₹0'}
-          muted={sec80eeaPaisa === 0}
-          valueClassName={sec80eeaPaisa > 0 ? 'text-emerald-700' : undefined}
-        />
-        <Row label="Chapter VI-A deductions" value={formatINR(deductionsPaisa)} muted={deductionsPaisa === 0} />
-        <Row label="Taxable income" value={formatINR(result.taxablePaisa)} />
+        <Row label="Gross slab income" value={formatINR(grossSlabPaisa)} />
+        {regime === 'OLD' && (
+          <>
+            <Row
+              label="HRA exemption (sec 10(13A))"
+              value={hraExemptionPaisa > 0 ? `− ${formatINR(hraExemptionPaisa)}` : '₹0'}
+              muted={hraExemptionPaisa === 0}
+              valueClassName={hraExemptionPaisa > 0 ? 'text-emerald-700' : undefined}
+            />
+            {sec24bPaisa > 0 && (
+              <Row
+                label="Sec 24(b) home loan interest"
+                value={`− ${formatINR(sec24bPaisa)}`}
+                valueClassName="text-emerald-700"
+              />
+            )}
+            {sec80eeaPaisa > 0 && (
+              <Row
+                label="Sec 80EEA additional interest"
+                value={`− ${formatINR(sec80eeaPaisa)}`}
+                valueClassName="text-emerald-700"
+              />
+            )}
+          </>
+        )}
+
+        {/* Chapter VI-A — expandable to the per-section breakdown */}
+        {deductionBreakdown.length > 0 ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowDeductions((s) => !s)}
+              className="flex w-full items-baseline justify-between text-[var(--dxp-text-secondary)] hover:text-[var(--dxp-text)]"
+            >
+              <dt className="flex items-center gap-1">
+                {showDeductions ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                Chapter VI-A deductions
+              </dt>
+              <dd className="font-mono tabular-nums">
+                {deductionsPaisa > 0 ? `− ${formatINR(deductionsPaisa)}` : '₹0'}
+              </dd>
+            </button>
+            {showDeductions && (
+              <div className="ml-4 mt-1 space-y-0.5 border-l border-[var(--dxp-border-light)] pl-2">
+                {deductionBreakdown.map((b, i) => (
+                  <div
+                    key={i}
+                    className="flex items-baseline justify-between text-[10px] text-[var(--dxp-text-muted)]"
+                  >
+                    <span>{b.label}</span>
+                    <span className="font-mono tabular-nums">{formatINR(b.amountPaisa)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <Row
+            label="Chapter VI-A deductions"
+            value={deductionsPaisa > 0 ? `− ${formatINR(deductionsPaisa)}` : '₹0'}
+            muted={deductionsPaisa === 0}
+            valueClassName={deductionsPaisa > 0 ? 'text-emerald-700' : undefined}
+          />
+        )}
+
+        <Row label="Taxable income" value={formatINR(result.taxablePaisa)} bold />
+
+        {/* Per-band slab ladder */}
+        {(result.bands?.length ?? 0) > 0 && (
+          <div className="my-1 rounded border border-[var(--dxp-border-light)] p-2">
+            <div className="mb-1 flex items-baseline justify-between text-[9px] font-bold uppercase tracking-wider text-[var(--dxp-text-muted)]">
+              <span>Band</span>
+              <span className="flex gap-3">
+                <span>Rate</span>
+                <span>Tax</span>
+              </span>
+            </div>
+            {result.bands!.map((b, i) => (
+              <div
+                key={i}
+                className={`flex items-baseline justify-between text-[10px] ${
+                  b.taxPaisa > 0
+                    ? 'text-[var(--dxp-text-secondary)]'
+                    : 'text-[var(--dxp-text-muted)]'
+                }`}
+              >
+                <span className="font-mono">
+                  {formatBound(b.lowerPaisa)} – {formatBound(b.upperPaisa)}
+                </span>
+                <span className="flex gap-3 font-mono tabular-nums">
+                  <span>{b.ratePct}%</span>
+                  <span className="w-16 text-right">
+                    {b.taxPaisa > 0 ? formatINR(b.taxPaisa) : '—'}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <Row label="Slab tax" value={formatINR(result.taxBeforeRebatePaisa)} />
         {result.rebatePaisa > 0 && (
           <Row
@@ -316,12 +422,7 @@ function RegimeColumn({
             valueClassName="text-emerald-700"
           />
         )}
-        <Row
-          label="Tax after rebate"
-          value={formatINR(result.taxAfterRebatePaisa)}
-        />
-        {/* Surcharge rows — only shown when income > ₹50L (i.e.
-            surcharge is non-zero). Keeps the typical user's UI clean. */}
+        <Row label="Tax after rebate" value={formatINR(result.taxAfterRebatePaisa)} />
         {(result.surchargePaisa ?? 0) > 0 && (
           <>
             <Row
@@ -342,12 +443,28 @@ function RegimeColumn({
           value={`+ ${formatINR(result.cessPaisa)}`}
           muted={result.cessPaisa === 0}
         />
+
+        {/* Capital-gains tax add-on — flat rate, same in both regimes */}
+        {cgTotalPaisa > 0 && (
+          <div className="my-1 rounded border border-[var(--dxp-border-light)] bg-[var(--dxp-surface-subtle,transparent)] p-2">
+            <div className="flex items-baseline justify-between">
+              <dt className="font-semibold text-[var(--dxp-text-secondary)]">Capital gains tax</dt>
+              <dd className="font-mono font-bold tabular-nums text-[var(--dxp-text)]">
+                + {formatINR(cgTotalPaisa)}
+              </dd>
+            </div>
+            <p className="mt-0.5 text-[10px] text-[var(--dxp-text-muted)]">
+              Separate flat rates per asset (LTCG / STCG) — same in both regimes.{' '}
+              {formatINR(cgTaxPaisa)} tax + {formatINR(cgCessPaisa)} cess.{' '}
+              <a href="/tax/ltcg-stcg" className="underline">
+                Source: /tax/ltcg-stcg
+              </a>
+            </p>
+          </div>
+        )}
+
         <div className="my-1 border-t border-[var(--dxp-border)]" />
-        <Row
-          label="Total tax owed"
-          value={formatINR(result.totalTaxPaisa)}
-          bold
-        />
+        <Row label="Total tax owed" value={formatINR(result.totalTaxPaisa)} bold />
       </dl>
     </div>
   );
@@ -367,9 +484,17 @@ function Row({
   valueClassName?: string;
 }) {
   return (
-    <div className={`flex items-baseline justify-between ${muted ? 'text-[var(--dxp-text-muted)]' : 'text-[var(--dxp-text-secondary)]'}`}>
+    <div
+      className={`flex items-baseline justify-between ${
+        muted ? 'text-[var(--dxp-text-muted)]' : 'text-[var(--dxp-text-secondary)]'
+      }`}
+    >
       <dt>{label}</dt>
-      <dd className={`font-mono tabular-nums ${bold ? 'font-bold text-[var(--dxp-text)]' : ''} ${valueClassName ?? ''}`}>
+      <dd
+        className={`font-mono tabular-nums ${bold ? 'font-bold text-[var(--dxp-text)]' : ''} ${
+          valueClassName ?? ''
+        }`}
+      >
         {value}
       </dd>
     </div>

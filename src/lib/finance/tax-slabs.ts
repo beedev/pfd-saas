@@ -87,6 +87,18 @@ export interface TaxComputeResult {
   totalTaxPaisa: number;
   /** Effective tax rate as % of gross — useful for headline display. */
   effectiveRatePct: number;
+  /** Per-band slab breakdown (for the "show the math" UI). */
+  bands: SlabBand[];
+}
+
+/** One row of the slab-tax breakdown — the tax contributed by the portion
+ *  of taxable income that falls inside [lowerPaisa, upperPaisa). */
+export interface SlabBand {
+  lowerPaisa: number;
+  upperPaisa: number | null;
+  ratePct: number;
+  /** Tax from this band given the taxable income (0 if income < lower). */
+  taxPaisa: number;
 }
 
 /**
@@ -114,6 +126,23 @@ export function computeSlabTax(taxablePaisa: number, slabs: TaxSlabRow[]): numbe
   }
 
   return Math.round(tax);
+}
+
+/** Per-band breakdown of slab tax — every band is returned (even ones with
+ *  ₹0 contribution) so the UI can render the full ladder like a tax notice. */
+export function computeSlabBands(taxablePaisa: number, slabs: TaxSlabRow[]): SlabBand[] {
+  const sorted = [...slabs].sort((a, b) => a.slabOrder - b.slabOrder);
+  return sorted.map((slab) => {
+    const lower = slab.lowerPaisa;
+    const cap = slab.upperPaisa ?? Infinity;
+    const portion = Math.max(0, Math.min(Math.max(taxablePaisa, 0), cap) - lower);
+    return {
+      lowerPaisa: lower,
+      upperPaisa: slab.upperPaisa ?? null,
+      ratePct: slab.ratePct,
+      taxPaisa: Math.round((portion * slab.ratePct) / 100),
+    };
+  });
 }
 
 export function computeTax(input: TaxComputeInput): TaxComputeResult {
@@ -185,6 +214,7 @@ export function computeTax(input: TaxComputeInput): TaxComputeResult {
     cessPaisa,
     totalTaxPaisa,
     effectiveRatePct,
+    bands: computeSlabBands(taxablePaisa, slabs),
   };
 }
 
