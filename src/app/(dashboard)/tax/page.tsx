@@ -285,7 +285,7 @@ export default function TaxDashboardPage() {
 
           {/* Quarterly advance-tax planner */}
           <div ref={advanceTaxRef}>
-            <AdvanceTaxCard fy={fy} />
+            <AdvanceTaxCard fy={fy} onPaymentChange={() => setRefreshTick((t) => t + 1)} />
           </div>
 
           {/* C — Quick Actions row (replaces 5-tile sub-nav grid) */}
