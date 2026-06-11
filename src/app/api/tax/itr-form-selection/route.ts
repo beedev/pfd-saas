@@ -20,6 +20,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, itrFormSelection, type ItrWizardAnswers } from '@/db';
 import { auth } from '@/auth';
 import { selectItrForm } from '@/lib/finance/itr-selector';
+import { getTaxRules } from '@/lib/finance/tax-rules';
 
 function findPgError(err: unknown): { code?: string; detail?: string } {
   let cur: unknown = err;
@@ -82,6 +83,12 @@ export async function POST(request: NextRequest) {
       hasForeignIncome,
       hasOtherSources,
       totalIncomePaisa,
+      hasStcg,
+      ltcg112aPaisa,
+      hasOtherCapitalGains,
+      isDirector,
+      hasUnlistedShares,
+      hasCarryForwardLosses,
     } = body ?? {};
 
     if (!fy || typeof fy !== 'string' || !/^\d{4}-\d{2}$/.test(fy)) {
@@ -97,9 +104,21 @@ export async function POST(request: NextRequest) {
       hasForeignIncome: !!hasForeignIncome,
       hasOtherSources: !!hasOtherSources,
       totalIncomePaisa: Math.max(0, Number(totalIncomePaisa) || 0),
+      // Finer CG + disqualifier fields (optional; present from the updated wizard).
+      hasStcg: !!hasStcg,
+      ltcg112aPaisa: Math.max(0, Number(ltcg112aPaisa) || 0),
+      hasOtherCapitalGains: !!hasOtherCapitalGains,
+      isDirector: !!isDirector,
+      hasUnlistedShares: !!hasUnlistedShares,
+      hasCarryForwardLosses: !!hasCarryForwardLosses,
     };
 
-    const { form, reasoning } = selectItrForm(answers);
+    // Sahaj/Sugam thresholds (₹1.25L 112A, ₹50L cap) from the configurable
+    // tax_rules so the selector tracks budget changes.
+    const rules = await getTaxRules(fy);
+    const { form, reasoning } = selectItrForm(answers, {
+      ltcg112aExemptionPaisa: rules.capitalGains.sec112aExemptionPostPaisa,
+    });
 
     const userId = session.user.id;
 

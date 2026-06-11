@@ -27,6 +27,9 @@ interface Detected {
   numHouseProperties: number;
   hasCapitalGains: boolean;
   capitalGainsPaisa: number;
+  hasStcg?: boolean;
+  ltcg112aPaisa?: number;
+  hasOtherCapitalGains?: boolean;
   hasBusinessIncome: boolean;
   businessPaisa: number;
   hasPresumptive: boolean;
@@ -34,6 +37,9 @@ interface Detected {
   hasOtherSources: boolean;
   otherPaisa: number;
   totalIncomePaisa: number;
+  isDirector?: boolean;
+  hasUnlistedShares?: boolean;
+  hasCarryForwardLosses?: boolean;
 }
 
 interface Selection {
@@ -59,11 +65,16 @@ export default function ItrWizardPage() {
   // Editable wizard answers — initialised from detected.
   const [hasSalary, setHasSalary] = useState(false);
   const [numHouseProperties, setNumHouseProperties] = useState(0);
-  const [hasCapitalGains, setHasCapitalGains] = useState(false);
+  const [hasStcg, setHasStcg] = useState(false);
+  const [ltcg112aRupees, setLtcg112aRupees] = useState('');
+  const [hasOtherCapitalGains, setHasOtherCapitalGains] = useState(false);
   const [hasBusinessIncome, setHasBusinessIncome] = useState(false);
   const [hasPresumptive, setHasPresumptive] = useState(false);
   const [hasForeignIncome, setHasForeignIncome] = useState(false);
   const [hasOtherSources, setHasOtherSources] = useState(false);
+  const [isDirector, setIsDirector] = useState(false);
+  const [hasUnlistedShares, setHasUnlistedShares] = useState(false);
+  const [hasCarryForwardLosses, setHasCarryForwardLosses] = useState(false);
   const [totalIncomeRupees, setTotalIncomeRupees] = useState('');
 
   const [result, setResult] = useState<{ form: string; reasoning: string } | null>(null);
@@ -85,11 +96,16 @@ export default function ItrWizardPage() {
       setExisting(s.selection ?? null);
       setHasSalary(det.hasSalary);
       setNumHouseProperties(det.numHouseProperties);
-      setHasCapitalGains(det.hasCapitalGains);
+      setHasStcg(det.hasStcg ?? false);
+      setLtcg112aRupees(String(Math.round((det.ltcg112aPaisa ?? 0) / 100)));
+      setHasOtherCapitalGains(det.hasOtherCapitalGains ?? false);
       setHasBusinessIncome(det.hasBusinessIncome);
       setHasPresumptive(det.hasPresumptive);
       setHasForeignIncome(det.hasForeignIncome);
       setHasOtherSources(det.hasOtherSources);
+      setIsDirector(det.isDirector ?? false);
+      setHasUnlistedShares(det.hasUnlistedShares ?? false);
+      setHasCarryForwardLosses(det.hasCarryForwardLosses ?? false);
       setTotalIncomeRupees(String(Math.round(det.totalIncomePaisa / 100)));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to detect');
@@ -105,15 +121,24 @@ export default function ItrWizardPage() {
   const compute = async () => {
     setIsComputing(true);
     try {
+      const ltcg112aPaisa = Math.round(Number(ltcg112aRupees) * 100) || 0;
       const body = {
         fy,
         hasSalary,
         numHouseProperties,
-        hasCapitalGains,
+        // Blanket flag kept true if ANY capital gain is present (back-compat);
+        // the selector prefers the finer fields below.
+        hasCapitalGains: hasStcg || ltcg112aPaisa > 0 || hasOtherCapitalGains,
+        hasStcg,
+        ltcg112aPaisa,
+        hasOtherCapitalGains,
         hasBusinessIncome,
         hasPresumptive,
         hasForeignIncome,
         hasOtherSources,
+        isDirector,
+        hasUnlistedShares,
+        hasCarryForwardLosses,
         totalIncomePaisa: Math.round(Number(totalIncomeRupees) * 100) || 0,
       };
       // Posting persists immediately AND returns the recommendation —
@@ -221,14 +246,34 @@ export default function ItrWizardPage() {
                 </div>
               </div>
               <YesNoRow
-                question="Capital gains realised this year?"
-                detail={
-                  detected.hasCapitalGains
-                    ? `Detected ₹${(detected.capitalGainsPaisa / 100).toLocaleString('en-IN')} in /tax/ltcg-stcg`
-                    : 'No capital gains logged'
-                }
-                value={hasCapitalGains}
-                onChange={setHasCapitalGains}
+                question="Short-term capital gains (any)?"
+                detail="Any STCG disqualifies ITR-1/4 (Sahaj/Sugam) → ITR-2/3"
+                value={hasStcg}
+                onChange={setHasStcg}
+              />
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold text-[var(--dxp-text)]">
+                    Equity LTCG under sec 112A (₹)
+                  </p>
+                  <p className="text-xs text-[var(--dxp-text-muted)]">
+                    ≤ ₹1.25L is allowed in ITR-1/4; above it forces ITR-2/3. Detected ₹
+                    {((detected.ltcg112aPaisa ?? 0) / 100).toLocaleString('en-IN')}
+                  </p>
+                </div>
+                <div className="w-40">
+                  <Input
+                    type="number"
+                    value={ltcg112aRupees}
+                    onChange={(e) => setLtcg112aRupees(e.target.value)}
+                  />
+                </div>
+              </div>
+              <YesNoRow
+                question="Other capital gains (property, debt, unlisted — non-112A)?"
+                detail="Any non-112A capital gain disqualifies ITR-1/4"
+                value={hasOtherCapitalGains}
+                onChange={setHasOtherCapitalGains}
               />
               <YesNoRow
                 question="Business or professional income? (GST consulting, freelance)"
@@ -251,6 +296,24 @@ export default function ItrWizardPage() {
                 detail="Not auto-detected — tick if you have any foreign source income"
                 value={hasForeignIncome}
                 onChange={setHasForeignIncome}
+              />
+              <YesNoRow
+                question="Director in a company?"
+                detail="Disqualifies ITR-1/4 (Sahaj/Sugam)"
+                value={isDirector}
+                onChange={setIsDirector}
+              />
+              <YesNoRow
+                question="Held unlisted equity shares during the year?"
+                detail="Disqualifies ITR-1/4 (Sahaj/Sugam)"
+                value={hasUnlistedShares}
+                onChange={setHasUnlistedShares}
+              />
+              <YesNoRow
+                question="Brought-forward / carry-forward losses?"
+                detail="Disqualifies ITR-1/4 (Sahaj/Sugam)"
+                value={hasCarryForwardLosses}
+                onChange={setHasCarryForwardLosses}
               />
               <YesNoRow
                 question="Income from other sources (interest, dividends)?"

@@ -88,7 +88,7 @@ const POST_REFORM_CUTOFF = '2024-07-23';
 
 const CESS_PCT = 4;
 
-function isEquityBucket(t: CgAssetType): boolean {
+export function isEquityBucket(t: CgAssetType): boolean {
   return t === 'STOCKS' || t === 'EQUITY_MF';
 }
 

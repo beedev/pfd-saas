@@ -2924,12 +2924,28 @@ export type ItrForm = 'ITR-1' | 'ITR-2' | 'ITR-3' | 'ITR-4';
 export interface ItrWizardAnswers {
   hasSalary: boolean;
   numHouseProperties: number;
+  /** Legacy blanket flag (kept for old rows). Newer rows set the finer
+   *  capital-gains fields below; the selector prefers those when present. */
   hasCapitalGains: boolean;
   hasBusinessIncome: boolean;
   hasPresumptive: boolean;
   hasForeignIncome: boolean;
   hasOtherSources: boolean;
   totalIncomePaisa: number;
+  // ── Finer capital-gains + disqualifier fields (AY 2026-27 ITR rules) ──
+  // jsonb column, so these are additive/optional — old rows omit them.
+  /** Any short-term capital gain (sec 111A or other) — disqualifies ITR-1/4. */
+  hasStcg?: boolean;
+  /** Equity LTCG under sec 112A, in paisa. ≤ ₹1.25L is ALLOWED in ITR-1/4. */
+  ltcg112aPaisa?: number;
+  /** LTCG other than 112A (property, debt, unlisted, sec-112) — disqualifies ITR-1/4. */
+  hasOtherCapitalGains?: boolean;
+  /** Director in a company — disqualifies ITR-1/4. */
+  isDirector?: boolean;
+  /** Held unlisted equity shares in the year — disqualifies ITR-1/4. */
+  hasUnlistedShares?: boolean;
+  /** Brought-forward / carry-forward losses — disqualifies ITR-1/4. */
+  hasCarryForwardLosses?: boolean;
 }
 
 export const itrFormSelection = pgTable('itr_form_selection', {
