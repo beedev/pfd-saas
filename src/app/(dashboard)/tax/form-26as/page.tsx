@@ -30,7 +30,6 @@ import {
   CardHeader,
   CardContent,
   Badge,
-  Select,
   Input,
 } from '@dxp/ui';
 import { ScreenReportButton } from '@/components/reports/screen-report-button';
@@ -53,7 +52,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 // ─── shapes ────────────────────────────────────────────────────────────
 
@@ -130,24 +129,6 @@ const formatINR = (paisa: number) =>
     maximumFractionDigits: 0,
   }).format(paisa / 100);
 
-function generateFyOptions(): string[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: string[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push(`${s}-${e}`);
-  }
-  return out;
-}
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
 function statusMeta(s: TanStatus): {
   label: string;
   icon: React.ReactNode;
@@ -196,7 +177,7 @@ function statusMeta(s: TanStatus): {
 // ─── page ──────────────────────────────────────────────────────────────
 
 export default function Form26asPage() {
-  const [fy, setFy] = useState<string>(previousFy());
+  const { fy } = useFinancialYear();
   const [data, setData] = useState<ReconResp | null>(null);
   const [uploads, setUploads] = useState<UploadRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -321,8 +302,6 @@ export default function Form26asPage() {
     }
   };
 
-  const fyOptions = generateFyOptions().map((y) => ({ value: y, label: `FY ${y}` }));
-
   // Empty-state — no books rows AND no 26AS uploads.
   const isFullyEmpty =
     !isLoading &&
@@ -342,9 +321,6 @@ export default function Form26asPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-40">
-            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
-          </div>
           <ScreenReportButton reportId="form26as-recon" fy={fy} />
         </div>
       </div>

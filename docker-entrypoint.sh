@@ -92,6 +92,29 @@ if [ ! -f "$SECRETS/auth_secret" ]; then
 fi
 export AUTH_SECRET=$(cat "$SECRETS/auth_secret")
 
+# ─── Generate CRON_SECRET on first run ───────────────────────────────
+# The in-container scheduler (below) authenticates to /api/cron/tick with
+# this bearer secret; the Next.js process validates against the same value.
+# Persisted so restarts keep a stable secret.
+if [ ! -f "$SECRETS/cron_secret" ]; then
+  openssl rand -base64 32 | tr -d /=+ | cut -c1-40 > "$SECRETS/cron_secret"
+  chmod 600 "$SECRETS/cron_secret"
+  chown postgres:postgres "$SECRETS/cron_secret"
+fi
+export CRON_SECRET=$(cat "$SECRETS/cron_secret")
+
+# ─── Telegram bot token (optional, persisted in the volume) ───────────
+# If a -e TELEGRAM_BOT_TOKEN was passed, persist it so future redeploys
+# don't need it again. Otherwise load a previously-persisted token. When
+# neither exists, Telegram sends are simply skipped (no error).
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  printf '%s' "$TELEGRAM_BOT_TOKEN" > "$SECRETS/telegram_bot_token"
+  chmod 600 "$SECRETS/telegram_bot_token"
+  chown postgres:postgres "$SECRETS/telegram_bot_token"
+elif [ -f "$SECRETS/telegram_bot_token" ]; then
+  export TELEGRAM_BOT_TOKEN=$(cat "$SECRETS/telegram_bot_token")
+fi
+
 # ─── Start postgres in background ────────────────────────────────────
 # `-l /dev/stdout` fails on Alpine because postgres can't open /dev/stdout
 # with the permissions it wants. Use a regular log file under /data
@@ -231,6 +254,34 @@ export AUTH_URL=${AUTH_URL:-http://localhost:3000}
 #   - src/app/api/auth/switch-account/route.ts (404s when disabled)
 #   - src/app/(dashboard)/layout.tsx (bridges to Sidebar prop)
 export DEMO_PERSONAL_SWITCH=${DEMO_PERSONAL_SWITCH:-true}
+
+# ─── In-container scheduler (replaces V1's LaunchAgents/cron) ─────────
+# A backgrounded ticker waits for the app to come up, then POSTs
+# /api/cron/tick every CRON_INTERVAL_SECONDS (default 60). cron/tick runs
+# any scheduled_jobs whose next_run_at <= NOW (daily_digest / alerts_check
+# / sip_auto_execute) and advances them — so a 1-minute tick drives jobs of
+# any cadence with no external scheduler. Set DISABLE_CRON=true to opt out
+# (e.g. when an external scheduler hits /api/cron/tick instead).
+if [ "${DISABLE_CRON:-false}" != "true" ]; then
+  CRON_INTERVAL_SECONDS=${CRON_INTERVAL_SECONDS:-60}
+  echo "[entrypoint] In-container scheduler ON (every ${CRON_INTERVAL_SECONDS}s)"
+  (
+    # Wait for the server to accept requests before the first tick.
+    until wget --quiet --tries=1 --spider http://127.0.0.1:3000/api/health 2>/dev/null; do
+      sleep 2
+    done
+    echo "[scheduler] app is up — ticking /api/cron/tick every ${CRON_INTERVAL_SECONDS}s"
+    while true; do
+      wget --quiet --tries=1 --timeout=120 -O /dev/null \
+        --header="Authorization: Bearer ${CRON_SECRET}" \
+        --post-data='' \
+        http://127.0.0.1:3000/api/cron/tick 2>/dev/null || true
+      sleep "${CRON_INTERVAL_SECONDS}"
+    done
+  ) &
+else
+  echo "[entrypoint] In-container scheduler OFF (DISABLE_CRON=true) — drive /api/cron/tick externally"
+fi
 
 # ─── Start Next.js in foreground ─────────────────────────────────────
 echo "[entrypoint] Starting Next.js on http://0.0.0.0:3000..."

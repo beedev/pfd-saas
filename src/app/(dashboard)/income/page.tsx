@@ -23,23 +23,9 @@ import {
   PiggyBank,
   TrendingUp,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, StatsDisplay, Badge, Select } from '@dxp/ui';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { Card, CardContent, CardHeader, StatsDisplay, Badge } from '@dxp/ui';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 import { ScreenReportButton } from '@/components/reports/screen-report-button';
-
-/** ±2 years around current FY — same window as the /tax page so the
- *  two pages stay navigable in lockstep. */
-function generateFyOptions(): Array<{ value: string; label: string }> {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: Array<{ value: string; label: string }> = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push({ value: `${s}-${e}`, label: `FY ${s}-${e}` });
-  }
-  return out;
-}
 
 interface IncomeSummary {
   currentFy: string;
@@ -81,11 +67,9 @@ function formatINRNullable(paisa: number | null): string {
 export default function IncomePage() {
   const [data, setData] = useState<IncomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // FY state lives on the page so the selector is local — no URL sync
-  // since the page is a roll-up not a deep-link target. The selector
-  // defaults to the server's current FY on first load, then the user
-  // drives it from there.
-  const [fy, setFy] = useState<string>(getCurrentFinancialYear());
+  // FY now comes from the global financial-year context so the top-bar
+  // selector drives this page in lockstep with every other dashboard page.
+  const { fy } = useFinancialYear();
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -107,8 +91,6 @@ export default function IncomePage() {
     load();
   }, [load]);
 
-  const fyOptions = generateFyOptions();
-
   if (error) {
     return <p className="text-sm text-red-600">{error}</p>;
   }
@@ -129,11 +111,6 @@ export default function IncomePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-40">
-            {/* FY selector — mirrors the /tax page pattern so users can
-                walk historical FYs without two different mental models. */}
-            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
-          </div>
           {/* Sprint 6.2g — income summary report (PDF/Excel/CSV) for
               the selected FY. */}
           <ScreenReportButton reportId="income-summary" fy={fy} />

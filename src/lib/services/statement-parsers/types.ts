@@ -10,7 +10,14 @@
  * + a writer in the commit route.
  */
 
-export type DocType = 'lic' | 'chit' | 'mf-sip' | 'epf-passbook' | 'nps-sot' | 'unknown';
+export type DocType =
+  | 'lic'
+  | 'chit'
+  | 'mf-sip'
+  | 'epf-passbook'
+  | 'nps-sot'
+  | 'cg-statement'
+  | 'unknown';
 
 /* ─── LIC ────────────────────────────────────────────────────────────── */
 
@@ -171,6 +178,39 @@ export interface NpsSotParsed {
   warnings: string[];
 }
 
+/* ─── Capital-gains contract notes / P&L statements ──────────────────── */
+//
+// Broker realised-P&L / capital-gains statements (Zerodha Tradewise,
+// Groww, CAMS/KFintech CG statements). Each emits rows shaped to feed the
+// aggregate-LTCG engine (see lib/finance/capital-gains-tax). The concrete
+// per-broker text parser is added when a sample statement is available
+// (same pattern as the mf-sip CAS parser) — the framework + type live here
+// so onboarding one is a single file + a DETECTORS/PARSERS entry.
+
+export type CgBroker = 'ZERODHA' | 'GROWW' | 'CAMS' | 'KFINTECH' | 'UNKNOWN';
+
+export interface CgStatementRow {
+  /** Maps to capital_gains.asset_type (EQUITY_MF / EQUITY / DEBT_MF / ...). */
+  assetType: string;
+  /** 'LTCG' | 'STCG' — by the holding period on the contract note. */
+  holdingPeriod: 'LTCG' | 'STCG';
+  /** ISO sale date — drives the pre/post-23-Jul-2024 rate split. */
+  saleDate: string | null;
+  /** NET realised gain in paisa (may be negative). */
+  capitalGainPaisa: number;
+  scrip: string | null;
+}
+
+export interface CgStatementParsed {
+  type: 'cg-statement';
+  broker: CgBroker;
+  fy: string | null;
+  rows: CgStatementRow[];
+  totalLtcgPaisa: number;
+  totalStcgPaisa: number;
+  warnings: string[];
+}
+
 /* ─── Unknown ─────────────────────────────────────────────────────────── */
 
 export interface UnknownParsed {
@@ -184,4 +224,5 @@ export type ParsedStatement =
   | MfSipParsed
   | EpfPassbookParsed
   | NpsSotParsed
+  | CgStatementParsed
   | UnknownParsed;

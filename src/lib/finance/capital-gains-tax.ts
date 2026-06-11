@@ -39,6 +39,8 @@
  *    (carry-forward modelled in ITR itself).
  */
 
+import type { CapitalGainsRules } from '@/db';
+
 export type CgAssetType =
   | 'STOCKS'
   | 'EQUITY_MF'
@@ -86,14 +88,14 @@ const POST_REFORM_CUTOFF = '2024-07-23';
 
 const CESS_PCT = 4;
 
-function isEquityBucket(t: CgAssetType): boolean {
+export function isEquityBucket(t: CgAssetType): boolean {
   return t === 'STOCKS' || t === 'EQUITY_MF';
 }
 
-function isPostReform(saleDate: string | undefined): boolean {
+function isPostReform(saleDate: string | undefined, cutoff: string = POST_REFORM_CUTOFF): boolean {
   // Missing date → assume current regime (post-reform).
   if (!saleDate) return true;
-  return saleDate >= POST_REFORM_CUTOFF;
+  return saleDate >= cutoff;
 }
 
 export interface CapitalGainsTaxInput {
@@ -176,6 +178,180 @@ export function computeCapitalGainsTax(
       ltcgOtherGainsPaisa: ltcgOtherPre + ltcgOtherPost,
     },
     cessPaisa: cess,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Aggregate (per-FY) capital-gains tax — the CORRECT model.
+//
+// Equity LTCG (sec 112A) and equity STCG (sec 111A) are taxed on the
+// NET of all gains AND losses for the FY, with the ₹1L/₹1.25L sec-112A
+// annual exemption applied ONCE per period — NOT per row. The per-row
+// `tax_amount` stored at insert is a DISPLAY estimate only; this is the
+// authoritative figure used by the regime comparison.
+//
+// We split equity buckets by the pre/post-23-Jul-2024 reform cutoff
+// (different rate AND different exemption ceiling per period) and net
+// within each period.
+//
+// Non-equity (sec 112) LTCG + STCG are KEPT per-row: each carries its
+// own indexed/slab tax with no aggregate annual exemption, so summing
+// their stored `tax_amount` is correct.
+// ────────────────────────────────────────────────────────────────────
+
+/** Minimal row shape from the capital_gains table needed for aggregation. */
+export interface AggregateCgRow {
+  assetType: CgAssetType;
+  holdingPeriod: CgGainType;
+  saleDate?: string | null;
+  /** NET gain in paisa — can be negative (a loss). */
+  capitalGain: number;
+  /** Per-row stored tax (paisa) — used only for the non-equity bucket. */
+  taxAmount: number;
+}
+
+export interface CgBreakdownLine {
+  label: string;
+  gainPaisa: number;
+  exemptionPaisa: number;
+  taxPaisa: number;
+}
+
+export interface AggregateCapitalGainsTax {
+  totalTaxPaisa: number;
+  /** Equity LTCG portion only (for callers that want the headline figure). */
+  ltcgEquityTaxPaisa: number;
+  breakdown: CgBreakdownLine[];
+}
+
+/** Equity LTCG rate by period: 10% pre-reform, 12.5% post. */
+const LTCG_EQUITY_RATE_PRE = 0.10;
+const LTCG_EQUITY_RATE_POST = 0.125;
+/** Equity STCG (sec 111A) rate by period: 15% pre-reform, 20% post. */
+const STCG_EQUITY_RATE_PRE = 0.15;
+const STCG_EQUITY_RATE_POST = 0.20;
+
+/**
+ * Compute aggregate capital-gains tax for a financial year.
+ *
+ * @param rows     capital_gains rows for the FY (paisa, gains may be negative)
+ * @param fy       financial year (carried for audit; rate selection is by
+ *                 SALE DATE, not FY, per the Finance Act 2024 transition)
+ * @param cgRules  optional FY-configurable rates/exemptions/cutoff. When
+ *                 provided, overrides the module constants — rates in the
+ *                 rules object are PERCENTAGES (e.g. 12.5), so divided by 100.
+ *                 Defaults to the historical hardcoded constants.
+ */
+export function computeAggregateCapitalGainsTax(
+  rows: AggregateCgRow[],
+  fy: string,
+  cgRules?: CapitalGainsRules,
+): AggregateCapitalGainsTax {
+  void fy; // rate selection is sale-date driven; fy retained for audit
+
+  // Resolve rates/exemptions/cutoff from the injected rules (percentages →
+  // fractions) or fall back to the module constants. Pure refactor — the
+  // seeded values equal the constants, so results stay byte-identical.
+  const ltcgEquityRatePre = cgRules ? cgRules.ltcgEquityRatePrePct / 100 : LTCG_EQUITY_RATE_PRE;
+  const ltcgEquityRatePost = cgRules ? cgRules.ltcgEquityRatePostPct / 100 : LTCG_EQUITY_RATE_POST;
+  const stcgEquityRatePre = cgRules ? cgRules.stcgEquityRatePrePct / 100 : STCG_EQUITY_RATE_PRE;
+  const stcgEquityRatePost = cgRules ? cgRules.stcgEquityRatePostPct / 100 : STCG_EQUITY_RATE_POST;
+  const sec112aExemptionPre = cgRules ? cgRules.sec112aExemptionPrePaisa : SEC_112A_EXEMPTION_PRE_PAISA;
+  const sec112aExemptionPost = cgRules ? cgRules.sec112aExemptionPostPaisa : SEC_112A_EXEMPTION_POST_PAISA;
+  const reformCutoff = cgRules ? cgRules.reformCutoff : POST_REFORM_CUTOFF;
+
+  // Net per (equity-class × gain-type × period) bucket.
+  let ltcgEquityNetPre = 0;
+  let ltcgEquityNetPost = 0;
+  let stcgEquityNetPre = 0;
+  let stcgEquityNetPost = 0;
+  let nonEquityPerRowTax = 0;
+
+  for (const r of rows) {
+    const equity = isEquityBucket(r.assetType);
+    const saleDate = r.saleDate ?? undefined;
+    const post = isPostReform(saleDate, reformCutoff);
+    if (equity) {
+      if (r.holdingPeriod === 'LTCG') {
+        if (post) ltcgEquityNetPost += r.capitalGain;
+        else ltcgEquityNetPre += r.capitalGain;
+      } else {
+        if (post) stcgEquityNetPost += r.capitalGain;
+        else stcgEquityNetPre += r.capitalGain;
+      }
+    } else {
+      // Non-equity (sec 112) LTCG/STCG — keep the per-row stored tax.
+      // Long-term loss set-off WITHIN the non-equity bucket is out of
+      // scope (per-row tax never goes negative); noted limitation.
+      nonEquityPerRowTax += r.taxAmount;
+    }
+  }
+
+  const breakdown: CgBreakdownLine[] = [];
+
+  // ── Equity LTCG (sec 112A): net per period, ONE exemption per period,
+  // tax positive excess. Negative net → 0 (carry-forward not modelled). ──
+  const ltcgEquityTaxablePre = Math.max(0, ltcgEquityNetPre - sec112aExemptionPre);
+  const ltcgEquityTaxPre = Math.round(ltcgEquityTaxablePre * ltcgEquityRatePre);
+  const ltcgEquityTaxablePost = Math.max(0, ltcgEquityNetPost - sec112aExemptionPost);
+  const ltcgEquityTaxPost = Math.round(ltcgEquityTaxablePost * ltcgEquityRatePost);
+  const ltcgEquityTax = ltcgEquityTaxPre + ltcgEquityTaxPost;
+
+  if (ltcgEquityNetPre !== 0 || ltcgEquityTaxPre > 0) {
+    breakdown.push({
+      label: 'Equity LTCG (sec 112A, pre-23-Jul-2024 @ 10%)',
+      gainPaisa: ltcgEquityNetPre,
+      exemptionPaisa: ltcgEquityNetPre > 0 ? Math.min(ltcgEquityNetPre, sec112aExemptionPre) : 0,
+      taxPaisa: ltcgEquityTaxPre,
+    });
+  }
+  if (ltcgEquityNetPost !== 0 || ltcgEquityTaxPost > 0) {
+    breakdown.push({
+      label: 'Equity LTCG (sec 112A, post-23-Jul-2024 @ 12.5%)',
+      gainPaisa: ltcgEquityNetPost,
+      exemptionPaisa: ltcgEquityNetPost > 0 ? Math.min(ltcgEquityNetPost, sec112aExemptionPost) : 0,
+      taxPaisa: ltcgEquityTaxPost,
+    });
+  }
+
+  // ── Equity STCG (sec 111A): net per period, no exemption. ──
+  const stcgEquityTaxPre = Math.round(Math.max(0, stcgEquityNetPre) * stcgEquityRatePre);
+  const stcgEquityTaxPost = Math.round(Math.max(0, stcgEquityNetPost) * stcgEquityRatePost);
+  const stcgEquityTax = stcgEquityTaxPre + stcgEquityTaxPost;
+
+  if (stcgEquityNetPre !== 0 || stcgEquityTaxPre > 0) {
+    breakdown.push({
+      label: 'Equity STCG (sec 111A, pre-23-Jul-2024 @ 15%)',
+      gainPaisa: stcgEquityNetPre,
+      exemptionPaisa: 0,
+      taxPaisa: stcgEquityTaxPre,
+    });
+  }
+  if (stcgEquityNetPost !== 0 || stcgEquityTaxPost > 0) {
+    breakdown.push({
+      label: 'Equity STCG (sec 111A, post-23-Jul-2024 @ 20%)',
+      gainPaisa: stcgEquityNetPost,
+      exemptionPaisa: 0,
+      taxPaisa: stcgEquityTaxPost,
+    });
+  }
+
+  // ── Non-equity (sec 112) — sum of stored per-row tax. ──
+  if (nonEquityPerRowTax > 0) {
+    breakdown.push({
+      label: 'Non-equity (sec 112) — per-row indexed/slab tax',
+      gainPaisa: 0, // mixed per-row; gain not aggregated here
+      exemptionPaisa: 0,
+      taxPaisa: nonEquityPerRowTax,
+    });
+  }
+
+  const totalTaxPaisa = ltcgEquityTax + stcgEquityTax + nonEquityPerRowTax;
+
+  return {
+    totalTaxPaisa,
+    ltcgEquityTaxPaisa: ltcgEquityTax,
+    breakdown,
   };
 }
 

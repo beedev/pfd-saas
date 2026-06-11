@@ -61,8 +61,17 @@ export interface Section24bInput {
 
 /**
  * Returns the deductible interest amount in paisa. Always ≥ 0.
+ *
+ * @param selfOccupiedCapPaisa  FY-configurable ₹2L self-occupied post-1999
+ *                              cap. Defaults to the module constant.
+ * @param pre1999CapPaisa       FY-configurable ₹30k self-occupied pre-1999
+ *                              cap. Defaults to the module constant.
  */
-export function computeSection24bDeduction(input: Section24bInput): number {
+export function computeSection24bDeduction(
+  input: Section24bInput,
+  selfOccupiedCapPaisa: number = SELF_OCCUPIED_POST_1999_CAP_PAISA,
+  pre1999CapPaisa: number = SELF_OCCUPIED_PRE_1999_CAP_PAISA,
+): number {
   const { homeLoanInterestPaidPaisa, isSelfOccupied, loanDisbursedAfter1Apr1999 } = input;
 
   if (homeLoanInterestPaidPaisa <= 0) return 0;
@@ -74,8 +83,8 @@ export function computeSection24bDeduction(input: Section24bInput): number {
   }
 
   const cap = loanDisbursedAfter1Apr1999
-    ? SELF_OCCUPIED_POST_1999_CAP_PAISA
-    : SELF_OCCUPIED_PRE_1999_CAP_PAISA;
+    ? selfOccupiedCapPaisa
+    : pre1999CapPaisa;
 
   return Math.min(homeLoanInterestPaidPaisa, cap);
 }

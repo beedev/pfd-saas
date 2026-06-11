@@ -29,15 +29,29 @@ import {
 } from '@/db';
 import { aggregateLoanTaxDeductions } from './loan-tax';
 import { financialYearBoundsIso } from './tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from './form16-tax-source';
+import { deriveDeductions } from './deduction-engine';
+
+/** Chapter VI-A sections that are folded into the house-property head
+ *  (income side), so they must NOT also count as VI-A deductions. */
+const INCOME_SIDE_SECTIONS = new Set(['24B', '80EEA']);
 
 export async function computeItr3Summary(userId: string, fy: string) {
   const { start: startDate, end: endDate } = financialYearBoundsIso(fy);
 
-  // Schedule S — salary employers
+  // Schedule S — salary employers. The per-row `rows` list stays
+  // books-sourced (Schedule-S detail), but the headline gross / taxable /
+  // TDS totals are Form-16 authoritative (resolver): when a Part-B / Part-A
+  // Form 16 exists for the FY its figures override the salary_income books,
+  // else they equal the books sums (behaviour unchanged).
   const salaries = await db.select().from(salaryIncome).where(and(eq(salaryIncome.financialYear, fy), eq(salaryIncome.userId, userId)));
-  const totalGrossSalary = salaries.reduce((s, r) => s + r.grossSalaryPaisa, 0);
-  const totalTaxableSalary = salaries.reduce((s, r) => s + r.taxableSalaryPaisa, 0);
-  const totalSalaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+  const [salaryResolved, salaryTdsResolved] = await Promise.all([
+    resolveSalaryIncome(userId, fy),
+    resolveSalaryTds(userId, fy),
+  ]);
+  const totalGrossSalary = salaryResolved.grossSalaryPaisa;
+  const totalTaxableSalary = salaryResolved.valuePaisa;
+  const totalSalaryTds = salaryTdsResolved.valuePaisa;
 
   // Schedule BP — consulting from GST invoices
   // Filter: invoiceDate within FY, status not CANCELLED, type = TAX (or whatever issued invoices)
@@ -96,13 +110,10 @@ export async function computeItr3Summary(userId: string, fy: string) {
   const osRows = await db.select().from(otherSourcesIncome).where(and(eq(otherSourcesIncome.financialYear, fy), eq(otherSourcesIncome.userId, userId)));
   const totalOtherSources = osRows.reduce((s, r) => s + r.amountPaisa, 0);
 
-  // Schedule VI-A — Section 80 deductions (already exists)
+  // Schedule VI-A — manual tax_deductions rows kept for the 80C-manual
+  // split + rowCount; the authoritative VI-A total comes from the shared
+  // deduction engine below.
   const deductionRows = await db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, userId)));
-  // Prefer Phase-6 amountPaisa, else fallback to legacy deductibleAmount
-  const manualTotalDeductions = deductionRows.reduce(
-    (s, r) => s + (r.amountPaisa ?? r.deductibleAmount ?? 0),
-    0,
-  );
 
   // Sprint 5.9c — loan-derived 80C principal (capped at ₹1.5L) + 24(b)
   // interest, surfaced for disclosure and added to the deductions
@@ -137,12 +148,22 @@ export async function computeItr3Summary(userId: string, fy: string) {
   const manualEightyCPaisa = deductionRows
     .filter((r) => r.section === '80C')
     .reduce((s, r) => s + (r.amountPaisa ?? r.deductibleAmount ?? 0), 0);
-  const eightyCAppliedPaisa = Math.min(
-    manualEightyCPaisa + loanDeductions.totalPrincipalPaisa,
-    EIGHTY_C_CAP_PAISA,
+
+  // Chapter VI-A via the shared deduction engine — the SAME source the
+  // /tax regime-compare card uses, so ITR-3 reflects EVERY asset-backed
+  // deduction (EPF/LIC/NPS/ELSS/SGB/small-savings → 80C, NPS Tier-I →
+  // 80CCD(1B), health → 80D, donations → 80G) and not just the manual
+  // tax_deductions rows + loan 80C. Income-side 24(b)/80EEA are excluded
+  // (they reduce the house-property head, not VI-A).
+  const engineDeductions = await deriveDeductions(userId, fy);
+  const totalDeductions = Object.entries(engineDeductions.buckets)
+    .filter(([sec]) => !INCOME_SIDE_SECTIONS.has(sec))
+    .reduce((s, [, b]) => s + b.appliedPaisa, 0);
+  const eightyCBucket = engineDeductions.buckets['80C'];
+  const eightyCAppliedPaisa = eightyCBucket?.appliedPaisa ?? 0;
+  const deductionBreakdown = engineDeductions.breakdown.filter(
+    (b) => !b.label.includes('24(b)') && !b.label.includes('80EEA'),
   );
-  const manualNon80c = manualTotalDeductions - manualEightyCPaisa;
-  const totalDeductions = manualNon80c + eightyCAppliedPaisa;
 
   // Non-salary TDS
   const tdsRows = await db.select().from(tdsCredits).where(and(eq(tdsCredits.financialYear, fy), eq(tdsCredits.userId, userId)));
@@ -184,6 +205,10 @@ export async function computeItr3Summary(userId: string, fy: string) {
         totalGrossSalary,
         totalTaxableSalary,
         totalSalaryTds,
+        grossSource: salaryResolved.source,
+        grossDetail: salaryResolved.detail,
+        tdsSource: salaryTdsResolved.source,
+        tdsDetail: salaryTdsResolved.detail,
         rows: salaries,
       },
       businessProfession: {
@@ -212,6 +237,9 @@ export async function computeItr3Summary(userId: string, fy: string) {
       deductions: {
         rowCount: deductionRows.length,
         total: totalDeductions,
+        // Engine-derived per-section breakdown (summing to `total`) so the
+        // ITR-3 hub lists 80C/80CCD(1B)/80D/80G consistently with /tax.
+        breakdown: deductionBreakdown,
         // Sprint 5.9c — 80C breakdown + loan-derived deductions
         eightyC: {
           manualPaisa: manualEightyCPaisa,
@@ -227,6 +255,8 @@ export async function computeItr3Summary(userId: string, fy: string) {
       },
       tds: {
         salaryTds: totalSalaryTds,
+        salaryTdsSource: salaryTdsResolved.source,
+        salaryTdsDetail: salaryTdsResolved.detail,
         nonSalaryTds: totalNonSalaryTds,
         tds2Count,
         tds3Count,

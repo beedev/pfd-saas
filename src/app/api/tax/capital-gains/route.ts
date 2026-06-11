@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db, capitalGains, type CapGainAssetType, type HoldingPeriod } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseBody } from '@/lib/api/parse-body';
+import { computeAggregateCapitalGainsTax } from '@/lib/finance/capital-gains-tax';
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -20,12 +21,38 @@ export async function GET(request: NextRequest) {
 
     const ltcgTotal = rows.filter((r) => r.holdingPeriod === 'LTCG').reduce((s, r) => s + r.capitalGain, 0);
     const stcgTotal = rows.filter((r) => r.holdingPeriod === 'STCG').reduce((s, r) => s + r.capitalGain, 0);
+    // Per-row stored tax — kept as a display estimate (preserves shape).
     const totalTax = rows.reduce((s, r) => s + r.taxAmount, 0);
     const totalExemption = rows.reduce((s, r) => s + (r.exemptionApplied ?? 0), 0);
 
+    // Aggregate (authoritative) CG tax — equity LTCG/STCG net all gains
+    // and losses for the FY, applying the sec-112A annual exemption ONCE.
+    // This is the CORRECT total; `totalTax` above over-counts because it
+    // ignores netting and applies the exemption per-row.
+    const aggregate = computeAggregateCapitalGainsTax(
+      rows.map((r) => ({
+        assetType: r.assetType,
+        holdingPeriod: r.holdingPeriod,
+        saleDate: r.saleDate,
+        capitalGain: r.capitalGain,
+        taxAmount: r.taxAmount ?? 0,
+      })),
+      fy,
+    );
+
     return NextResponse.json({
       entries: rows,
-      summary: { ltcgTotal, stcgTotal, totalTax, totalExemption },
+      summary: {
+        ltcgTotal,
+        stcgTotal,
+        totalTax,
+        totalExemption,
+        // Aggregate-correct figures (added — existing fields unchanged).
+        aggregateTaxPaisa: aggregate.totalTaxPaisa,
+        totalTaxPaisa: aggregate.totalTaxPaisa,
+        ltcgTaxPaisa: aggregate.ltcgEquityTaxPaisa,
+        aggregateBreakdown: aggregate.breakdown,
+      },
     });
   } catch (err) {
     console.error('[capital-gains GET]', err);

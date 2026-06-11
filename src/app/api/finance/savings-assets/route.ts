@@ -23,11 +23,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import {
   db,
   savingsAssetInclusion,
-  holdings,
-  mutualFunds,
   goldHoldings,
-  npsAccounts,
-  epfAccounts,
   smallSavingsAccounts,
   chitFunds,
   insurancePolicies,
@@ -35,6 +31,7 @@ import {
 } from '@/db';
 import { auth } from '@/auth';
 import { MATURING_POLICY_TYPES } from '@/lib/finance/retirement-shared';
+import { assetClassCurrentValuePaisa } from '@/lib/assets/registry';
 
 type Liquidity = 'liquid' | 'semi-liquid' | 'locked';
 
@@ -86,22 +83,38 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const [stocks, mfs, gold, nps, pf, ss, chits, ins, fds, inclusions] =
-      await Promise.all([
-        db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
-        db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
-        db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
-        db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
-        db.select().from(epfAccounts).where(eq(epfAccounts.userId, session.user.id)),
-        db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
-        db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
-        db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
-        db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
-        db
-          .select()
-          .from(savingsAssetInclusion)
-          .where(and(isNull(savingsAssetInclusion.goalId), eq(savingsAssetInclusion.userId, session.user.id))),
-      ]);
+    // Aggregate classes (Stocks / MFs / NPS / PF) source their current
+    // value from the asset registry — the same fetch + valuePaisa rule
+    // net worth uses — so "add an investment mode" lands here for free.
+    // Itemized classes (gold / chit / insurance / FD / small savings) keep
+    // their own fetches: they expose per-item maturity/projected values
+    // that the registry's net-worth valuePaisa doesn't model.
+    const [
+      stocksValuePaisa,
+      mfsValuePaisa,
+      npsValuePaisa,
+      pfValuePaisa,
+      gold,
+      ss,
+      chits,
+      ins,
+      fds,
+      inclusions,
+    ] = await Promise.all([
+      assetClassCurrentValuePaisa('stocks', session.user.id),
+      assetClassCurrentValuePaisa('mutualFunds', session.user.id),
+      assetClassCurrentValuePaisa('nps', session.user.id),
+      assetClassCurrentValuePaisa('pf', session.user.id),
+      db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
+      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
+      db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
+      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
+      db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
+      db
+        .select()
+        .from(savingsAssetInclusion)
+        .where(and(isNull(savingsAssetInclusion.goalId), eq(savingsAssetInclusion.userId, session.user.id))),
+    ]);
 
     const inclusionRows = inclusions.map((r) => ({
       assetClass: r.assetClass,
@@ -114,28 +127,28 @@ export async function GET() {
       {
         assetClass: 'STOCKS',
         label: 'Stocks',
-        valuePaisa: stocks.reduce((s, h) => s + (h.currentValue || 0), 0),
+        valuePaisa: stocksValuePaisa,
         liquidity: 'liquid',
         defaultIncluded: true,
       },
       {
         assetClass: 'MUTUAL_FUNDS',
         label: 'Mutual Funds',
-        valuePaisa: mfs.reduce((s, f) => s + (f.currentValue || 0), 0),
+        valuePaisa: mfsValuePaisa,
         liquidity: 'liquid',
         defaultIncluded: true,
       },
       {
         assetClass: 'NPS',
         label: 'NPS',
-        valuePaisa: nps.reduce((s, n) => s + (n.totalValue || 0), 0),
+        valuePaisa: npsValuePaisa,
         liquidity: 'locked',
         defaultIncluded: false,
       },
       {
         assetClass: 'PF',
         label: 'Provident Fund',
-        valuePaisa: pf.reduce((s, p) => s + (p.totalBalance || 0), 0),
+        valuePaisa: pfValuePaisa,
         liquidity: 'locked',
         defaultIncluded: false,
       },

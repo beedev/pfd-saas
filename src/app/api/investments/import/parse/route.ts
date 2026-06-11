@@ -15,12 +15,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, insurancePolicies, chitFunds } from '@/db';
 import { auth } from '@/auth';
-import { parseStatement, type DocType } from '@/lib/services/statement-parsers';
+import { parseStatement, parseZerodhaTaxPnl, type DocType } from '@/lib/services/statement-parsers';
 
 export const runtime = 'nodejs';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const VALID_HINTS: DocType[] = ['lic', 'chit', 'mf-sip'];
+const VALID_HINTS: DocType[] = ['lic', 'chit', 'mf-sip', 'epf-passbook', 'nps-sot'];
+
+/** Detect a Zerodha tax-P&L spreadsheet upload by file name / mime type. */
+function isXlsxUpload(file: File): boolean {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.xlsx') || name.endsWith('.xls')) return true;
+  return /spreadsheet|excel/i.test(file.type);
+}
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -49,6 +56,17 @@ export async function POST(request: NextRequest) {
         : undefined;
 
     const buf = Buffer.from(await file.arrayBuffer());
+
+    // Zerodha tax-P&L is an .xlsx — parsed via exceljs, not the PDF-text path.
+    if (isXlsxUpload(file)) {
+      const parsed = await parseZerodhaTaxPnl(buf);
+      return NextResponse.json({
+        detectedType: 'cg-statement',
+        resolvedType: 'cg-statement',
+        parsed,
+      });
+    }
+
     const { detectedType, resolvedType, parsed } = await parseStatement(buf, hintType);
 
     // Annotate existing rows so the UI can highlight upserts

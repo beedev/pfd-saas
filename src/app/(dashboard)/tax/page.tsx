@@ -21,7 +21,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 import { RegimeComparisonCard } from '@/components/forms/regime-comparison-card';
 import { AdvanceTaxCard } from '@/components/forms/advance-tax-card';
 import { TaxKpiStrip } from '@/components/forms/tax-kpi-strip';
@@ -82,29 +82,19 @@ const formatINR = (paisa: number) =>
     paisa / 100
   );
 
-function generateFyOptions(): string[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: string[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push(`${s}-${e}`);
-  }
-  return out;
-}
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
 export default function TaxDashboardPage() {
-  const [fy, setFy] = useState<string>(previousFy());
+  const { fy, setFy } = useFinancialYear();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [taxPayments, setTaxPayments] = useState<TaxPayment[]>([]);
   const [totalTaxPaid, setTotalTaxPaid] = useState(0);
+  // TDS deducted on your behalf (Form 16 / 26AS) — counts as tax paid but
+  // isn't a manual payment row. Sourced from the tax-paid GET's `tds` field.
+  const [taxPaidTds, setTaxPaidTds] = useState<{
+    salaryTdsPaisa: number;
+    salaryTdsSource: string;
+    salaryTdsDetail: string;
+    otherTdsPaisa: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // Sprint 5.2 (U5) — manual deduction rows for inline edit/delete
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
@@ -169,6 +159,7 @@ export default function TaxDashboardPage() {
       setSummary(s);
       setTaxPayments(tp.payments ?? []);
       setTotalTaxPaid(tp.totalPaisa ?? 0);
+      setTaxPaidTds(tp.tds ?? null);
 
       const hasSalary = (itr1?.blocks?.salary?.grossPaisa ?? 0) > 0;
       const hasDeductions =
@@ -219,8 +210,6 @@ export default function TaxDashboardPage() {
     }
   };
 
-  const fyOptions = generateFyOptions().map((y) => ({ value: y, label: `FY ${y}` }));
-
   // Decide whether to render the full dashboard or the empty-state
   // checklist instead. Rule: render checklist if both salary AND
   // deductions are missing. If at least one exists, render BOTH (so
@@ -247,9 +236,6 @@ export default function TaxDashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 sm:w-auto">
-          <div className="w-full sm:w-40">
-            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
-          </div>
           {/* Sprint 6.2g — Section 80 + Capital Gains reports per the
               currently-selected FY. PDF/Excel/CSV for both. */}
           <ScreenReportButton reportId="section80" fy={fy} label="Section 80" />
@@ -276,7 +262,7 @@ export default function TaxDashboardPage() {
 
           {/* Quarterly advance-tax planner */}
           <div ref={advanceTaxRef}>
-            <AdvanceTaxCard fy={fy} />
+            <AdvanceTaxCard fy={fy} onPaymentChange={() => setRefreshTick((t) => t + 1)} />
           </div>
 
           {/* C — Quick Actions row (replaces 5-tile sub-nav grid) */}
@@ -574,6 +560,36 @@ export default function TaxDashboardPage() {
                   <Button variant="secondary" size="sm" onClick={() => setShowTaxForm(false)}>Cancel</Button>
                 </div>
               )}
+              {/* TDS deducted on your behalf (Form 16 / 26AS) — counts as
+                  tax paid, but is not a manually-entered payment. */}
+              {taxPaidTds && (taxPaidTds.salaryTdsPaisa > 0 || taxPaidTds.otherTdsPaisa > 0) && (
+                <div className="mb-2 space-y-2">
+                  {taxPaidTds.salaryTdsPaisa > 0 && (
+                    <div className="flex items-center justify-between rounded border border-[var(--dxp-border-light)] bg-[var(--dxp-surface-alt,var(--dxp-surface))] px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="success">TDS — salary</Badge>
+                        <span className="text-xs text-[var(--dxp-text-muted)]">
+                          {taxPaidTds.salaryTdsSource === 'form16'
+                            ? 'from Form 16 Part A'
+                            : taxPaidTds.salaryTdsSource === 'form26as'
+                              ? 'from Form 26AS'
+                              : 'from books'}
+                        </span>
+                      </div>
+                      <span className="font-mono font-bold text-[var(--dxp-text)]">{formatINR(taxPaidTds.salaryTdsPaisa)}</span>
+                    </div>
+                  )}
+                  {taxPaidTds.otherTdsPaisa > 0 && (
+                    <div className="flex items-center justify-between rounded border border-[var(--dxp-border-light)] bg-[var(--dxp-surface-alt,var(--dxp-surface))] px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="success">TDS — other</Badge>
+                        <span className="text-xs text-[var(--dxp-text-muted)]">194J / 194A / 194</span>
+                      </div>
+                      <span className="font-mono font-bold text-[var(--dxp-text)]">{formatINR(taxPaidTds.otherTdsPaisa)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               {taxPayments.length > 0 ? (
                 <div className="space-y-2">
                   {taxPayments.map((tp) => (
@@ -595,8 +611,10 @@ export default function TaxDashboardPage() {
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : !taxPaidTds || (taxPaidTds.salaryTdsPaisa === 0 && taxPaidTds.otherTdsPaisa === 0) ? (
                 <p className="text-sm text-[var(--dxp-text-muted)]">No tax payments recorded for FY {fy}.</p>
+              ) : (
+                <p className="text-xs text-[var(--dxp-text-muted)]">No manual advance/self-assessment payments — TDS above is auto-counted from Form 16 / 26AS.</p>
               )}
             </CardContent>
           </Card>

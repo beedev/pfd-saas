@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, DataTable, Badge, Input, Select, type Column } from '@dxp/ui';
 import { Plus, Loader2, FolderOpen, Download, Trash2, Eye } from 'lucide-react';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 interface Doc {
   id: number;
@@ -40,26 +40,10 @@ const formatBytes = (bytes: number | null) => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 };
 
-function generateFyOptions(): Array<{ value: string; label: string }> {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const opts = [{ value: '', label: 'All years' }];
-  for (let i = 2; i >= -1; i--) {
-    const s = startYear - i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    opts.push({ value: `${s}-${e}`, label: `FY ${s}-${e}` });
-  }
-  return opts;
-}
-
 export default function DocumentsVaultPage() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [fy, setFy] = useState(() => {
-    const current = getCurrentFinancialYear();
-    const s = Number(current.split('-')[0]) - 1;
-    return `${s}-${String((s + 1) % 100).padStart(2, '0')}`;
-  });
+  const { fy } = useFinancialYear();
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [preview, setPreview] = useState<Doc | null>(null);
@@ -164,10 +148,9 @@ export default function DocumentsVaultPage() {
 
       <Card>
         <CardContent>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             <Input placeholder="Search titles..." value={search} onChange={(e) => setSearch(e.target.value)} />
             <Select options={catOpts} value={category} onChange={setCategory} />
-            <Select options={generateFyOptions()} value={fy} onChange={setFy} />
           </div>
         </CardContent>
       </Card>

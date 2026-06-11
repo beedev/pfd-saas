@@ -28,7 +28,7 @@
 
 export type Regime = 'OLD' | 'NEW';
 
-interface SurchargeBracket {
+export interface SurchargeBracket {
   lowerPaisa: number;
   ratePct: number;
 }
@@ -81,15 +81,20 @@ export interface SurchargeResult {
   effectiveSurchargePaisa: number;
 }
 
-export function computeSurcharge(input: SurchargeInput): SurchargeResult {
+export function computeSurcharge(
+  input: SurchargeInput,
+  brackets?: SurchargeBracket[],
+): SurchargeResult {
   const { taxableIncomePaisa, taxBeforeSurchargePaisa, taxAtThresholdPaisa, regime } = input;
 
   if (taxableIncomePaisa <= FIFTY_LAKH) {
     return { surchargePaisa: 0, marginalReliefPaisa: 0, effectiveSurchargePaisa: 0 };
   }
 
-  const brackets = regime === 'OLD' ? OLD_BRACKETS : NEW_BRACKETS;
-  const bracket = findBracket(taxableIncomePaisa, brackets);
+  // Injected FY-configurable brackets override the module defaults. When
+  // omitted, fall back to the regime-appropriate hardcoded arrays.
+  const activeBrackets = brackets ?? (regime === 'OLD' ? OLD_BRACKETS : NEW_BRACKETS);
+  const bracket = findBracket(taxableIncomePaisa, activeBrackets);
 
   if (bracket.ratePct === 0) {
     return { surchargePaisa: 0, marginalReliefPaisa: 0, effectiveSurchargePaisa: 0 };

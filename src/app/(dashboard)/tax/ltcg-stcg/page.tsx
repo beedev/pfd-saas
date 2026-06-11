@@ -20,7 +20,21 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, StatsDisplay, Badge, Input, Select } from '@dxp/ui';
 import { Plus, Loader2, Trash2, Calendar, Info } from 'lucide-react';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
+import { ContextualImport } from '@/components/import/contextual-import';
+
+interface CgParsed {
+  type: 'cg-statement';
+  broker: string;
+  fy: string | null;
+  rows: Array<{ assetType: string; holdingPeriod: 'LTCG' | 'STCG'; capitalGainPaisa: number; scrip: string | null }>;
+  totalStcgPaisa: number;
+  totalLtcgPaisa: number;
+  warnings: string[];
+}
+
+const fmtINR = (p: number) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
 
 interface CapGainEntry {
   id: number;
@@ -44,6 +58,9 @@ interface Summary {
   stcgTotal: number;
   totalTax: number;
   totalExemption: number;
+  /** Aggregate-correct CG tax (equity netted, sec-112A exemption applied
+   *  once per FY). Falls back to per-row `totalTax` when absent. */
+  aggregateTaxPaisa?: number;
 }
 
 const CG_CUTOFF = '2024-07-23';
@@ -54,23 +71,6 @@ const formatINR = (paisa: number) =>
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(paisa / 100);
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const s = Number(current.split('-')[0]) - 1;
-  return `${s}-${String((s + 1) % 100).padStart(2, '0')}`;
-}
-
-function generateFyOptions(): Array<{ value: string; label: string }> {
-  const currentStart = Number(getCurrentFinancialYear().split('-')[0]);
-  return Array.from({ length: 4 }, (_, i) => {
-    const s = currentStart - 3 + i;
-    return {
-      value: `${s}-${String((s + 1) % 100).padStart(2, '0')}`,
-      label: `FY ${s}-${String((s + 1) % 100).padStart(2, '0')}`,
-    };
-  });
-}
 
 const ASSET_TYPE_OPTIONS = [
   { value: 'STOCKS', label: 'Stocks' },
@@ -99,7 +99,7 @@ function rateLabel(row: CapGainEntry): string {
 }
 
 export default function CapitalGainsPage() {
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
   const [entries, setEntries] = useState<CapGainEntry[]>([]);
   const [summary, setSummary] = useState<Summary>({
     ltcgTotal: 0,
@@ -221,9 +221,46 @@ export default function CapitalGainsPage() {
           <p className="text-[var(--dxp-text-secondary)]">Realized capital gains for FY {fy}</p>
         </div>
         <div className="flex gap-3">
-          <div className="w-40">
-            <Select options={generateFyOptions()} value={fy} onChange={setFy} />
-          </div>
+          <ContextualImport<CgParsed>
+            buttonLabel="Import statement"
+            title="Import a capital-gains statement"
+            subtitle="KFINTECH / CAMS capital-gains PDF, or a Zerodha tax-P&L .xlsx"
+            accept=".pdf,.xlsx"
+            canImport={(p) => p?.type === 'cg-statement' && p.rows.length > 0 && !!(p.fy || fy)}
+            commit={async (p) => {
+              const r = await fetch('/api/investments/import/commit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'cg-statement', fy: p.fy || fy, rows: p.rows }),
+              });
+              const d = await r.json();
+              if (!r.ok) throw new Error(d?.error || 'Import failed');
+            }}
+            onImported={load}
+            renderPreview={(p) => (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">{p.broker}</Badge>
+                  {p.fy && <span className="text-xs text-[var(--dxp-text-muted)]">FY {p.fy}</span>}
+                  <span className="ml-auto text-xs">
+                    STCG <strong>{fmtINR(p.totalStcgPaisa)}</strong> · LTCG <strong>{fmtINR(p.totalLtcgPaisa)}</strong>
+                  </span>
+                </div>
+                {p.rows.map((row, i) => (
+                  <div key={i} className="flex items-center justify-between border-t border-[var(--dxp-border-light)] pt-1 text-xs">
+                    <span>{row.scrip || row.assetType} · {row.holdingPeriod}</span>
+                    <span className={`font-mono ${row.capitalGainPaisa < 0 ? 'text-red-600' : ''}`}>{fmtINR(row.capitalGainPaisa)}</span>
+                  </div>
+                ))}
+                {p.warnings.map((w, i) => (
+                  <p key={i} className="rounded bg-amber-50 p-2 text-xs text-amber-800">⚠ {w}</p>
+                ))}
+                {p.rows.length === 0 && (
+                  <p className="text-xs text-[var(--dxp-text-muted)]">Nothing to import — add manually instead.</p>
+                )}
+              </div>
+            )}
+          />
           <Button variant="primary" onClick={() => setShowForm(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add entry
           </Button>
@@ -257,7 +294,7 @@ export default function CapitalGainsPage() {
           { label: 'LTCG Total', value: summary.ltcgTotal / 100, format: 'currency' },
           { label: 'STCG Total', value: summary.stcgTotal / 100, format: 'currency' },
           { label: 'Exemptions Applied', value: summary.totalExemption / 100, format: 'currency' },
-          { label: 'Total Tax on Gains', value: summary.totalTax / 100, format: 'currency' },
+          { label: 'Total Tax on Gains', value: (summary.aggregateTaxPaisa ?? summary.totalTax) / 100, format: 'currency' },
         ]}
       />
 

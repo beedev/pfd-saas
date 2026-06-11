@@ -2,27 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Button, Card, CardHeader, CardContent, Select, Badge } from '@dxp/ui';
+import { Button, Card, CardHeader, CardContent, Badge } from '@dxp/ui';
 import { Loader2, Package, CheckCircle, AlertCircle } from 'lucide-react';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
-
-/** Previous FY is what you're typically filing for */
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = parseInt(current.split('-')[0], 10) - 1;
-  return `${startYear}-${String(startYear + 1).slice(2)}`;
-}
-
-function generateFyOptions(): Array<{ value: string; label: string }> {
-  const currentStart = parseInt(getCurrentFinancialYear().split('-')[0], 10);
-  const opts: Array<{ value: string; label: string }> = [];
-  for (let i = 3; i >= 0; i--) {
-    const s = currentStart - i;
-    const e = String(s + 1).slice(2);
-    opts.push({ value: `${s}-${e}`, label: `FY ${s}-${e}` });
-  }
-  return opts;
-}
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 interface Summary {
   buckets: Array<{ section: string; label: string; totalPaisa: number; sources: unknown[] }>;
@@ -31,7 +13,7 @@ interface Summary {
 }
 
 export default function FilingPackPage() {
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -85,10 +67,6 @@ export default function FilingPackPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Tax Filing Pack</h1>
         <p className="text-[var(--dxp-text-secondary)]">Generate a ZIP bundle of deductions and supporting documents</p>
-      </div>
-
-      <div className="max-w-xs">
-        <Select options={generateFyOptions()} value={fy} onChange={setFy} />
       </div>
 
       {isLoading ? (

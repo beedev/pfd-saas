@@ -31,7 +31,11 @@
  * Sprint 5.1b — Surcharge + marginal relief wired via surcharge.ts.
  */
 
-import { computeSurcharge, bracketThresholdForIncome } from './surcharge';
+import {
+  computeSurcharge,
+  bracketThresholdForIncome,
+  type SurchargeBracket,
+} from './surcharge';
 
 export interface TaxSlabRow {
   slabOrder: number;
@@ -63,6 +67,9 @@ export interface TaxComputeInput {
   regime?: 'OLD' | 'NEW';
   /** Sprint 5.1b — FY string for surcharge bracket selection. */
   fy?: string;
+  /** FY-configurable surcharge brackets for this regime. When omitted,
+   *  computeSurcharge falls back to its hardcoded regime defaults. */
+  surchargeBrackets?: SurchargeBracket[];
 }
 
 export interface TaxComputeResult {
@@ -87,6 +94,18 @@ export interface TaxComputeResult {
   totalTaxPaisa: number;
   /** Effective tax rate as % of gross — useful for headline display. */
   effectiveRatePct: number;
+  /** Per-band slab breakdown (for the "show the math" UI). */
+  bands: SlabBand[];
+}
+
+/** One row of the slab-tax breakdown — the tax contributed by the portion
+ *  of taxable income that falls inside [lowerPaisa, upperPaisa). */
+export interface SlabBand {
+  lowerPaisa: number;
+  upperPaisa: number | null;
+  ratePct: number;
+  /** Tax from this band given the taxable income (0 if income < lower). */
+  taxPaisa: number;
 }
 
 /**
@@ -116,8 +135,25 @@ export function computeSlabTax(taxablePaisa: number, slabs: TaxSlabRow[]): numbe
   return Math.round(tax);
 }
 
+/** Per-band breakdown of slab tax — every band is returned (even ones with
+ *  ₹0 contribution) so the UI can render the full ladder like a tax notice. */
+export function computeSlabBands(taxablePaisa: number, slabs: TaxSlabRow[]): SlabBand[] {
+  const sorted = [...slabs].sort((a, b) => a.slabOrder - b.slabOrder);
+  return sorted.map((slab) => {
+    const lower = slab.lowerPaisa;
+    const cap = slab.upperPaisa ?? Infinity;
+    const portion = Math.max(0, Math.min(Math.max(taxablePaisa, 0), cap) - lower);
+    return {
+      lowerPaisa: lower,
+      upperPaisa: slab.upperPaisa ?? null,
+      ratePct: slab.ratePct,
+      taxPaisa: Math.round((portion * slab.ratePct) / 100),
+    };
+  });
+}
+
 export function computeTax(input: TaxComputeInput): TaxComputeResult {
-  const { grossIncomePaisa, deductionsPaisa, slabs, config, regime, fy } = input;
+  const { grossIncomePaisa, deductionsPaisa, slabs, config, regime, fy, surchargeBrackets } = input;
 
   // 1. Standard deduction
   const afterStdDed = Math.max(0, grossIncomePaisa - config.standardDeductionPaisa);
@@ -156,7 +192,7 @@ export function computeTax(input: TaxComputeInput): TaxComputeResult {
       taxAtThresholdPaisa,
       regime,
       fy,
-    });
+    }, surchargeBrackets);
     surchargePaisa = sc.surchargePaisa;
     marginalReliefPaisa = sc.marginalReliefPaisa;
     effectiveSurchargePaisa = sc.effectiveSurchargePaisa;
@@ -185,6 +221,7 @@ export function computeTax(input: TaxComputeInput): TaxComputeResult {
     cessPaisa,
     totalTaxPaisa,
     effectiveRatePct,
+    bands: computeSlabBands(taxablePaisa, slabs),
   };
 }
 
@@ -212,6 +249,11 @@ export interface RegimeCompareInput {
   /** Sprint 5.1b — FY for surcharge bracket selection. Required to
    *  compute surcharge; omit only for unit tests. */
   fy?: string;
+  /** FY-configurable OLD-regime surcharge brackets. Threaded into the
+   *  OLD computeTax call; omit to use the hardcoded defaults. */
+  oldSurchargeBrackets?: SurchargeBracket[];
+  /** FY-configurable NEW-regime surcharge brackets. */
+  newSurchargeBrackets?: SurchargeBracket[];
 }
 
 export interface RegimeCompareResult {
@@ -230,6 +272,7 @@ export function compareRegimes(input: RegimeCompareInput): RegimeCompareResult {
     config: input.oldConfig,
     regime: 'OLD',
     fy: input.fy,
+    surchargeBrackets: input.oldSurchargeBrackets,
   });
   const newResult = computeTax({
     grossIncomePaisa: input.grossIncomePaisa,
@@ -238,6 +281,7 @@ export function compareRegimes(input: RegimeCompareInput): RegimeCompareResult {
     config: input.newConfig,
     regime: 'NEW',
     fy: input.fy,
+    surchargeBrackets: input.newSurchargeBrackets,
   });
 
   // Pick the lower-tax regime. Tie-break NEW (govt default + simpler).

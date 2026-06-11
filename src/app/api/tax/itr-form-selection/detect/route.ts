@@ -30,6 +30,7 @@ import {
 } from '@/db';
 import { auth } from '@/auth';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { isEquityBucket } from '@/lib/finance/capital-gains-tax';
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -90,6 +91,16 @@ export async function GET(request: NextRequest) {
     const totalIncomePaisa =
       salaryPaisa + businessPaisa + otherPaisa + capitalGainsPaisa + rentalPaisa;
 
+    // Finer capital-gains split for the AY 2026-27 ITR rules: STCG (any)
+    // and non-112A LTCG disqualify ITR-1/4; equity LTCG (112A) ≤ ₹1.25L is
+    // allowed. Equity = STT-paid equity bucket (isEquityBucket).
+    const ltcgRows = gains.filter((g) => g.holdingPeriod === 'LTCG');
+    const hasStcg = gains.some((g) => g.holdingPeriod === 'STCG');
+    const ltcg112aPaisa = ltcgRows
+      .filter((g) => isEquityBucket(g.assetType))
+      .reduce((s, g) => s + (g.capitalGain ?? 0), 0);
+    const hasOtherCapitalGains = ltcgRows.some((g) => !isEquityBucket(g.assetType));
+
     return NextResponse.json({
       fy,
       detected: {
@@ -99,6 +110,10 @@ export async function GET(request: NextRequest) {
         numHouseProperties: properties.length,
         hasCapitalGains: gains.length > 0,
         capitalGainsPaisa,
+        // Finer CG fields (drive the official Sahaj/Sugam eligibility).
+        hasStcg,
+        ltcg112aPaisa,
+        hasOtherCapitalGains,
         hasBusinessIncome: gstInvoices.length > 0,
         businessPaisa,
         hasPresumptive: false,
@@ -106,6 +121,10 @@ export async function GET(request: NextRequest) {
         hasOtherSources: others.length > 0,
         otherPaisa,
         totalIncomePaisa,
+        // Not auto-detectable — user asserts these in the wizard.
+        isDirector: false,
+        hasUnlistedShares: false,
+        hasCarryForwardLosses: false,
       },
     });
   } catch (err) {

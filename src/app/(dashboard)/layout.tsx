@@ -16,10 +16,14 @@
 
 import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Toaster } from '@/components/ui/sonner';
 import { auth } from '@/auth';
 import { db, businessProfile, userPreferences } from '@/db';
+import { FinancialYearProvider } from '@/components/providers/financial-year-provider';
+import { FinancialYearBar } from '@/components/layout/financial-year-bar';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
 export default async function DashboardLayout({
   children,
@@ -57,6 +61,10 @@ export default async function DashboardLayout({
     .limit(1);
   const hasBusinessProfile = bp.length > 0;
 
+  // Seed the global FY from the cookie (falls back to the current FY).
+  const cookieStore = await cookies();
+  const initialFy = cookieStore.get('pfd-fy')?.value || getCurrentFinancialYear();
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
       <Sidebar
@@ -80,9 +88,12 @@ export default async function DashboardLayout({
           pt-14 keeps the page content out from under it. md+ has the
           inline sidebar so no top padding needed. */}
       <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
-        <div className="container mx-auto p-4 md:p-6">
-          {children}
-        </div>
+        <FinancialYearProvider initialFy={initialFy}>
+          <div className="container mx-auto p-4 md:p-6">
+            <FinancialYearBar />
+            {children}
+          </div>
+        </FinancialYearProvider>
       </main>
       <Toaster />
     </div>

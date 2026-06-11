@@ -1,10 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { LogOut, Menu, X, MessageSquare, UserCircle, ArrowLeftRight } from 'lucide-react';
+import {
+  LogOut,
+  Menu,
+  X,
+  MessageSquare,
+  UserCircle,
+  ArrowLeftRight,
+  ChevronRight,
+  ChevronDown,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -173,6 +182,7 @@ const navigation: NavSection[] = [
     section: 'Settings',
     items: [
       { name: 'Settings', href: '/settings', icon: Settings },
+      { name: 'Tax Rates & Rules', href: '/settings/tax-rules', icon: Calculator },
       { name: 'FY Close', href: '/settings/fy-close', icon: CalendarCheck },
     ],
   },
@@ -202,6 +212,30 @@ type SidebarProps = {
   userEmail: string | null;
 };
 
+// Sprint: collapsible sidebar sections. localStorage key for the persisted
+// expanded-section set. A user's manual expand/collapse choices stick across
+// navigations and reloads; first load with no stored state auto-expands only
+// the section containing the active route.
+const EXPANDED_STORAGE_KEY = 'pfd-sidebar-expanded';
+
+/**
+ * Returns the set of section names that contain the active route, using the
+ * SAME active-route test the NavItem highlight uses. A section is "active"
+ * when any of its items matches the current pathname. Used both to seed the
+ * default expanded set on first load and to auto-open the right section.
+ */
+function activeSectionsFor(sections: NavSection[], pathname: string): string[] {
+  return sections
+    .filter((s) =>
+      s.items.some(
+        (item) =>
+          pathname === item.href ||
+          (item.href !== '/' && pathname.startsWith(item.href)),
+      ),
+    )
+    .map((s) => s.section);
+}
+
 /**
  * Renders BOTH the persistent desktop sidebar (≥md) and the mobile
  * top bar + slide-in drawer (<md). Layout chooses which one to show via
@@ -218,11 +252,87 @@ export function Sidebar({
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
-  const visibleNav = navigation.filter((s) => {
-    if (s.section === 'GST' && !hasBusinessProfile) return false;
-    if (s.section === 'Personal' && !habitsEnabled) return false;
-    return true;
-  });
+  const visibleNav = useMemo(
+    () =>
+      navigation.filter((s) => {
+        if (s.section === 'GST' && !hasBusinessProfile) return false;
+        if (s.section === 'Personal' && !habitsEnabled) return false;
+        return true;
+      }),
+    [hasBusinessProfile, habitsEnabled],
+  );
+
+  // ─── Collapsible-section state ──────────────────────────────────
+  // `expanded` holds the set of currently-open section names. We seed it
+  // synchronously from the active route (so SSR + the very first client
+  // paint agree and there's no hydration flash), then, after mount, hydrate
+  // from localStorage if the user has a stored preference.
+  const initialExpanded = useMemo(
+    () => new Set(activeSectionsFor(visibleNav, pathname)),
+    // Seed once on mount; subsequent active-route changes are handled by the
+    // effect below so we don't clobber the user's manual toggles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [expanded, setExpanded] = useState<Set<string>>(initialExpanded);
+  // Tracks whether we've read the stored preference yet — guards the persist
+  // effect from writing the seed value back before hydration completes.
+  const [hydrated, setHydrated] = useState(false);
+
+  // On mount: if the user has a saved expanded-set, use it. Otherwise keep
+  // the active-route seed (which is already in state).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(EXPANDED_STORAGE_KEY);
+      if (raw) {
+        const stored = JSON.parse(raw) as string[];
+        if (Array.isArray(stored)) setExpanded(new Set(stored));
+      }
+    } catch {
+      // Corrupt/blocked storage — fall back to the active-route seed.
+    }
+    setHydrated(true);
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-expand the active section on navigation. We only ADD the active
+  // section(s); we never collapse what the user has open, so manual choices
+  // stick. Runs after navigation (pathname change) once hydrated.
+  useEffect(() => {
+    if (!hydrated) return;
+    const active = activeSectionsFor(visibleNav, pathname);
+    if (active.length === 0) return;
+    setExpanded((prev) => {
+      const needsAdd = active.some((name) => !prev.has(name));
+      if (!needsAdd) return prev;
+      const next = new Set(prev);
+      active.forEach((name) => next.add(name));
+      return next;
+    });
+  }, [pathname, hydrated, visibleNav]);
+
+  // Persist whenever the expanded set changes (after hydration only).
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem(
+        EXPANDED_STORAGE_KEY,
+        JSON.stringify(Array.from(expanded)),
+      );
+    } catch {
+      // Storage unavailable (private mode / quota) — non-fatal.
+    }
+  }, [expanded, hydrated]);
+
+  const toggleSection = (section: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  };
 
   // ─── Account-switcher state (Docker self-host only) ─────────────
   // Email → display label mapping. The Demo well-known account uses
@@ -288,45 +398,60 @@ export function Sidebar({
   ) : null;
 
   const navBody = (
-    <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
-      {visibleNav.map((section) => (
-        <div key={section.section}>
-          <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-            {section.section}
-          </p>
-          <div className="space-y-1">
-            {section.items.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== '/' && pathname.startsWith(item.href));
+    <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+      {visibleNav.map((section) => {
+        const isOpen = expanded.has(section.section);
+        return (
+          <div key={section.section}>
+            <button
+              type="button"
+              onClick={() => toggleSection(section.section)}
+              aria-expanded={isOpen}
+              className="group flex w-full items-center rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500 transition-colors hover:bg-gray-800/60 hover:text-gray-300"
+            >
+              {isOpen ? (
+                <ChevronDown className="mr-1.5 h-3.5 w-3.5 flex-shrink-0 text-gray-500 group-hover:text-gray-300" />
+              ) : (
+                <ChevronRight className="mr-1.5 h-3.5 w-3.5 flex-shrink-0 text-gray-500 group-hover:text-gray-300" />
+              )}
+              <span>{section.section}</span>
+            </button>
+            {isOpen && (
+              <div className="mt-1 mb-2 space-y-1">
+                {section.items.map((item) => {
+                  const isActive =
+                    pathname === item.href ||
+                    (item.href !== '/' && pathname.startsWith(item.href));
 
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={cn(
-                    'group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                    isActive
-                      ? 'bg-gray-800 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white',
-                  )}
-                >
-                  <item.icon
-                    className={cn(
-                      'mr-3 h-5 w-5 flex-shrink-0',
-                      isActive
-                        ? 'text-white'
-                        : 'text-gray-400 group-hover:text-white',
-                    )}
-                  />
-                  {item.name}
-                </Link>
-              );
-            })}
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={cn(
+                        'group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                        isActive
+                          ? 'bg-gray-800 text-white'
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white',
+                      )}
+                    >
+                      <item.icon
+                        className={cn(
+                          'mr-3 h-5 w-5 flex-shrink-0',
+                          isActive
+                            ? 'text-white'
+                            : 'text-gray-400 group-hover:text-white',
+                        )}
+                      />
+                      {item.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </nav>
   );
 

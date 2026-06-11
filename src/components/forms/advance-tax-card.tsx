@@ -64,7 +64,16 @@ const statusBadge = (s: Installment['status']) => {
   }
 };
 
-export function AdvanceTaxCard({ fy }: { fy: string }) {
+export function AdvanceTaxCard({
+  fy,
+  onPaymentChange,
+}: {
+  fy: string;
+  /** Fired after a payment is recorded so the parent can refresh the
+   *  header KPI strip (advance-tax-paid / balance-to-pay) and any other
+   *  sections that depend on advance-tax totals. */
+  onPaymentChange?: () => void;
+}) {
   const [data, setData] = useState<AdvanceTaxResp | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -129,6 +138,7 @@ export function AdvanceTaxCard({ fy }: { fy: string }) {
       toast.success('Payment recorded');
       setEditingId(null);
       load();
+      onPaymentChange?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
     } finally {

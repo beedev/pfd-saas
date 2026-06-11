@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 
 import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay, DataTable, type Column } from '@dxp/ui';
 import { Plus, Trash2, Loader2, ShieldCheck } from 'lucide-react';
+import { ContextualImport } from '@/components/import/contextual-import';
+import type { EpfPassbookParsed } from '@/lib/services/statement-parsers';
 
 interface PFAccount {
   id: number;
@@ -159,12 +161,55 @@ export default function PFPage() {
           <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Provident Fund</h1>
           <p className="text-[var(--dxp-text-secondary)]">EPF, PPF and VPF balances</p>
         </div>
-        <Link href="/investments/pf/new">
-          <Button variant="primary">
-            <Plus className="mr-2 h-4 w-4" />
-            Add PF account
-          </Button>
-        </Link>
+        <div className="flex gap-3">
+          <ContextualImport<EpfPassbookParsed>
+            buttonLabel="Import EPF passbook"
+            title="Import EPF passbook"
+            subtitle="EPFO member passbook PDF"
+            accept=".pdf"
+            hint="epf-passbook"
+            canImport={(p) => p?.type === 'epf-passbook'}
+            commit={async (p) => {
+              const r = await fetch('/api/investments/import/commit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'epf-passbook', data: p.data }),
+              });
+              const d = await r.json();
+              if (!r.ok) throw new Error(d?.error || 'Import failed');
+            }}
+            onImported={load}
+            renderPreview={(p) => (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">{p.confidence}</Badge>
+                  <span className="text-xs text-[var(--dxp-text-muted)]">
+                    {p.data.employerName || 'EPF account'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <span className="text-[var(--dxp-text-muted)]">UAN</span>
+                  <span className="font-mono">{p.data.uan || '—'}</span>
+                  <span className="text-[var(--dxp-text-muted)]">Member ID</span>
+                  <span className="font-mono">{p.data.memberId || '—'}</span>
+                  <span className="text-[var(--dxp-text-muted)]">Employee balance</span>
+                  <span className="font-mono">{formatINR(p.data.employeeBalancePaisa)}</span>
+                  <span className="text-[var(--dxp-text-muted)]">Employer balance</span>
+                  <span className="font-mono">{formatINR(p.data.employerBalancePaisa)}</span>
+                </div>
+                {p.warnings.map((w, i) => (
+                  <p key={i} className="rounded bg-amber-50 p-2 text-xs text-amber-800">⚠ {w}</p>
+                ))}
+              </div>
+            )}
+          />
+          <Link href="/investments/pf/new">
+            <Button variant="primary">
+              <Plus className="mr-2 h-4 w-4" />
+              Add PF account
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <StatsDisplay

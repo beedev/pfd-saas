@@ -2343,6 +2343,56 @@ export const taxRegimeConfig = pgTable('tax_regime_config', {
 
 export type TaxRegimeConfig = typeof taxRegimeConfig.$inferSelect;
 
+// ─── Configurable tax RULES (deduction caps, surcharge, CG, presumptive) ──
+// Per-FY, global (govt data — NOT user-scoped, like tax_slabs). Externalises
+// the constants that used to live in code so they can be edited when the
+// budget changes them, without a deploy. The engine reads via getTaxRules()
+// with a code-constant fallback so a missing row never breaks computation.
+export interface SurchargeBracketRule {
+  lowerPaisa: number;
+  ratePct: number;
+}
+export interface CapitalGainsRules {
+  /** ISO date the 2024 LTCG/STCG reform took effect. */
+  reformCutoff: string;
+  sec112aExemptionPrePaisa: number;
+  sec112aExemptionPostPaisa: number;
+  ltcgEquityRatePrePct: number;
+  ltcgEquityRatePostPct: number;
+  stcgEquityRatePrePct: number;
+  stcgEquityRatePostPct: number;
+  ltcgGeneralRatePct: number;
+}
+export interface PresumptiveRules {
+  ad: { digitalPct: number; cashPct: number; turnoverLimitPaisa: number };
+  ada: { pct: number; receiptLimitPaisa: number };
+}
+
+export const taxRules = pgTable('tax_rules', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  // Chapter VI-A caps
+  eightyCCapPaisa: bigint('eighty_c_cap_paisa', { mode: 'number' }).notNull().default(15000000),
+  eightyCcd1bCapPaisa: bigint('eighty_ccd_1b_cap_paisa', { mode: 'number' }).notNull().default(5000000),
+  eightyDBaseCapPaisa: bigint('eighty_d_base_cap_paisa', { mode: 'number' }).notNull().default(2500000),
+  eightyDSeniorCapPaisa: bigint('eighty_d_senior_cap_paisa', { mode: 'number' }).notNull().default(5000000),
+  // House property
+  sec24bSelfOccupiedCapPaisa: bigint('sec_24b_self_occupied_cap_paisa', { mode: 'number' }).notNull().default(20000000),
+  sec24bPre1999CapPaisa: bigint('sec_24b_pre1999_cap_paisa', { mode: 'number' }).notNull().default(3000000),
+  sec80eeaCapPaisa: bigint('sec_80eea_cap_paisa', { mode: 'number' }).notNull().default(15000000),
+  // Structured rules (mid-FY splits / brackets) as JSON
+  surchargeOldBrackets: jsonb('surcharge_old_brackets').$type<SurchargeBracketRule[]>(),
+  surchargeNewBrackets: jsonb('surcharge_new_brackets').$type<SurchargeBracketRule[]>(),
+  capitalGainsRules: jsonb('capital_gains_rules').$type<CapitalGainsRules>(),
+  presumptiveRules: jsonb('presumptive_rules').$type<PresumptiveRules>(),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('tax_rules_fy_unique').on(table.fy),
+]);
+
+export type TaxRulesRow = typeof taxRules.$inferSelect;
+
 // 11. Tax Deductions (Section 80)
 export type DeductionSection = 'SECTION_80C' | 'SECTION_80CCC' | 'SECTION_80CCD' | 'SECTION_80D' | 'SECTION_80E' | 'SECTION_80EE' | 'SECTION_80TTA' | 'OTHER';
 
@@ -2874,12 +2924,28 @@ export type ItrForm = 'ITR-1' | 'ITR-2' | 'ITR-3' | 'ITR-4';
 export interface ItrWizardAnswers {
   hasSalary: boolean;
   numHouseProperties: number;
+  /** Legacy blanket flag (kept for old rows). Newer rows set the finer
+   *  capital-gains fields below; the selector prefers those when present. */
   hasCapitalGains: boolean;
   hasBusinessIncome: boolean;
   hasPresumptive: boolean;
   hasForeignIncome: boolean;
   hasOtherSources: boolean;
   totalIncomePaisa: number;
+  // ── Finer capital-gains + disqualifier fields (AY 2026-27 ITR rules) ──
+  // jsonb column, so these are additive/optional — old rows omit them.
+  /** Any short-term capital gain (sec 111A or other) — disqualifies ITR-1/4. */
+  hasStcg?: boolean;
+  /** Equity LTCG under sec 112A, in paisa. ≤ ₹1.25L is ALLOWED in ITR-1/4. */
+  ltcg112aPaisa?: number;
+  /** LTCG other than 112A (property, debt, unlisted, sec-112) — disqualifies ITR-1/4. */
+  hasOtherCapitalGains?: boolean;
+  /** Director in a company — disqualifies ITR-1/4. */
+  isDirector?: boolean;
+  /** Held unlisted equity shares in the year — disqualifies ITR-1/4. */
+  hasUnlistedShares?: boolean;
+  /** Brought-forward / carry-forward losses — disqualifies ITR-1/4. */
+  hasCarryForwardLosses?: boolean;
 }
 
 export const itrFormSelection = pgTable('itr_form_selection', {

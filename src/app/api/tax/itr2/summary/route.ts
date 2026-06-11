@@ -42,7 +42,9 @@ import {
 import { auth } from '@/auth';
 import { computeItr2Summary } from '@/lib/finance/itr2-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
+import { deriveDeductions } from '@/lib/finance/deduction-engine';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from '@/lib/finance/form16-tax-source';
 import type { CapitalGainRow, CgAssetType, CgGainType } from '@/lib/finance/capital-gains-tax';
 
 /** Map schema `assetType` codes to the lib's CgAssetType. The lib's
@@ -169,15 +171,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const salaryGross = salaries.reduce(
-      (s, r) => s + (r.grossSalaryPaisa ?? 0),
-      0,
-    );
+    // Form-16-authoritative salary gross + TDS (resolver). Falls back to
+    // salary_income books when no Part-B / Part-A Form 16 exists for the FY.
+    const [salaryResolved, salaryTdsResolved] = await Promise.all([
+      resolveSalaryIncome(userId, fy),
+      resolveSalaryTds(userId, fy),
+    ]);
+
+    const salaryGross = salaryResolved.grossSalaryPaisa;
     const salaryExemptions = salaries.reduce(
       (s, r) => s + (r.exemptionsPaisa ?? 0),
       0,
     );
-    const salaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+    const salaryTds = salaryTdsResolved.valuePaisa;
 
     const manualInterest24b = deductions
       .filter((d) => d.section === '24B')
@@ -236,15 +242,21 @@ export async function GET(request: NextRequest) {
     const manualEightyCPaisa = deductions
       .filter((r) => r.section === '80C')
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
-    const eightyCAppliedPaisa = Math.min(
-      manualEightyCPaisa + loanDeductions.totalPrincipalPaisa,
-      EIGHTY_C_CAP_PAISA,
+    // Chapter VI-A via the shared deduction engine — the SAME source the
+    // /tax regime-compare card uses, so every asset-backed deduction
+    // (EPF/LIC/NPS/ELSS/SGB/small-savings → 80C, NPS Tier-I → 80CCD(1B),
+    // health → 80D, donations → 80G) is reflected, not just manual rows +
+    // loan 80C. Income-side 24(b)/80EEA are excluded (house-property head).
+    const engineDeductions = await deriveDeductions(userId, fy);
+    const eightyCAppliedPaisa = engineDeductions.buckets['80C']?.appliedPaisa ?? 0;
+    const oldDeductionsTotal = Object.entries(engineDeductions.buckets)
+      .filter(([sec]) => sec !== '24B' && sec !== '80EEA')
+      .reduce((s, [, b]) => s + b.appliedPaisa, 0);
+    const deductionBreakdown = engineDeductions.breakdown.filter(
+      (b) => !b.label.includes('24(b)') && !b.label.includes('80EEA'),
     );
-    const otherDeductionsPaisa = deductions
-      .filter((r) => r.section !== '80C')
-      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
-    const oldDeductionsTotal = otherDeductionsPaisa + eightyCAppliedPaisa;
-    const deductionsForRegime = regime === 'OLD' ? oldDeductionsTotal : 0;
+    const deductionsForRegime =
+      regime === 'OLD' ? oldDeductionsTotal : engineDeductions.newRegimeTotalPaisa;
 
     const summary = computeItr2Summary({
       salaryGrossPaisa: salaryGross,
@@ -301,9 +313,13 @@ export async function GET(request: NextRequest) {
         salary: {
           employerCount: salaries.length,
           grossPaisa: salaryGross,
+          grossSource: salaryResolved.source,
+          grossDetail: salaryResolved.detail,
           exemptionsPaisa: salaryExemptions,
           taxableSalaryPaisa: salaryGross - salaryExemptions,
           tdsPaisa: salaryTds,
+          tdsSource: salaryTdsResolved.source,
+          tdsDetail: salaryTdsResolved.detail,
         },
         houseProperties: summary.housePropertyRows,
         otherSources: {
@@ -322,6 +338,7 @@ export async function GET(request: NextRequest) {
           rowCount: deductions.length,
           oldRegimeTotalPaisa: oldDeductionsTotal,
           appliedPaisa: deductionsForRegime,
+          breakdown: deductionBreakdown,
           // Sprint 5.9c — 80C breakdown + loan-derived deductions
           eightyC: {
             manualPaisa: manualEightyCPaisa,

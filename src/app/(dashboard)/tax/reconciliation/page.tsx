@@ -12,7 +12,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Button, Card, CardHeader, CardContent, Badge, Select } from '@dxp/ui';
+import { Button, Card, CardHeader, CardContent, Badge } from '@dxp/ui';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -25,7 +25,7 @@ import {
   Scale,
   Upload,
 } from 'lucide-react';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 type ReconStatus = 'matched' | 'mismatch' | 'missing_actual';
 
@@ -56,24 +56,6 @@ const fmtINR = (paisa: number) =>
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(paisa / 100);
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
-function generateFyOptions(): { value: string; label: string }[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: { value: string; label: string }[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push({ value: `${s}-${e}`, label: `FY ${s}-${e}` });
-  }
-  return out;
-}
 
 function statusBadge(status: ReconStatus) {
   if (status === 'matched') {
@@ -112,7 +94,7 @@ function deltaCell(books: number, actual: number | null) {
 }
 
 export default function ReconciliationPage() {
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
   const [data, setData] = useState<ReconResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -167,9 +149,6 @@ export default function ReconciliationPage() {
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
-          <div className="w-40">
-            <Select options={generateFyOptions()} value={fy} onChange={(v) => setFy(v)} />
-          </div>
           <Link href="/tax/form-16">
             <Button variant="secondary">
               <Upload className="h-4 w-4 mr-1" /> Upload Form 16

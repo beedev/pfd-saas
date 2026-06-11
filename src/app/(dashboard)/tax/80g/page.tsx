@@ -21,11 +21,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Button, Card, CardHeader, CardContent, Badge, Select } from '@dxp/ui';
+import { Button, Card, CardHeader, CardContent, Badge } from '@dxp/ui';
 import { Plus, Loader2, Gift, Pencil, Trash2 } from 'lucide-react';
 import { ScreenReportButton } from '@/components/reports/screen-report-button';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 type EightyGCat =
   | '100_NO_LIMIT'
@@ -64,25 +64,6 @@ const formatINR = (paisa: number) =>
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(paisa / 100);
-
-function previousFy(): string {
-  const c = getCurrentFinancialYear();
-  const s = Number(c.split('-')[0]) - 1;
-  return `${s}-${String((s + 1) % 100).padStart(2, '0')}`;
-}
-
-function generateFyOptions(): Array<{ value: string; label: string }> {
-  const currentStart = Number(getCurrentFinancialYear().split('-')[0]);
-  const opts: Array<{ value: string; label: string }> = [];
-  for (let i = 3; i >= 0; i--) {
-    const s = currentStart - i;
-    opts.push({
-      value: `${s}-${String((s + 1) % 100).padStart(2, '0')}`,
-      label: `FY ${s}-${String((s + 1) % 100).padStart(2, '0')}`,
-    });
-  }
-  return opts;
-}
 
 const BUCKETS: Array<{
   key: EightyGCat;
@@ -135,7 +116,7 @@ export default function Section80GPage() {
     Record<EightyGCat, number> | null
   >(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -223,9 +204,6 @@ export default function Section80GPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-40">
-            <Select options={generateFyOptions()} value={fy} onChange={setFy} />
-          </div>
           {/* Sprint 6.2g — 80G donation log report (PDF + Excel). */}
           <ScreenReportButton reportId="form80g" fy={fy} />
           <Link href="/tax/new?section=80G">
