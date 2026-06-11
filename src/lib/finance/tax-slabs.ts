@@ -31,7 +31,11 @@
  * Sprint 5.1b — Surcharge + marginal relief wired via surcharge.ts.
  */
 
-import { computeSurcharge, bracketThresholdForIncome } from './surcharge';
+import {
+  computeSurcharge,
+  bracketThresholdForIncome,
+  type SurchargeBracket,
+} from './surcharge';
 
 export interface TaxSlabRow {
   slabOrder: number;
@@ -63,6 +67,9 @@ export interface TaxComputeInput {
   regime?: 'OLD' | 'NEW';
   /** Sprint 5.1b — FY string for surcharge bracket selection. */
   fy?: string;
+  /** FY-configurable surcharge brackets for this regime. When omitted,
+   *  computeSurcharge falls back to its hardcoded regime defaults. */
+  surchargeBrackets?: SurchargeBracket[];
 }
 
 export interface TaxComputeResult {
@@ -146,7 +153,7 @@ export function computeSlabBands(taxablePaisa: number, slabs: TaxSlabRow[]): Sla
 }
 
 export function computeTax(input: TaxComputeInput): TaxComputeResult {
-  const { grossIncomePaisa, deductionsPaisa, slabs, config, regime, fy } = input;
+  const { grossIncomePaisa, deductionsPaisa, slabs, config, regime, fy, surchargeBrackets } = input;
 
   // 1. Standard deduction
   const afterStdDed = Math.max(0, grossIncomePaisa - config.standardDeductionPaisa);
@@ -185,7 +192,7 @@ export function computeTax(input: TaxComputeInput): TaxComputeResult {
       taxAtThresholdPaisa,
       regime,
       fy,
-    });
+    }, surchargeBrackets);
     surchargePaisa = sc.surchargePaisa;
     marginalReliefPaisa = sc.marginalReliefPaisa;
     effectiveSurchargePaisa = sc.effectiveSurchargePaisa;
@@ -242,6 +249,11 @@ export interface RegimeCompareInput {
   /** Sprint 5.1b — FY for surcharge bracket selection. Required to
    *  compute surcharge; omit only for unit tests. */
   fy?: string;
+  /** FY-configurable OLD-regime surcharge brackets. Threaded into the
+   *  OLD computeTax call; omit to use the hardcoded defaults. */
+  oldSurchargeBrackets?: SurchargeBracket[];
+  /** FY-configurable NEW-regime surcharge brackets. */
+  newSurchargeBrackets?: SurchargeBracket[];
 }
 
 export interface RegimeCompareResult {
@@ -260,6 +272,7 @@ export function compareRegimes(input: RegimeCompareInput): RegimeCompareResult {
     config: input.oldConfig,
     regime: 'OLD',
     fy: input.fy,
+    surchargeBrackets: input.oldSurchargeBrackets,
   });
   const newResult = computeTax({
     grossIncomePaisa: input.grossIncomePaisa,
@@ -268,6 +281,7 @@ export function compareRegimes(input: RegimeCompareInput): RegimeCompareResult {
     config: input.newConfig,
     regime: 'NEW',
     fy: input.fy,
+    surchargeBrackets: input.newSurchargeBrackets,
   });
 
   // Pick the lower-tax regime. Tie-break NEW (govt default + simpler).

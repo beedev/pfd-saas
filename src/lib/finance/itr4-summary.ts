@@ -37,6 +37,7 @@
  */
 
 import { computeTax, type TaxSlabRow, type TaxRegimeConfigRow } from './tax-slabs';
+import type { PresumptiveRules } from '@/db';
 
 /** Section 44AD gross-receipts limit: ₹2cr. */
 const SEC_44AD_LIMIT_PAISA = 2_00_00_000 * 100;
@@ -85,6 +86,9 @@ export interface Itr4SummaryInput {
   slabs: TaxSlabRow[];
   config: TaxRegimeConfigRow;
   regime: 'OLD' | 'NEW';
+  /** FY-configurable presumptive percentages (44AD/44ADA). When omitted,
+   *  the historical literals (6%/8%, 50%) are used. */
+  presumptive?: PresumptiveRules;
 }
 
 export interface Itr4SummaryResult {
@@ -109,23 +113,34 @@ export interface Itr4SummaryResult {
 }
 
 /** Per section + receipt mode, the deemed-profit % the filer must
- *  declare *at minimum*. Returns null for 44AE (no auto-minimum). */
+ *  declare *at minimum*. Returns null for 44AE (no auto-minimum).
+ *
+ *  @param presumptive  FY-configurable 44AD/44ADA percentages. When
+ *                      provided, uses presumptive.ad.digitalPct/cashPct
+ *                      and presumptive.ada.pct. Defaults to the historical
+ *                      literals (6%/8% for 44AD, 50% for 44ADA). */
 export function deemedProfitPctFor(
   section: PresumptiveSection,
   receiptMode: ReceiptMode,
+  presumptive?: PresumptiveRules,
 ): number | null {
   if (section === '44AD') {
-    return receiptMode === 'DIGITAL' ? 6 : 8; // MIXED → conservative 8%
+    // MIXED → conservative cash %.
+    if (presumptive) {
+      return receiptMode === 'DIGITAL' ? presumptive.ad.digitalPct : presumptive.ad.cashPct;
+    }
+    return receiptMode === 'DIGITAL' ? 6 : 8;
   }
-  if (section === '44ADA') return 50;
+  if (section === '44ADA') return presumptive ? presumptive.ada.pct : 50;
   if (section === '44AE') return null;
   return null;
 }
 
 function evaluatePresumptiveLine(
   line: PresumptiveLineInput,
+  presumptive?: PresumptiveRules,
 ): PresumptiveLineResult {
-  const pct = deemedProfitPctFor(line.section, line.receiptMode);
+  const pct = deemedProfitPctFor(line.section, line.receiptMode, presumptive);
   const minimumProfit =
     pct != null
       ? Math.round((line.grossReceiptsPaisa * pct) / 100)
@@ -152,7 +167,9 @@ export function computeItr4Summary(input: Itr4SummaryInput): Itr4SummaryResult {
     input.salaryGrossPaisa - input.salaryExemptionsPaisa,
   );
 
-  const presumptiveLines = input.presumptiveLines.map(evaluatePresumptiveLine);
+  const presumptiveLines = input.presumptiveLines.map((line) =>
+    evaluatePresumptiveLine(line, input.presumptive),
+  );
   const totalPresumptiveProfit = presumptiveLines.reduce(
     (s, r) => s + r.declaredProfitPaisa,
     0,

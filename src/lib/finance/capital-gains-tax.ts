@@ -39,6 +39,8 @@
  *    (carry-forward modelled in ITR itself).
  */
 
+import type { CapitalGainsRules } from '@/db';
+
 export type CgAssetType =
   | 'STOCKS'
   | 'EQUITY_MF'
@@ -90,10 +92,10 @@ function isEquityBucket(t: CgAssetType): boolean {
   return t === 'STOCKS' || t === 'EQUITY_MF';
 }
 
-function isPostReform(saleDate: string | undefined): boolean {
+function isPostReform(saleDate: string | undefined, cutoff: string = POST_REFORM_CUTOFF): boolean {
   // Missing date → assume current regime (post-reform).
   if (!saleDate) return true;
-  return saleDate >= POST_REFORM_CUTOFF;
+  return saleDate >= cutoff;
 }
 
 export interface CapitalGainsTaxInput {
@@ -232,15 +234,31 @@ const STCG_EQUITY_RATE_POST = 0.20;
 /**
  * Compute aggregate capital-gains tax for a financial year.
  *
- * @param rows  capital_gains rows for the FY (paisa, gains may be negative)
- * @param fy    financial year (carried for audit; rate selection is by
- *              SALE DATE, not FY, per the Finance Act 2024 transition)
+ * @param rows     capital_gains rows for the FY (paisa, gains may be negative)
+ * @param fy       financial year (carried for audit; rate selection is by
+ *                 SALE DATE, not FY, per the Finance Act 2024 transition)
+ * @param cgRules  optional FY-configurable rates/exemptions/cutoff. When
+ *                 provided, overrides the module constants — rates in the
+ *                 rules object are PERCENTAGES (e.g. 12.5), so divided by 100.
+ *                 Defaults to the historical hardcoded constants.
  */
 export function computeAggregateCapitalGainsTax(
   rows: AggregateCgRow[],
   fy: string,
+  cgRules?: CapitalGainsRules,
 ): AggregateCapitalGainsTax {
   void fy; // rate selection is sale-date driven; fy retained for audit
+
+  // Resolve rates/exemptions/cutoff from the injected rules (percentages →
+  // fractions) or fall back to the module constants. Pure refactor — the
+  // seeded values equal the constants, so results stay byte-identical.
+  const ltcgEquityRatePre = cgRules ? cgRules.ltcgEquityRatePrePct / 100 : LTCG_EQUITY_RATE_PRE;
+  const ltcgEquityRatePost = cgRules ? cgRules.ltcgEquityRatePostPct / 100 : LTCG_EQUITY_RATE_POST;
+  const stcgEquityRatePre = cgRules ? cgRules.stcgEquityRatePrePct / 100 : STCG_EQUITY_RATE_PRE;
+  const stcgEquityRatePost = cgRules ? cgRules.stcgEquityRatePostPct / 100 : STCG_EQUITY_RATE_POST;
+  const sec112aExemptionPre = cgRules ? cgRules.sec112aExemptionPrePaisa : SEC_112A_EXEMPTION_PRE_PAISA;
+  const sec112aExemptionPost = cgRules ? cgRules.sec112aExemptionPostPaisa : SEC_112A_EXEMPTION_POST_PAISA;
+  const reformCutoff = cgRules ? cgRules.reformCutoff : POST_REFORM_CUTOFF;
 
   // Net per (equity-class × gain-type × period) bucket.
   let ltcgEquityNetPre = 0;
@@ -252,7 +270,7 @@ export function computeAggregateCapitalGainsTax(
   for (const r of rows) {
     const equity = isEquityBucket(r.assetType);
     const saleDate = r.saleDate ?? undefined;
-    const post = isPostReform(saleDate);
+    const post = isPostReform(saleDate, reformCutoff);
     if (equity) {
       if (r.holdingPeriod === 'LTCG') {
         if (post) ltcgEquityNetPost += r.capitalGain;
@@ -273,17 +291,17 @@ export function computeAggregateCapitalGainsTax(
 
   // ── Equity LTCG (sec 112A): net per period, ONE exemption per period,
   // tax positive excess. Negative net → 0 (carry-forward not modelled). ──
-  const ltcgEquityTaxablePre = Math.max(0, ltcgEquityNetPre - SEC_112A_EXEMPTION_PRE_PAISA);
-  const ltcgEquityTaxPre = Math.round(ltcgEquityTaxablePre * LTCG_EQUITY_RATE_PRE);
-  const ltcgEquityTaxablePost = Math.max(0, ltcgEquityNetPost - SEC_112A_EXEMPTION_POST_PAISA);
-  const ltcgEquityTaxPost = Math.round(ltcgEquityTaxablePost * LTCG_EQUITY_RATE_POST);
+  const ltcgEquityTaxablePre = Math.max(0, ltcgEquityNetPre - sec112aExemptionPre);
+  const ltcgEquityTaxPre = Math.round(ltcgEquityTaxablePre * ltcgEquityRatePre);
+  const ltcgEquityTaxablePost = Math.max(0, ltcgEquityNetPost - sec112aExemptionPost);
+  const ltcgEquityTaxPost = Math.round(ltcgEquityTaxablePost * ltcgEquityRatePost);
   const ltcgEquityTax = ltcgEquityTaxPre + ltcgEquityTaxPost;
 
   if (ltcgEquityNetPre !== 0 || ltcgEquityTaxPre > 0) {
     breakdown.push({
       label: 'Equity LTCG (sec 112A, pre-23-Jul-2024 @ 10%)',
       gainPaisa: ltcgEquityNetPre,
-      exemptionPaisa: ltcgEquityNetPre > 0 ? Math.min(ltcgEquityNetPre, SEC_112A_EXEMPTION_PRE_PAISA) : 0,
+      exemptionPaisa: ltcgEquityNetPre > 0 ? Math.min(ltcgEquityNetPre, sec112aExemptionPre) : 0,
       taxPaisa: ltcgEquityTaxPre,
     });
   }
@@ -291,14 +309,14 @@ export function computeAggregateCapitalGainsTax(
     breakdown.push({
       label: 'Equity LTCG (sec 112A, post-23-Jul-2024 @ 12.5%)',
       gainPaisa: ltcgEquityNetPost,
-      exemptionPaisa: ltcgEquityNetPost > 0 ? Math.min(ltcgEquityNetPost, SEC_112A_EXEMPTION_POST_PAISA) : 0,
+      exemptionPaisa: ltcgEquityNetPost > 0 ? Math.min(ltcgEquityNetPost, sec112aExemptionPost) : 0,
       taxPaisa: ltcgEquityTaxPost,
     });
   }
 
   // ── Equity STCG (sec 111A): net per period, no exemption. ──
-  const stcgEquityTaxPre = Math.round(Math.max(0, stcgEquityNetPre) * STCG_EQUITY_RATE_PRE);
-  const stcgEquityTaxPost = Math.round(Math.max(0, stcgEquityNetPost) * STCG_EQUITY_RATE_POST);
+  const stcgEquityTaxPre = Math.round(Math.max(0, stcgEquityNetPre) * stcgEquityRatePre);
+  const stcgEquityTaxPost = Math.round(Math.max(0, stcgEquityNetPost) * stcgEquityRatePost);
   const stcgEquityTax = stcgEquityTaxPre + stcgEquityTaxPost;
 
   if (stcgEquityNetPre !== 0 || stcgEquityTaxPre > 0) {

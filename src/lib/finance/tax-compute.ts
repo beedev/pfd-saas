@@ -51,6 +51,7 @@ import { deriveDeductions } from './deduction-engine';
 import { resolveSalaryIncome } from './form16-tax-source';
 import { financialYearBoundsIso } from './tax-constants';
 import { computeAggregateCapitalGainsTax } from './capital-gains-tax';
+import { getTaxRules } from './tax-rules';
 
 const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
 const TWO_LAKH = 2_00_000 * 100;
@@ -132,6 +133,12 @@ export async function computeFyTaxComparison(
   if (slabs.length === 0 || configs.length < 2) {
     return { error: `No slab data for FY ${fy}. Seed first.`, status: 404 };
   }
+
+  // FY-configurable tax rules (deduction caps, surcharge brackets, CG
+  // rates, presumptive %) — fetched ONCE here and injected into the pure
+  // compute libs below. Falls back to the historical constants when no
+  // tax_rules row exists, so results stay byte-identical to the seed.
+  const rules = await getTaxRules(fy);
   const slabsByRegime = (regime: TaxRegime) => slabs.filter((s) => s.regime === regime);
   const configByRegime = (regime: TaxRegime) => {
     const cfg = configs.find((c) => c.regime === regime);
@@ -269,7 +276,7 @@ export async function computeFyTaxComparison(
         homeLoanInterestPaidPaisa: interestPaid,
         isSelfOccupied: p.isSelfOccupied,
         loanDisbursedAfter1Apr1999: post1999,
-      });
+      }, rules.sec24bSelfOccupiedCapPaisa, rules.sec24bPre1999CapPaisa);
       sec24bTotalPaisa += sec24b;
       sec80eeaTotalPaisa += computeSection80EeaDeduction({
         homeLoanInterestPaidPaisa: interestPaid,
@@ -278,7 +285,7 @@ export async function computeFyTaxComparison(
         stampValuePaisa: p.stampValuePaisa,
         carpetAreaSqft: p.carpetAreaSqft,
         loanDisbursedDate: p.homeLoanDisbursedDate,
-      });
+      }, rules.sec80eeaCapPaisa);
     }
   }
 
@@ -293,12 +300,12 @@ export async function computeFyTaxComparison(
         homeLoanInterestPaidPaisa: userInterest,
         isSelfOccupied: true,
         loanDisbursedAfter1Apr1999: post1999,
-      });
+      }, rules.sec24bSelfOccupiedCapPaisa, rules.sec24bPre1999CapPaisa);
       const newContribution = computeSection24bDeduction({
         homeLoanInterestPaidPaisa: Math.max(userInterest, loanInterestPaisa),
         isSelfOccupied: true,
         loanDisbursedAfter1Apr1999: post1999,
-      });
+      }, rules.sec24bSelfOccupiedCapPaisa, rules.sec24bPre1999CapPaisa);
       sec24bTotalPaisa += Math.max(0, newContribution - oldContribution);
     } else {
       sec24bTotalPaisa += loanInterestPaisa;
@@ -346,6 +353,8 @@ export async function computeFyTaxComparison(
     newSlabs: slabsByRegime('NEW'),
     newConfig: configByRegime('NEW'),
     fy,
+    oldSurchargeBrackets: rules.surchargeOldBrackets,
+    newSurchargeBrackets: rules.surchargeNewBrackets,
   });
   const newResult = computeTax({
     grossIncomePaisa: Math.max(0, newGrossSlab),
@@ -354,6 +363,7 @@ export async function computeFyTaxComparison(
     config: configByRegime('NEW'),
     regime: 'NEW',
     fy,
+    surchargeBrackets: rules.surchargeNewBrackets,
   });
 
   // ─── Capital gains (flat-rate, added on top, cess re-applied) ─────
@@ -366,6 +376,7 @@ export async function computeFyTaxComparison(
       taxAmount: r.taxAmount ?? 0,
     })),
     fy,
+    rules.capitalGains,
   );
   const capitalGainsTaxPaisa = capitalGainsAgg.totalTaxPaisa;
   const capitalGainsTaxWithCessPaisa = Math.round(capitalGainsTaxPaisa * (1 + CESS_PCT / 100));

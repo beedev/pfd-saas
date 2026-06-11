@@ -59,8 +59,14 @@ export interface Section80EeaInput {
 /**
  * Returns the deductible 80EEA amount in paisa. Always ≥ 0, capped
  * at ₹1.5L, and at the residual interest above the sec 24(b) cap.
+ *
+ * @param capPaisa  FY-configurable ₹1.5L deduction cap. Defaults to the
+ *                  module constant.
  */
-export function computeSection80EeaDeduction(input: Section80EeaInput): number {
+export function computeSection80EeaDeduction(
+  input: Section80EeaInput,
+  capPaisa: number = SECTION_80EEA_CAP_PAISA,
+): number {
   const {
     homeLoanInterestPaidPaisa,
     section24bDeductionPaisa,
@@ -83,5 +89,5 @@ export function computeSection80EeaDeduction(input: Section80EeaInput): number {
   // Eligible: 80EEA applies to interest ABOVE the 24(b) deduction,
   // capped at ₹1.5L.
   const residual = Math.max(0, homeLoanInterestPaidPaisa - section24bDeductionPaisa);
-  return Math.min(residual, SECTION_80EEA_CAP_PAISA);
+  return Math.min(residual, capPaisa);
 }
