@@ -26,6 +26,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, advanceTaxInstallments } from '@/db';
 import { auth } from '@/auth';
 import { projectAnnualTax } from '@/lib/finance/tax-projection';
+import { resolveTaxPaid } from '@/lib/finance/form16-tax-source';
 
 /** Quarterly schedule fixed by Section 211 of the Income Tax Act. */
 const SCHEDULE: Array<{ order: number; monthOfDueDay: number; isNextYear: boolean; pct: number }> = [
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
     const userId = session.user.id;
     await seedIfMissing(userId, fy);
 
-    const [rows, projection] = await Promise.all([
+    const [rows, projection, taxPaid] = await Promise.all([
       db
         .select()
         .from(advanceTaxInstallments)
@@ -111,9 +112,20 @@ export async function GET(request: NextRequest) {
           and(eq(advanceTaxInstallments.userId, userId), eq(advanceTaxInstallments.fy, fy)),
         ),
       projectAnnualTax(userId, fy),
+      resolveTaxPaid(userId, fy),
     ]);
 
     const projectedAnnualTaxPaisa = projection?.projectedAnnualTaxPaisa ?? 0;
+    // Advance-tax obligation is on ASSESSED tax = total tax − tax deducted
+    // at source. TDS (salary Part-A + 194x on receipts) is credited
+    // automatically; only the residual is payable as advance tax. Without
+    // this the card showed the full liability as "due" and raised a false
+    // 234B/234C alarm for a salaried/professional filer whose employer and
+    // payers already deducted most of the tax. Self-assessment payments are
+    // NOT netted here — those are tracked per-installment via paid_amount.
+    const tdsCreditedPaisa =
+      (taxPaid?.salaryTds.valuePaisa ?? 0) + (taxPaid?.otherTdsPaisa ?? 0);
+    const assessedTaxPaisa = Math.max(0, projectedAnnualTaxPaisa - tdsCreditedPaisa);
     const today = new Date();
 
     const sorted = rows.sort((a, b) => a.installmentOrder - b.installmentOrder);
@@ -121,7 +133,7 @@ export async function GET(request: NextRequest) {
     let cumulativeDueAsOfToday = 0;
 
     const installments = sorted.map((r) => {
-      const expectedDuePaisa = Math.round((projectedAnnualTaxPaisa * r.duePct) / 100);
+      const expectedDuePaisa = Math.round((assessedTaxPaisa * r.duePct) / 100);
       const paid = r.paidAmountPaisa ?? 0;
       cumulativePaid += paid;
       // Only count this slot in cumulative-due if today has already crossed its due date
@@ -141,7 +153,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const totalExpected = projectedAnnualTaxPaisa;
+    const totalExpected = assessedTaxPaisa;
     const totalPaid = cumulativePaid;
     const pending = Math.max(0, totalExpected - totalPaid);
 
@@ -155,7 +167,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       fy,
       projectedAnnualTaxPaisa,
-      recommendedRegime: projection?.comparison.recommendation ?? null,
+      // TDS already deducted at source + the residual advance-tax base.
+      tdsCreditedPaisa,
+      assessedTaxPaisa,
+      recommendedRegime: projection?.recommendation ?? null,
       installments,
       totals: {
         expectedPaisa: totalExpected,
