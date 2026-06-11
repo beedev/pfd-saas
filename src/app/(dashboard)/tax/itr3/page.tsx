@@ -17,7 +17,7 @@ import {
 interface Summary {
   fy: string;
   schedules: {
-    salary: { rowCount: number; totalGrossSalary: number; totalTaxableSalary: number; totalSalaryTds: number };
+    salary: { rowCount: number; totalGrossSalary: number; totalTaxableSalary: number; totalSalaryTds: number; grossSource?: string; grossDetail?: string };
     businessProfession: {
       consultingTurnover: number;
       invoiceCount: number;
@@ -133,14 +133,17 @@ export default function Itr3HubPage() {
             <ScheduleCard
               icon={Briefcase}
               title="Schedule S — Salary"
-              status={s!.salary.rowCount > 0 ? 'done' : 'pending'}
+              status={s!.salary.totalGrossSalary > 0 ? 'done' : 'pending'}
               summary={
-                s!.salary.rowCount > 0 ? (
+                s!.salary.totalGrossSalary > 0 ? (
                   <>
-                    {s!.salary.rowCount} employer(s) · Gross {formatINR(s!.salary.totalGrossSalary)} · Taxable {formatINR(s!.salary.totalTaxableSalary)} · TDS {formatINR(s!.salary.totalSalaryTds)}
+                    {s!.salary.grossSource === 'form16'
+                      ? 'From Form 16'
+                      : `${s!.salary.rowCount} employer(s)`}{' '}
+                    · Gross {formatINR(s!.salary.totalGrossSalary)} · Taxable {formatINR(s!.salary.totalTaxableSalary)} · TDS {formatINR(s!.salary.totalSalaryTds)}
                   </>
                 ) : (
-                  <>No Form 16 entries yet</>
+                  <>No salary captured yet — upload Form 16 or add manually</>
                 )
               }
               actions={[
