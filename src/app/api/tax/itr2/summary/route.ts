@@ -43,6 +43,7 @@ import { auth } from '@/auth';
 import { computeItr2Summary } from '@/lib/finance/itr2-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from '@/lib/finance/form16-tax-source';
 import type { CapitalGainRow, CgAssetType, CgGainType } from '@/lib/finance/capital-gains-tax';
 
 /** Map schema `assetType` codes to the lib's CgAssetType. The lib's
@@ -169,15 +170,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const salaryGross = salaries.reduce(
-      (s, r) => s + (r.grossSalaryPaisa ?? 0),
-      0,
-    );
+    // Form-16-authoritative salary gross + TDS (resolver). Falls back to
+    // salary_income books when no Part-B / Part-A Form 16 exists for the FY.
+    const [salaryResolved, salaryTdsResolved] = await Promise.all([
+      resolveSalaryIncome(userId, fy),
+      resolveSalaryTds(userId, fy),
+    ]);
+
+    const salaryGross = salaryResolved.grossSalaryPaisa;
     const salaryExemptions = salaries.reduce(
       (s, r) => s + (r.exemptionsPaisa ?? 0),
       0,
     );
-    const salaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+    const salaryTds = salaryTdsResolved.valuePaisa;
 
     const manualInterest24b = deductions
       .filter((d) => d.section === '24B')
@@ -301,9 +306,13 @@ export async function GET(request: NextRequest) {
         salary: {
           employerCount: salaries.length,
           grossPaisa: salaryGross,
+          grossSource: salaryResolved.source,
+          grossDetail: salaryResolved.detail,
           exemptionsPaisa: salaryExemptions,
           taxableSalaryPaisa: salaryGross - salaryExemptions,
           tdsPaisa: salaryTds,
+          tdsSource: salaryTdsResolved.source,
+          tdsDetail: salaryTdsResolved.detail,
         },
         houseProperties: summary.housePropertyRows,
         otherSources: {

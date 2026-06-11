@@ -42,6 +42,7 @@ import { auth } from '@/auth';
 import { computeItr1Summary } from '@/lib/finance/itr1-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from '@/lib/finance/form16-tax-source';
 
 /** ITR-1 cap — gross total income must be ≤ ₹50L. */
 const ITR1_CAP_PAISA = 50 * 100 * 100000;
@@ -174,15 +175,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const salaryGross = salaries.reduce(
-      (s, r) => s + (r.grossSalaryPaisa ?? 0),
-      0,
-    );
+    // Form-16-authoritative salary gross + TDS (resolver). When a Part-B
+    // Form 16 exists for the FY its figures override the salary_income
+    // books; otherwise these equal the books sums (behaviour unchanged).
+    const [salaryResolved, salaryTdsResolved] = await Promise.all([
+      resolveSalaryIncome(userId, fy),
+      resolveSalaryTds(userId, fy),
+    ]);
+
+    const salaryGross = salaryResolved.grossSalaryPaisa;
     const salaryExemptions = salaries.reduce(
       (s, r) => s + (r.exemptionsPaisa ?? 0),
       0,
     );
-    const salaryTds = salaries.reduce((s, r) => s + (r.tdsPaisa ?? 0), 0);
+    const salaryTds = salaryTdsResolved.valuePaisa;
 
     // ITR-1 single property — derive 24(b) interest from tax_deductions
     // section '24B' for the FY (caller's accepted Section 24 cap).
@@ -378,9 +384,13 @@ export async function GET(request: NextRequest) {
         salary: {
           employerCount: salaries.length,
           grossPaisa: salaryGross,
+          grossSource: salaryResolved.source,
+          grossDetail: salaryResolved.detail,
           exemptionsPaisa: salaryExemptions,
           taxableSalaryPaisa: salaryGross - salaryExemptions,
           tdsPaisa: salaryTds,
+          tdsSource: salaryTdsResolved.source,
+          tdsDetail: salaryTdsResolved.detail,
         },
         houseProperty: property
           ? {
