@@ -15,6 +15,8 @@ import {
   type Column,
 } from '@dxp/ui';
 import { Plus, Trash2, Loader2, Landmark } from 'lucide-react';
+import { ContextualImport } from '@/components/import/contextual-import';
+import type { NpsSotParsed } from '@/lib/services/statement-parsers';
 
 interface NPSAccount {
   id: number;
@@ -177,12 +179,55 @@ export default function NPSPage() {
           <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">NPS</h1>
           <p className="text-[var(--dxp-text-secondary)]">National Pension System accounts</p>
         </div>
-        <Link href="/investments/nps/new">
-          <Button variant="primary">
-            <Plus className="mr-2 h-4 w-4" />
-            Add NPS account
-          </Button>
-        </Link>
+        <div className="flex gap-3">
+          <ContextualImport<NpsSotParsed>
+            buttonLabel="Import NPS statement"
+            title="Import NPS Statement of Transactions"
+            subtitle="Protean / KFin CRA Statement of Transactions PDF"
+            accept=".pdf"
+            hint="nps-sot"
+            canImport={(p) => p?.type === 'nps-sot'}
+            commit={async (p) => {
+              const r = await fetch('/api/investments/import/commit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'nps-sot', data: p.data }),
+              });
+              const d = await r.json();
+              if (!r.ok) throw new Error(d?.error || 'Import failed');
+            }}
+            onImported={load}
+            renderPreview={(p) => (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">{p.confidence}</Badge>
+                  <span className="text-xs text-[var(--dxp-text-muted)]">
+                    {p.data.subscriberName || 'NPS subscriber'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <span className="text-[var(--dxp-text-muted)]">PRAN</span>
+                  <span className="font-mono">{p.data.pran || '—'}</span>
+                  <span className="text-[var(--dxp-text-muted)]">Tier</span>
+                  <span className="font-mono">{p.data.tier || '—'}</span>
+                  <span className="text-[var(--dxp-text-muted)]">Total value</span>
+                  <span className="font-mono">{formatINR(p.data.totalValuePaisa)}</span>
+                  <span className="text-[var(--dxp-text-muted)]">Contributed</span>
+                  <span className="font-mono">{formatINR(p.data.totalContributedPaisa)}</span>
+                </div>
+                {p.warnings.map((w, i) => (
+                  <p key={i} className="rounded bg-amber-50 p-2 text-xs text-amber-800">⚠ {w}</p>
+                ))}
+              </div>
+            )}
+          />
+          <Link href="/investments/nps/new">
+            <Button variant="primary">
+              <Plus className="mr-2 h-4 w-4" />
+              Add NPS account
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <StatsDisplay

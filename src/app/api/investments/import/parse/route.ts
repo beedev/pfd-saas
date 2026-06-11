@@ -20,7 +20,7 @@ import { parseStatement, parseZerodhaTaxPnl, type DocType } from '@/lib/services
 export const runtime = 'nodejs';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const VALID_HINTS: DocType[] = ['lic', 'chit', 'mf-sip'];
+const VALID_HINTS: DocType[] = ['lic', 'chit', 'mf-sip', 'epf-passbook', 'nps-sot'];
 
 /** Detect a Zerodha tax-P&L spreadsheet upload by file name / mime type. */
 function isXlsxUpload(file: File): boolean {

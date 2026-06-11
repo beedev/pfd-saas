@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Trash2, ArrowLeft, FileText } from 'lucide-react';
+import { Trash2, ArrowLeft, FileText, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SalaryRow {
@@ -84,9 +84,14 @@ function Inner() {
           <h1 className="text-2xl font-bold text-gray-900">Salary Income</h1>
           <p className="text-sm text-gray-500">FY {fy} — books vs the official Form 16</p>
         </div>
-        <Link href="/tax/form-16" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
-          <FileText className="h-4 w-4" /> Manage Form 16
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/tax/import" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
+            <Upload className="h-4 w-4" /> Import from Yeswanth TaxCalc
+          </Link>
+          <Link href="/tax/form-16" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
+            <FileText className="h-4 w-4" /> Manage Form 16
+          </Link>
+        </div>
       </div>
 
       {/* Books vs Form 16 (official) — the certificate is final; tax is

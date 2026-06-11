@@ -17,6 +17,8 @@ import {
   insurancePolicies,
   chitFunds,
   capitalGains,
+  epfAccounts,
+  npsAccounts,
   type PolicyType,
   type CapGainAssetType,
   type HoldingPeriod,
@@ -26,6 +28,8 @@ import type {
   LicPaymentMode,
   ChitParsed,
   CgStatementRow,
+  EpfPassbookData,
+  NpsSotData,
 } from '@/lib/services/statement-parsers';
 import { calculateChitXirrFromSummary } from '@/lib/finance/chit-xirr';
 
@@ -364,6 +368,139 @@ async function commitCgStatement(body: CgCommitBody, userId: string) {
   return { inserted: values.length };
 }
 
+/* ─── EPF passbook commit ─────────────────────────────────────────────── */
+
+interface EpfPassbookCommitBody {
+  type: 'epf-passbook';
+  data: EpfPassbookData;
+}
+
+/** Today as an ISO yyyy-mm-dd string. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Insert (or update) a single EPF account from a parsed passbook.
+ *
+ * The passbook gives employee + employer closing balances; it does NOT
+ * give a separate "total contributed" figure, so we estimate
+ * `totalContributed` as the sum of the two shares (best available).
+ *
+ * Respects the `epf_account_number_unique` (userId, accountNumber) index:
+ * when an `accountNumber` (member id) is present and a row already exists,
+ * we UPDATE it instead of inserting a duplicate. When `accountNumber` is
+ * null the unique index does not bind a second null the same way, so we
+ * fall back to a plain insert.
+ */
+async function commitEpfPassbook(body: EpfPassbookCommitBody, userId: string) {
+  const d = body.data;
+  const employee = d.employeeBalancePaisa ?? 0;
+  const employer = d.employerBalancePaisa ?? 0;
+  const total = employee + employer;
+  const accountNumber = d.memberId ?? null;
+  const openingDate = d.asOfDate || todayIso();
+
+  const baseValues = {
+    accountType: 'EPF' as const,
+    accountHolder: d.employerName || 'EPF account',
+    universalAccountNumber: d.uan ?? null,
+    accountNumber,
+    employeeBalance: employee,
+    employerBalance: employer,
+    totalBalance: total,
+    totalContributed: total,
+    monthlyContributionPaisa: d.monthlyContributionPaisa ?? 0,
+    openingDate,
+    lastContributionDate: d.asOfDate ?? null,
+    notes: 'Imported from EPF passbook',
+    userId,
+  };
+
+  // If we have a member id, honour the (userId, accountNumber) uniqueness.
+  if (accountNumber) {
+    const existing = await db
+      .select({ id: epfAccounts.id })
+      .from(epfAccounts)
+      .where(and(eq(epfAccounts.userId, userId), eq(epfAccounts.accountNumber, accountNumber)))
+      .limit(1);
+
+    if (existing[0]) {
+      await db
+        .update(epfAccounts)
+        .set({
+          accountHolder: baseValues.accountHolder,
+          universalAccountNumber: baseValues.universalAccountNumber,
+          employeeBalance: baseValues.employeeBalance,
+          employerBalance: baseValues.employerBalance,
+          totalBalance: baseValues.totalBalance,
+          totalContributed: baseValues.totalContributed,
+          monthlyContributionPaisa: baseValues.monthlyContributionPaisa,
+          lastContributionDate: baseValues.lastContributionDate,
+          notes: baseValues.notes,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(epfAccounts.id, existing[0].id), eq(epfAccounts.userId, userId)));
+      return { type: 'epf-passbook', inserted: 0, updated: 1 };
+    }
+  }
+
+  await db.insert(epfAccounts).values({
+    ...baseValues,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  return { type: 'epf-passbook', inserted: 1 };
+}
+
+/* ─── NPS Statement-of-Transactions commit ────────────────────────────── */
+
+interface NpsSotCommitBody {
+  type: 'nps-sot';
+  data: NpsSotData;
+}
+
+/**
+ * Insert a single NPS account from a parsed Statement of Transactions.
+ *
+ * `npsAccounts` requires accountNumber (PRAN), accountHolder, pan, tier,
+ * totalValue, totalContributed, monthlyContributionPaisa and openingDate
+ * (all notNull). The SoT carries no PAN, so `pan` is placeholdered with
+ * 'UNKNOWN' and a warning is surfaced to the caller. PRAN missing → a
+ * clear placeholder so the notNull constraint holds.
+ */
+async function commitNpsSot(body: NpsSotCommitBody, userId: string) {
+  const d = body.data;
+  const warnings: string[] = [];
+
+  const accountNumber = d.pran || `NPS-${todayIso()}`;
+  if (!d.pran) warnings.push('PRAN missing from statement — used a placeholder account number.');
+
+  // pan is notNull on npsAccounts; the SoT has none.
+  const pan = 'UNKNOWN';
+  warnings.push('PAN not present in NPS statement — set it manually on the account.');
+
+  await db.insert(npsAccounts).values({
+    accountNumber,
+    accountHolder: d.subscriberName || 'NPS subscriber',
+    pan,
+    tier: d.tier || 'TIER1',
+    equityFundValue: d.equityFundValuePaisa ?? 0,
+    debtFundValue: d.debtFundValuePaisa ?? 0,
+    alternativeFundValue: d.alternativeFundValuePaisa ?? 0,
+    totalValue: d.totalValuePaisa ?? 0,
+    totalContributed: d.totalContributedPaisa ?? 0,
+    monthlyContributionPaisa: d.monthlyContributionPaisa ?? 0,
+    openingDate: d.asOfDate || todayIso(),
+    notes: 'Imported from NPS Statement of Transactions',
+    userId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  return { type: 'nps-sot', inserted: 1, warnings };
+}
+
 /* ─── dispatcher ──────────────────────────────────────────────────────── */
 
 export async function POST(request: NextRequest) {
@@ -374,6 +511,8 @@ export async function POST(request: NextRequest) {
       | LicCommitBody
       | ChitCommitBody
       | CgCommitBody
+      | EpfPassbookCommitBody
+      | NpsSotCommitBody
       | { type: 'mf-sip' };
 
     if (!body || !('type' in body)) {
@@ -392,6 +531,14 @@ export async function POST(request: NextRequest) {
       case 'cg-statement': {
         const result = await commitCgStatement(body, session.user.id);
         return NextResponse.json({ type: 'cg-statement', ...result });
+      }
+      case 'epf-passbook': {
+        const result = await commitEpfPassbook(body, session.user.id);
+        return NextResponse.json(result);
+      }
+      case 'nps-sot': {
+        const result = await commitNpsSot(body, session.user.id);
+        return NextResponse.json(result);
       }
       case 'mf-sip':
         return NextResponse.json(
