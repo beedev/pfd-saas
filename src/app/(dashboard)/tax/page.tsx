@@ -21,7 +21,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 import { RegimeComparisonCard } from '@/components/forms/regime-comparison-card';
 import { AdvanceTaxCard } from '@/components/forms/advance-tax-card';
 import { TaxKpiStrip } from '@/components/forms/tax-kpi-strip';
@@ -82,26 +82,8 @@ const formatINR = (paisa: number) =>
     paisa / 100
   );
 
-function generateFyOptions(): string[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: string[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push(`${s}-${e}`);
-  }
-  return out;
-}
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
 export default function TaxDashboardPage() {
-  const [fy, setFy] = useState<string>(previousFy());
+  const { fy, setFy } = useFinancialYear();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [taxPayments, setTaxPayments] = useState<TaxPayment[]>([]);
   const [totalTaxPaid, setTotalTaxPaid] = useState(0);
@@ -228,8 +210,6 @@ export default function TaxDashboardPage() {
     }
   };
 
-  const fyOptions = generateFyOptions().map((y) => ({ value: y, label: `FY ${y}` }));
-
   // Decide whether to render the full dashboard or the empty-state
   // checklist instead. Rule: render checklist if both salary AND
   // deductions are missing. If at least one exists, render BOTH (so
@@ -256,9 +236,6 @@ export default function TaxDashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 sm:w-auto">
-          <div className="w-full sm:w-40">
-            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
-          </div>
           {/* Sprint 6.2g — Section 80 + Capital Gains reports per the
               currently-selected FY. PDF/Excel/CSV for both. */}
           <ScreenReportButton reportId="section80" fy={fy} label="Section 80" />

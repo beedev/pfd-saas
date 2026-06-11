@@ -20,7 +20,6 @@ import {
   CardHeader,
   CardContent,
   Badge,
-  Select,
   Input,
 } from '@dxp/ui';
 import {
@@ -33,7 +32,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 interface Form16Upload {
   id: number;
@@ -77,26 +76,8 @@ const fmtINR = (paisa: number) =>
     maximumFractionDigits: 0,
   }).format(paisa / 100);
 
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
-function generateFyOptions(): { value: string; label: string }[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: { value: string; label: string }[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push({ value: `${s}-${e}`, label: `FY ${s}-${e}` });
-  }
-  return out;
-}
-
 export default function Form16ListPage() {
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -218,9 +199,6 @@ export default function Form16ListPage() {
             Upload your Form 16 PDF or enter the figures manually. Each upload
             participates in the unified tax reconciliation.
           </p>
-        </div>
-        <div className="w-40">
-          <Select options={generateFyOptions()} value={fy} onChange={(v) => setFy(v)} />
         </div>
       </div>
 

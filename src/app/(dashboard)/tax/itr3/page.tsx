@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Download, FileText, Plus, AlertCircle, CheckCircle2, Briefcase, Banknote, Receipt, Wallet, Calculator } from 'lucide-react';
 import { toast } from 'sonner';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 import { ItrResultBanner } from '@/components/forms/itr-result-banner';
 import {
   ItrEligibilityBanner,
@@ -42,23 +43,8 @@ interface Summary {
 const formatINR = (paisa: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(paisa / 100);
 
-function currentFy(): string {
-  const d = new Date();
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
-}
-
-const FY_OPTIONS = (() => {
-  const cur = currentFy();
-  const startYear = parseInt(cur.split('-')[0], 10);
-  return [0, -1, -2].map((delta) => {
-    const y = startYear + delta;
-    return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
-  });
-})();
-
 export default function Itr3HubPage() {
-  const [fy, setFy] = useState<string>(currentFy());
+  const { fy } = useFinancialYear();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   // Sprint 5.2 — total tax + regime for the ITR result banner. ITR-3
@@ -119,15 +105,6 @@ export default function Itr3HubPage() {
           </h1>
           <p className="text-sm text-gray-500">Capture all schedules, then export CSVs into the official ITR-3 utility.</p>
         </div>
-        <select
-          value={fy}
-          onChange={(e) => setFy(e.target.value)}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium"
-        >
-          {FY_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>FY {opt}</option>
-          ))}
-        </select>
       </div>
 
       {loading ? (

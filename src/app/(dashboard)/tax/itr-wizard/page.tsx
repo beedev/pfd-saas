@@ -15,10 +15,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Card, CardHeader, CardContent, Badge, Button, Input, Select } from '@dxp/ui';
+import { Card, CardHeader, CardContent, Badge, Button, Input } from '@dxp/ui';
 import { Loader2, FileCheck2, Sparkles, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 interface Detected {
   hasSalary: boolean;
@@ -50,26 +50,8 @@ const formatINR = (paisa: number) =>
     maximumFractionDigits: 0,
   }).format(paisa / 100);
 
-function generateFyOptions(): string[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: string[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push(`${s}-${e}`);
-  }
-  return out;
-}
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
 export default function ItrWizardPage() {
-  const [fy, setFy] = useState<string>(previousFy());
+  const { fy } = useFinancialYear();
   const [detected, setDetected] = useState<Detected | null>(null);
   const [existing, setExisting] = useState<Selection | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -154,8 +136,6 @@ export default function ItrWizardPage() {
     }
   };
 
-  const fyOptions = generateFyOptions().map((y) => ({ value: y, label: `FY ${y}` }));
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -166,9 +146,6 @@ export default function ItrWizardPage() {
           <p className="text-[var(--dxp-text-secondary)]">
             Answer a few questions and we&apos;ll tell you which ITR form to file under
           </p>
-        </div>
-        <div className="w-40">
-          <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
         </div>
       </div>
 

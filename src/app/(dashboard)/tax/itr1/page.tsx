@@ -19,10 +19,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Card, CardHeader, CardContent, Badge, Button, Select, StatsDisplay } from '@dxp/ui';
+import { Card, CardHeader, CardContent, Badge, Button, StatsDisplay } from '@dxp/ui';
 import { Loader2, AlertTriangle, ArrowRight, Banknote, Home, Wallet, Calculator, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 import { ItrResultBanner } from '@/components/forms/itr-result-banner';
 import {
   ItrEligibilityBanner,
@@ -87,26 +87,8 @@ const formatINR = (paisa: number) =>
     maximumFractionDigits: 0,
   }).format(paisa / 100);
 
-function generateFyOptions(): string[] {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]);
-  const out: string[] = [];
-  for (let i = -2; i <= 2; i++) {
-    const s = startYear + i;
-    const e = String((s + 1) % 100).padStart(2, '0');
-    out.push(`${s}-${e}`);
-  }
-  return out;
-}
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
 export default function Itr1Page() {
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
   const [data, setData] = useState<Itr1Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -134,8 +116,6 @@ export default function Itr1Page() {
     load();
   }, [load]);
 
-  const fyOptions = generateFyOptions().map((y) => ({ value: y, label: `FY ${y}` }));
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -149,9 +129,6 @@ export default function Itr1Page() {
         </div>
         <div className="flex items-center gap-2">
           {data && <Badge variant="info">Regime: {data.regime}</Badge>}
-          <div className="w-40">
-            <Select options={fyOptions} value={fy} onChange={(v) => setFy(v)} />
-          </div>
         </div>
       </div>
 

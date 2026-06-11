@@ -20,7 +20,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, StatsDisplay, Badge, Input, Select } from '@dxp/ui';
 import { Plus, Loader2, Trash2, Calendar, Info } from 'lucide-react';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
 interface CapGainEntry {
   id: number;
@@ -58,23 +58,6 @@ const formatINR = (paisa: number) =>
     maximumFractionDigits: 0,
   }).format(paisa / 100);
 
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const s = Number(current.split('-')[0]) - 1;
-  return `${s}-${String((s + 1) % 100).padStart(2, '0')}`;
-}
-
-function generateFyOptions(): Array<{ value: string; label: string }> {
-  const currentStart = Number(getCurrentFinancialYear().split('-')[0]);
-  return Array.from({ length: 4 }, (_, i) => {
-    const s = currentStart - 3 + i;
-    return {
-      value: `${s}-${String((s + 1) % 100).padStart(2, '0')}`,
-      label: `FY ${s}-${String((s + 1) % 100).padStart(2, '0')}`,
-    };
-  });
-}
-
 const ASSET_TYPE_OPTIONS = [
   { value: 'STOCKS', label: 'Stocks' },
   { value: 'EQUITY_MF', label: 'Equity Mutual Funds' },
@@ -102,7 +85,7 @@ function rateLabel(row: CapGainEntry): string {
 }
 
 export default function CapitalGainsPage() {
-  const [fy, setFy] = useState(previousFy());
+  const { fy } = useFinancialYear();
   const [entries, setEntries] = useState<CapGainEntry[]>([]);
   const [summary, setSummary] = useState<Summary>({
     ltcgTotal: 0,
@@ -224,9 +207,6 @@ export default function CapitalGainsPage() {
           <p className="text-[var(--dxp-text-secondary)]">Realized capital gains for FY {fy}</p>
         </div>
         <div className="flex gap-3">
-          <div className="w-40">
-            <Select options={generateFyOptions()} value={fy} onChange={setFy} />
-          </div>
           <Button variant="primary" onClick={() => setShowForm(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add entry
           </Button>
