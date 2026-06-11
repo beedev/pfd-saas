@@ -66,6 +66,7 @@ import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { deriveDeductions } from '@/lib/finance/deduction-engine';
 import { resolveSalaryIncome } from '@/lib/finance/form16-tax-source';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { computeAggregateCapitalGainsTax } from '@/lib/finance/capital-gains-tax';
 import { auth } from '@/auth';
 
 export async function GET(request: NextRequest) {
@@ -423,7 +424,21 @@ export async function GET(request: NextRequest) {
     // approximated to slab-only for now — most users won't cross a
     // band boundary because of CG alone; if they do, the slab-only
     // surcharge under-counts by a few thousand. Documented limitation.
-    const capitalGainsTaxPaisa = caps.reduce((s, r) => s + (r.taxAmount ?? 0), 0);
+    // Aggregate (authoritative) CG tax — equity LTCG/STCG net all gains
+    // and losses for the FY, applying the sec-112A annual exemption ONCE.
+    // Replaces the per-row sum (caps.reduce on taxAmount) which over-counted
+    // because it ignored netting and applied the exemption per transaction.
+    const capitalGainsAgg = computeAggregateCapitalGainsTax(
+      caps.map((r) => ({
+        assetType: r.assetType,
+        holdingPeriod: r.holdingPeriod,
+        saleDate: r.saleDate,
+        capitalGain: r.capitalGain,
+        taxAmount: r.taxAmount ?? 0,
+      })),
+      fy,
+    );
+    const capitalGainsTaxPaisa = capitalGainsAgg.totalTaxPaisa;
     const CESS_PCT = 4;
     const capitalGainsTaxWithCessPaisa = Math.round(
       capitalGainsTaxPaisa * (1 + CESS_PCT / 100),

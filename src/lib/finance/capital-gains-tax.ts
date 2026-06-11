@@ -179,6 +179,164 @@ export function computeCapitalGainsTax(
   };
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Aggregate (per-FY) capital-gains tax — the CORRECT model.
+//
+// Equity LTCG (sec 112A) and equity STCG (sec 111A) are taxed on the
+// NET of all gains AND losses for the FY, with the ₹1L/₹1.25L sec-112A
+// annual exemption applied ONCE per period — NOT per row. The per-row
+// `tax_amount` stored at insert is a DISPLAY estimate only; this is the
+// authoritative figure used by the regime comparison.
+//
+// We split equity buckets by the pre/post-23-Jul-2024 reform cutoff
+// (different rate AND different exemption ceiling per period) and net
+// within each period.
+//
+// Non-equity (sec 112) LTCG + STCG are KEPT per-row: each carries its
+// own indexed/slab tax with no aggregate annual exemption, so summing
+// their stored `tax_amount` is correct.
+// ────────────────────────────────────────────────────────────────────
+
+/** Minimal row shape from the capital_gains table needed for aggregation. */
+export interface AggregateCgRow {
+  assetType: CgAssetType;
+  holdingPeriod: CgGainType;
+  saleDate?: string | null;
+  /** NET gain in paisa — can be negative (a loss). */
+  capitalGain: number;
+  /** Per-row stored tax (paisa) — used only for the non-equity bucket. */
+  taxAmount: number;
+}
+
+export interface CgBreakdownLine {
+  label: string;
+  gainPaisa: number;
+  exemptionPaisa: number;
+  taxPaisa: number;
+}
+
+export interface AggregateCapitalGainsTax {
+  totalTaxPaisa: number;
+  /** Equity LTCG portion only (for callers that want the headline figure). */
+  ltcgEquityTaxPaisa: number;
+  breakdown: CgBreakdownLine[];
+}
+
+/** Equity LTCG rate by period: 10% pre-reform, 12.5% post. */
+const LTCG_EQUITY_RATE_PRE = 0.10;
+const LTCG_EQUITY_RATE_POST = 0.125;
+/** Equity STCG (sec 111A) rate by period: 15% pre-reform, 20% post. */
+const STCG_EQUITY_RATE_PRE = 0.15;
+const STCG_EQUITY_RATE_POST = 0.20;
+
+/**
+ * Compute aggregate capital-gains tax for a financial year.
+ *
+ * @param rows  capital_gains rows for the FY (paisa, gains may be negative)
+ * @param fy    financial year (carried for audit; rate selection is by
+ *              SALE DATE, not FY, per the Finance Act 2024 transition)
+ */
+export function computeAggregateCapitalGainsTax(
+  rows: AggregateCgRow[],
+  fy: string,
+): AggregateCapitalGainsTax {
+  void fy; // rate selection is sale-date driven; fy retained for audit
+
+  // Net per (equity-class × gain-type × period) bucket.
+  let ltcgEquityNetPre = 0;
+  let ltcgEquityNetPost = 0;
+  let stcgEquityNetPre = 0;
+  let stcgEquityNetPost = 0;
+  let nonEquityPerRowTax = 0;
+
+  for (const r of rows) {
+    const equity = isEquityBucket(r.assetType);
+    const saleDate = r.saleDate ?? undefined;
+    const post = isPostReform(saleDate);
+    if (equity) {
+      if (r.holdingPeriod === 'LTCG') {
+        if (post) ltcgEquityNetPost += r.capitalGain;
+        else ltcgEquityNetPre += r.capitalGain;
+      } else {
+        if (post) stcgEquityNetPost += r.capitalGain;
+        else stcgEquityNetPre += r.capitalGain;
+      }
+    } else {
+      // Non-equity (sec 112) LTCG/STCG — keep the per-row stored tax.
+      // Long-term loss set-off WITHIN the non-equity bucket is out of
+      // scope (per-row tax never goes negative); noted limitation.
+      nonEquityPerRowTax += r.taxAmount;
+    }
+  }
+
+  const breakdown: CgBreakdownLine[] = [];
+
+  // ── Equity LTCG (sec 112A): net per period, ONE exemption per period,
+  // tax positive excess. Negative net → 0 (carry-forward not modelled). ──
+  const ltcgEquityTaxablePre = Math.max(0, ltcgEquityNetPre - SEC_112A_EXEMPTION_PRE_PAISA);
+  const ltcgEquityTaxPre = Math.round(ltcgEquityTaxablePre * LTCG_EQUITY_RATE_PRE);
+  const ltcgEquityTaxablePost = Math.max(0, ltcgEquityNetPost - SEC_112A_EXEMPTION_POST_PAISA);
+  const ltcgEquityTaxPost = Math.round(ltcgEquityTaxablePost * LTCG_EQUITY_RATE_POST);
+  const ltcgEquityTax = ltcgEquityTaxPre + ltcgEquityTaxPost;
+
+  if (ltcgEquityNetPre !== 0 || ltcgEquityTaxPre > 0) {
+    breakdown.push({
+      label: 'Equity LTCG (sec 112A, pre-23-Jul-2024 @ 10%)',
+      gainPaisa: ltcgEquityNetPre,
+      exemptionPaisa: ltcgEquityNetPre > 0 ? Math.min(ltcgEquityNetPre, SEC_112A_EXEMPTION_PRE_PAISA) : 0,
+      taxPaisa: ltcgEquityTaxPre,
+    });
+  }
+  if (ltcgEquityNetPost !== 0 || ltcgEquityTaxPost > 0) {
+    breakdown.push({
+      label: 'Equity LTCG (sec 112A, post-23-Jul-2024 @ 12.5%)',
+      gainPaisa: ltcgEquityNetPost,
+      exemptionPaisa: ltcgEquityNetPost > 0 ? Math.min(ltcgEquityNetPost, SEC_112A_EXEMPTION_POST_PAISA) : 0,
+      taxPaisa: ltcgEquityTaxPost,
+    });
+  }
+
+  // ── Equity STCG (sec 111A): net per period, no exemption. ──
+  const stcgEquityTaxPre = Math.round(Math.max(0, stcgEquityNetPre) * STCG_EQUITY_RATE_PRE);
+  const stcgEquityTaxPost = Math.round(Math.max(0, stcgEquityNetPost) * STCG_EQUITY_RATE_POST);
+  const stcgEquityTax = stcgEquityTaxPre + stcgEquityTaxPost;
+
+  if (stcgEquityNetPre !== 0 || stcgEquityTaxPre > 0) {
+    breakdown.push({
+      label: 'Equity STCG (sec 111A, pre-23-Jul-2024 @ 15%)',
+      gainPaisa: stcgEquityNetPre,
+      exemptionPaisa: 0,
+      taxPaisa: stcgEquityTaxPre,
+    });
+  }
+  if (stcgEquityNetPost !== 0 || stcgEquityTaxPost > 0) {
+    breakdown.push({
+      label: 'Equity STCG (sec 111A, post-23-Jul-2024 @ 20%)',
+      gainPaisa: stcgEquityNetPost,
+      exemptionPaisa: 0,
+      taxPaisa: stcgEquityTaxPost,
+    });
+  }
+
+  // ── Non-equity (sec 112) — sum of stored per-row tax. ──
+  if (nonEquityPerRowTax > 0) {
+    breakdown.push({
+      label: 'Non-equity (sec 112) — per-row indexed/slab tax',
+      gainPaisa: 0, // mixed per-row; gain not aggregated here
+      exemptionPaisa: 0,
+      taxPaisa: nonEquityPerRowTax,
+    });
+  }
+
+  const totalTaxPaisa = ltcgEquityTax + stcgEquityTax + nonEquityPerRowTax;
+
+  return {
+    totalTaxPaisa,
+    ltcgEquityTaxPaisa: ltcgEquityTax,
+    breakdown,
+  };
+}
+
 /**
  * Sprint 5.1c — Basic-exemption absorption of CG income.
  *

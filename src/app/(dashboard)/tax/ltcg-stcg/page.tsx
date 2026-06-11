@@ -44,6 +44,9 @@ interface Summary {
   stcgTotal: number;
   totalTax: number;
   totalExemption: number;
+  /** Aggregate-correct CG tax (equity netted, sec-112A exemption applied
+   *  once per FY). Falls back to per-row `totalTax` when absent. */
+  aggregateTaxPaisa?: number;
 }
 
 const CG_CUTOFF = '2024-07-23';
@@ -257,7 +260,7 @@ export default function CapitalGainsPage() {
           { label: 'LTCG Total', value: summary.ltcgTotal / 100, format: 'currency' },
           { label: 'STCG Total', value: summary.stcgTotal / 100, format: 'currency' },
           { label: 'Exemptions Applied', value: summary.totalExemption / 100, format: 'currency' },
-          { label: 'Total Tax on Gains', value: summary.totalTax / 100, format: 'currency' },
+          { label: 'Total Tax on Gains', value: (summary.aggregateTaxPaisa ?? summary.totalTax) / 100, format: 'currency' },
         ]}
       />
 
