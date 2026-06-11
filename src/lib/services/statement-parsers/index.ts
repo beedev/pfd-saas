@@ -18,6 +18,7 @@ import { detectMfSip, parseMfSipStream } from './mf-sip';
 import { detectEpfPassbook, parseEpfPassbookStream } from './epf-passbook';
 import { detectNpsSot, parseNpsSotStream } from './nps-sot';
 import { detectCgStatement, parseCgStatementStream } from './cg-statement';
+export { parseZerodhaTaxPnl } from './zerodha-taxpnl';
 
 export type { DocType, ParsedStatement } from './types';
 export type {
