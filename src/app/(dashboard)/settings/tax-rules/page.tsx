@@ -68,6 +68,15 @@ interface ApiResponse {
   rulesSeeded: boolean;
   regimeConfig: RegimeConfigRow[];
   slabs: SlabRow[];
+  availableFys: string[];
+}
+
+/** "2026-27" → "2027-28" — the natural next financial year. */
+function nextFy(fy: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!m) return '';
+  const start = Number(m[1]) + 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }
 
 // ── rupee ⇄ paisa helpers ──
@@ -86,12 +95,6 @@ function LabeledInput({ label, ...props }: React.ComponentProps<typeof Input> & 
   );
 }
 
-const FY_OPTIONS = [
-  { value: '2024-25', label: 'FY 2024-25' },
-  { value: '2025-26', label: 'FY 2025-26' },
-  { value: '2026-27', label: 'FY 2026-27' },
-];
-
 const EMPTY_REGIME_CONFIG = (regime: Regime): RegimeConfigRow => ({
   regime,
   standardDeductionPaisa: 0,
@@ -109,6 +112,10 @@ export default function TaxRulesPage() {
   const [slabs, setSlabs] = useState<SlabRow[]>([]);
   const [regimeConfig, setRegimeConfig] = useState<RegimeConfigRow[]>([]);
   const [rules, setRules] = useState<RulesState | null>(null);
+  const [availableFys, setAvailableFys] = useState<string[]>([]);
+  const [showAddFy, setShowAddFy] = useState(false);
+  const [newFy, setNewFy] = useState('');
+  const [isCloning, setIsCloning] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -121,6 +128,7 @@ export default function TaxRulesPage() {
       setRulesSeeded(r.rulesSeeded);
       setRules(r.rules);
       setSlabs(r.slabs);
+      if (Array.isArray(r.availableFys)) setAvailableFys(r.availableFys);
 
       // Ensure both regimes always have an editable config row.
       const byRegime = new Map(r.regimeConfig.map((c) => [c.regime, c]));
@@ -271,6 +279,41 @@ export default function TaxRulesPage() {
     }
   };
 
+  // Create a future FY by cloning the latest existing year's rates as a
+  // starting template (then the user edits them for the new budget).
+  const cloneFy = async () => {
+    const toFy = newFy.trim();
+    if (!/^\d{4}-\d{2}$/.test(toFy)) {
+      toast.error('Enter the new FY as YYYY-YY, e.g. 2027-28');
+      return;
+    }
+    const source = availableFys[availableFys.length - 1] ?? fy;
+    setIsCloning(true);
+    try {
+      const r = await fetch('/api/settings/tax-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cloneFromFy: source, toFy }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Failed to add FY');
+      toast.success(`FY ${toFy} created from FY ${source} — now edit its rates`);
+      if (Array.isArray(d.availableFys)) setAvailableFys(d.availableFys);
+      setShowAddFy(false);
+      setNewFy('');
+      setFy(toFy);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add FY');
+    } finally {
+      setIsCloning(false);
+    }
+  };
+
+  const fyOptions = (availableFys.length ? availableFys : [fy]).map((f) => ({
+    value: f,
+    label: `FY ${f}`,
+  }));
+
   const oldConfig = useMemo(() => regimeConfig.find((c) => c.regime === 'OLD'), [regimeConfig]);
   const newConfig = useMemo(() => regimeConfig.find((c) => c.regime === 'NEW'), [regimeConfig]);
 
@@ -295,14 +338,43 @@ export default function TaxRulesPage() {
         </div>
         <div className="flex items-center gap-3">
           <div className="w-40">
-            <Select options={FY_OPTIONS} value={fy} onChange={setFy} />
+            <Select options={fyOptions} value={fy} onChange={setFy} />
           </div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setShowAddFy((s) => !s);
+              setNewFy(nextFy(availableFys[availableFys.length - 1] ?? fy));
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" /> Add FY
+          </Button>
           <Button variant="primary" onClick={save} disabled={isSaving}>
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save changes
           </Button>
         </div>
       </div>
+
+      {showAddFy && (
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--dxp-border)] bg-[var(--dxp-surface-subtle,transparent)] px-4 py-3">
+          <LabeledInput
+            label="New financial year (YYYY-YY)"
+            value={newFy}
+            onChange={(e) => setNewFy(e.target.value)}
+            placeholder="2027-28"
+            className="w-40"
+          />
+          <p className="mb-2 text-xs text-[var(--dxp-text-muted)]">
+            Clones the latest year (FY {availableFys[availableFys.length - 1] ?? fy})&apos;s slabs, rates &amp;
+            rules as a starting template — then edit for the new budget.
+          </p>
+          <Button variant="primary" onClick={cloneFy} disabled={isCloning} className="mb-0.5">
+            {isCloning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Create &amp; edit
+          </Button>
+        </div>
+      )}
 
       {!rulesSeeded && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">

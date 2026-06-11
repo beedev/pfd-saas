@@ -92,6 +92,10 @@ export async function GET(request: NextRequest) {
       .where(eq(taxSlabs.fy, fy))
       .orderBy(asc(taxSlabs.regime), asc(taxSlabs.slabOrder));
 
+    // Every FY that has rate data anywhere — drives the editor's dropdown
+    // so newly-cloned years appear without a code change.
+    const availableFys = await listAvailableFys();
+
     const d = DEFAULT_TAX_RULES;
     // Always hand the editor a populated rules object: the real row if it
     // exists, otherwise the historical code constants (rulesSeeded=false so
@@ -130,10 +134,106 @@ export async function GET(request: NextRequest) {
       rulesSeeded: Boolean(rulesRow),
       regimeConfig,
       slabs,
+      availableFys,
     });
   } catch (err) {
     console.error('[tax-rules GET]', err);
     return NextResponse.json({ error: 'Failed to fetch tax rules' }, { status: 500 });
+  }
+}
+
+/** Distinct, sorted FYs that have slab / config / rules data. */
+async function listAvailableFys(): Promise<string[]> {
+  const [s, c, r] = await Promise.all([
+    db.selectDistinct({ fy: taxSlabs.fy }).from(taxSlabs),
+    db.selectDistinct({ fy: taxRegimeConfig.fy }).from(taxRegimeConfig),
+    db.selectDistinct({ fy: taxRules.fy }).from(taxRules),
+  ]);
+  return [...new Set([...s, ...c, ...r].map((x) => x.fy))].sort();
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// POST  body: { cloneFromFy, toFy } → seed a NEW FY by copying an existing
+// year's slabs + regime config + rules as an editable starting template.
+// Refuses if toFy already has slab data (use PATCH to edit instead).
+// ─────────────────────────────────────────────────────────────────────────
+export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+
+  let body: { cloneFromFy?: string; toFy?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+  const { cloneFromFy, toFy } = body;
+  if (!cloneFromFy || !FY_RE.test(cloneFromFy) || !toFy || !FY_RE.test(toFy)) {
+    return NextResponse.json({ error: 'cloneFromFy and toFy required (format YYYY-YY)' }, { status: 400 });
+  }
+  if (cloneFromFy === toFy) {
+    return NextResponse.json({ error: 'cloneFromFy and toFy must differ' }, { status: 400 });
+  }
+
+  try {
+    const existing = await db.select({ id: taxSlabs.id }).from(taxSlabs).where(eq(taxSlabs.fy, toFy)).limit(1);
+    if (existing.length) {
+      return NextResponse.json({ error: `FY ${toFy} already exists — edit it instead` }, { status: 409 });
+    }
+
+    const [srcSlabs, srcConfig] = await Promise.all([
+      db.select().from(taxSlabs).where(eq(taxSlabs.fy, cloneFromFy)),
+      db.select().from(taxRegimeConfig).where(eq(taxRegimeConfig.fy, cloneFromFy)),
+    ]);
+    if (srcSlabs.length === 0 || srcConfig.length === 0) {
+      return NextResponse.json({ error: `source FY ${cloneFromFy} has no slab/config data to clone` }, { status: 400 });
+    }
+    const [srcRules] = await db.select().from(taxRules).where(eq(taxRules.fy, cloneFromFy)).limit(1);
+
+    await db.transaction(async (tx) => {
+      await tx.insert(taxSlabs).values(
+        srcSlabs.map((s) => ({
+          fy: toFy,
+          regime: s.regime,
+          slabOrder: s.slabOrder,
+          lowerPaisa: s.lowerPaisa,
+          upperPaisa: s.upperPaisa,
+          ratePct: s.ratePct,
+        })),
+      );
+      await tx.insert(taxRegimeConfig).values(
+        srcConfig.map((c) => ({
+          fy: toFy,
+          regime: c.regime,
+          standardDeductionPaisa: c.standardDeductionPaisa,
+          rebate87aThresholdPaisa: c.rebate87aThresholdPaisa,
+          rebate87aMaxPaisa: c.rebate87aMaxPaisa,
+          cessPct: c.cessPct,
+        })),
+      );
+      // Rules: clone the row if the source had one, else seed with the
+      // column defaults + JSON fallback so the new FY is fully populated.
+      const d = DEFAULT_TAX_RULES;
+      await tx.insert(taxRules).values({
+        fy: toFy,
+        eightyCCapPaisa: srcRules?.eightyCCapPaisa ?? d.eightyCCapPaisa,
+        eightyCcd1bCapPaisa: srcRules?.eightyCcd1bCapPaisa ?? d.eightyCcd1bCapPaisa,
+        eightyDBaseCapPaisa: srcRules?.eightyDBaseCapPaisa ?? d.eightyDBaseCapPaisa,
+        eightyDSeniorCapPaisa: srcRules?.eightyDSeniorCapPaisa ?? d.eightyDSeniorCapPaisa,
+        sec24bSelfOccupiedCapPaisa: srcRules?.sec24bSelfOccupiedCapPaisa ?? d.sec24bSelfOccupiedCapPaisa,
+        sec24bPre1999CapPaisa: srcRules?.sec24bPre1999CapPaisa ?? d.sec24bPre1999CapPaisa,
+        sec80eeaCapPaisa: srcRules?.sec80eeaCapPaisa ?? d.sec80eeaCapPaisa,
+        surchargeOldBrackets: srcRules?.surchargeOldBrackets ?? d.surchargeOldBrackets,
+        surchargeNewBrackets: srcRules?.surchargeNewBrackets ?? d.surchargeNewBrackets,
+        capitalGainsRules: srcRules?.capitalGainsRules ?? d.capitalGains,
+        presumptiveRules: srcRules?.presumptiveRules ?? d.presumptive,
+      });
+    });
+
+    return NextResponse.json({ fy: toFy, clonedFrom: cloneFromFy, availableFys: await listAvailableFys() });
+  } catch (err) {
+    console.error('[tax-rules POST]', err);
+    return NextResponse.json({ error: 'Failed to clone FY' }, { status: 500 });
   }
 }
 
