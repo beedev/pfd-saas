@@ -62,12 +62,8 @@ import {
   isDisbursedOnOrAfterVintageCutoff,
 } from '@/lib/finance/section-24b';
 import { computeSection80EeaDeduction } from '@/lib/finance/section-80eea';
-import { computeSection80d } from '@/lib/finance/section-80d';
-import {
-  computeSection80g,
-  type EightyGCategory,
-} from '@/lib/finance/section-80g';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
+import { deriveDeductions } from '@/lib/finance/deduction-engine';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 import { auth } from '@/auth';
 
@@ -360,74 +356,50 @@ export async function GET(request: NextRequest) {
       salaryPaisa - hraExemptionPaisa + otherPaisa + businessPaisa + oldHpForSlab;
     const newGrossSlab = salaryPaisa + otherPaisa + businessPaisa + newHpForSlab;
 
-    // Chapter VI-A deductions — Sprint 5.1c refinement.
-    // OLD: bucketed 80D (sr-citizen caps), 4-category 80G, plus other
-    //      sections at face value.
-    // NEW: only rows flagged eligible_under_new (80CCD(2) + future).
-    const eightyDRows = deductions
-      .filter((r) => r.section === '80D' && r.eightyDBucket)
-      .map((r) => ({
-        bucket: r.eightyDBucket as 'SELF_FAMILY' | 'PARENTS',
-        amountPaisa: r.amountPaisa ?? 0,
-      }));
-    const eightyDResult = computeSection80d({
-      rows: eightyDRows,
-      isSrCitizen: prefs?.isSrCitizen ?? false,
-      parentsAreSrCitizens: prefs?.parentsAreSrCitizens ?? false,
+    // ─── Chapter VI-A deductions — shared deduction engine ────────────
+    // The engine derives EVERY Chapter VI-A bucket from the user's real
+    // records (80C with EPF/small-savings/ELSS/SGB/LIC/loan-principal,
+    // 80CCD(1B) NPS, 80D via sr-citizen helper INCLUDING health_insurance_
+    // policies, 80G at eligible amount, plus 24B/80EEA and any other
+    // manual sections), applying every cap once. This replaces the
+    // previous inline block that read raw tax_deductions and missed the
+    // asset-backed sources.
+    //
+    // IMPORTANT — house-property head double-count avoidance: regime-
+    // compare folds home-loan interest (24B) and 80EEA into the INCOME-
+    // side house-property head above (sec24bTotalPaisa / sec80eeaTotalPaisa
+    // reduce oldHpForSlab). So we must EXCLUDE the engine's 24B + 80EEA
+    // buckets from the Chapter VI-A deduction total here — otherwise the
+    // home-loan interest would be deducted twice (once on income, once as
+    // a deduction). The engine still surfaces them in its buckets; we
+    // simply don't add those two to oldDeductionsPaisa.
+    const engineDeductions = await deriveDeductions(userId, fy, {
+      adjustedGrossForEightyGPaisa: Math.max(0, oldGrossSlab),
     });
+    const INCOME_SIDE_SECTIONS = new Set(['24B', '80EEA']);
+    const oldDeductionsPaisa = Object.entries(engineDeductions.buckets)
+      .filter(([sec]) => !INCOME_SIDE_SECTIONS.has(sec))
+      .reduce((s, [, b]) => s + b.appliedPaisa, 0);
 
-    // 80G — use the four-category lib. Rows without category fall
-    // back to face-value (legacy data, pre-5.1c).
-    const eightyGCategorisedRows = deductions
-      .filter((r) => r.section === '80G' && r.eightyGCategory)
-      .map((r) => ({
-        category: r.eightyGCategory as EightyGCategory,
-        amountPaisa: r.amountPaisa ?? 0,
-      }));
-    const eightyGLegacyFaceValue = deductions
-      .filter((r) => r.section === '80G' && !r.eightyGCategory)
-      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
-    const eightyGResult = computeSection80g({
-      rows: eightyGCategorisedRows,
-      adjustedGrossPaisa: Math.max(0, oldGrossSlab),
-    });
+    const newDeductionsPaisa = engineDeductions.newRegimeTotalPaisa;
 
-    // 80D un-bucketed (legacy) at face value too.
-    const eightyDLegacy = deductions
-      .filter((r) => r.section === '80D' && !r.eightyDBucket)
-      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
-
-    // Sprint 5.9c — Loan-derived 80C principal. We add the FY
-    // principal portion of qualifying loans to OLD-regime deductions
-    // BUT enforce the ₹1.5L 80C ceiling here, since `tax-slabs.ts`
-    // doesn't cap per-section. We sum manual 80C entries (raw) with
-    // loan-derived principal and clamp the combined 80C bucket at
-    // ₹1.5L. Non-80C manual rows (24B, 80D, 80G, 80E, etc.) are
-    // unaffected.
-    const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
+    // Surfaced for the UI's expandable "Deductions applied" line — the
+    // engine's per-section breakdown, minus the income-side sections.
+    const deductionBreakdown = engineDeductions.breakdown.filter(
+      (b) => !b.label.includes('24(b)') && !b.label.includes('80EEA'),
+    );
+    // 80C bucket detail for the existing eightyC response shape.
+    const eightyCBucket = engineDeductions.buckets['80C'];
     const manualEightyCPaisa = deductions
       .filter((r) => r.section === '80C')
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
     const loanPrincipal80cPaisa = loanDeductions.totalPrincipalPaisa;
-    const combinedEightyCRaw = manualEightyCPaisa + loanPrincipal80cPaisa;
-    const eightyCApplied = Math.min(combinedEightyCRaw, EIGHTY_C_CAP_PAISA);
-    // Other non-80C OLD deductions — exclude 80C from `otherOldDeductions`
-    // to avoid double-counting when we add `eightyCApplied`.
-    const otherOldDeductionsExcl80c = deductions
-      .filter((r) => r.section !== '80D' && r.section !== '80G' && r.section !== '80C')
-      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
-
-    const oldDeductionsPaisa =
-      otherOldDeductionsExcl80c +
-      eightyCApplied +
-      eightyDResult.totalDeductionPaisa +
-      eightyDLegacy +
-      eightyGResult.totalDeductionPaisa +
-      eightyGLegacyFaceValue;
-
-    const newDeductionsPaisa = deductions
-      .filter((r) => r.eligibleUnderNew)
-      .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
+    const combinedEightyCRaw = (eightyCBucket?.sources ?? []).reduce(
+      (s, x) => s + x.amountPaisa,
+      0,
+    );
+    const eightyCApplied = eightyCBucket?.appliedPaisa ?? 0;
+    const EIGHTY_C_CAP_PAISA = 1_50_000 * 100;
 
     const result = compareRegimes({
       grossIncomePaisa: Math.max(0, oldGrossSlab),
@@ -494,10 +466,14 @@ export async function GET(request: NextRequest) {
       deductions: {
         oldRegime: oldDeductionsPaisa,
         newRegime: newDeductionsPaisa,
-        // Sprint 5.1c — surfaced for transparency
-        eightyD: eightyDResult,
-        eightyG: eightyGResult,
-        // Sprint 5.9c — 80C breakdown after cap application
+        // Engine-derived per-section bucket detail (appliedPaisa post-cap
+        // + pre-cap sources) for the expandable UI.
+        buckets: engineDeductions.buckets,
+        // Per-section breakdown that sums to oldRegime — drives the
+        // expandable "Deductions applied" line. Income-side 24(b)/80EEA
+        // are excluded (they reduce the house-property head, not VI-A).
+        breakdown: deductionBreakdown,
+        // Sprint 5.9c — 80C breakdown after cap application (engine-sourced).
         eightyC: {
           manualPaisa: manualEightyCPaisa,
           fromLoansPaisa: loanPrincipal80cPaisa,
