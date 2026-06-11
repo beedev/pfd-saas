@@ -53,6 +53,7 @@ import {
   invoices,
   userPreferences,
   liabilities,
+  presumptiveIncome,
   type TaxRegime,
 } from '@/db';
 import { compareRegimes } from '@/lib/finance/tax-slabs';
@@ -116,6 +117,7 @@ export async function GET(request: NextRequest) {
       deductions,
       prefsRows,
       loanRows,
+      presumptiveRows,
     ] = await Promise.all([
       db
         .select()
@@ -162,6 +164,15 @@ export async function GET(request: NextRequest) {
       // feed 80C + 24(b) without forcing the user to also create
       // manual tax_deductions rows.
       db.select().from(liabilities).where(eq(liabilities.userId, userId)),
+      // Sprint 5.12 — presumptive (44AD/44ADA/44AE) declarations for the FY.
+      // When present, the deemed profit IS the taxable business income and
+      // the underlying GST receipts must not be double-counted.
+      db
+        .select()
+        .from(presumptiveIncome)
+        .where(
+          and(eq(presumptiveIncome.userId, userId), eq(presumptiveIncome.fy, fy)),
+        ),
     ]);
 
     const prefs = prefsRows[0];
@@ -226,12 +237,22 @@ export async function GET(request: NextRequest) {
       .filter((r) => !r.isTaxExempt)
       .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
 
-    // GST invoices — taxable_amount is post-GST-component, the freelance
-    // / consulting income before tax. Falls under business income.
-    const businessPaisa = gstInvoices.reduce(
+    // Business income. Two mutually-exclusive bases:
+    //   • Presumptive (44AD/44ADA/44AE) — when the user has declared
+    //     presumptive income for the FY, the *deemed profit* (e.g. 44ADA's
+    //     50% of professional receipts) IS the taxable business income.
+    //     The raw GST receipts that fund it are NOT added on top.
+    //   • Regular books — full GST taxable_amount on FINAL invoices.
+    const gstReceiptsPaisa = gstInvoices.reduce(
       (s, r) => s + (r.taxableAmount ?? 0),
       0,
     );
+    const presumptiveDeclaredPaisa = presumptiveRows.reduce(
+      (s, r) => s + (r.declaredProfitPaisa ?? 0),
+      0,
+    );
+    const hasPresumptive = presumptiveRows.length > 0;
+    const businessPaisa = hasPresumptive ? presumptiveDeclaredPaisa : gstReceiptsPaisa;
 
     // ─── House property head (OLD regime only deductions) ─────────────
     // For each property: gross rent × 12 → 30% std maintenance deduction

@@ -212,9 +212,14 @@ export async function deriveDeductions(
 
   const loanPrincipalPaisa = loanDeductions.totalPrincipalPaisa;
 
+  // 80C credits the employee's PF *contribution* for the FY, NOT the lifetime
+  // accumulated balance. Use the recurring monthly employee contribution
+  // annualised (×12). Partial-year starters (e.g. a Form-16 period of <12
+  // months) should record the exact figure as a manual 80C entry, which is
+  // already summed into `manual80c` above.
   const epfEmployeePaisa = epfRows
     .filter((p) => p.accountType === 'EPF')
-    .reduce((s, p) => s + (p.employeeBalance ?? 0), 0);
+    .reduce((s, p) => s + (p.monthlyContributionPaisa ?? 0) * 12, 0);
 
   const smallSavingsPaisa = ssRows
     .filter((a) => SS_80C_SCHEMES.includes(a.schemeType))
@@ -241,7 +246,7 @@ export async function deriveDeductions(
   const eightyCSources: DeductionSource[] = [
     { source: 'Manual 80C entries', amountPaisa: manual80c },
     { source: 'Home loan principal (FY-aggregated)', amountPaisa: loanPrincipalPaisa },
-    { source: 'EPF employee balance', amountPaisa: epfEmployeePaisa },
+    { source: 'EPF employee contribution (annual)', amountPaisa: epfEmployeePaisa },
     { source: 'PPF/VPF/NSC/SSY/SCSS deposits', amountPaisa: smallSavingsPaisa },
     { source: 'Life insurance premiums (annualised)', amountPaisa: lifePremiumPaisa },
     { source: 'ELSS mutual funds (invested)', amountPaisa: elssPaisa },
