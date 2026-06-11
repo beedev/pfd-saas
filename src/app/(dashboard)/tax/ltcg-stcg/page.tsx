@@ -21,6 +21,20 @@ import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, StatsDisplay, Badge, Input, Select } from '@dxp/ui';
 import { Plus, Loader2, Trash2, Calendar, Info } from 'lucide-react';
 import { useFinancialYear } from '@/components/providers/financial-year-provider';
+import { ContextualImport } from '@/components/import/contextual-import';
+
+interface CgParsed {
+  type: 'cg-statement';
+  broker: string;
+  fy: string | null;
+  rows: Array<{ assetType: string; holdingPeriod: 'LTCG' | 'STCG'; capitalGainPaisa: number; scrip: string | null }>;
+  totalStcgPaisa: number;
+  totalLtcgPaisa: number;
+  warnings: string[];
+}
+
+const fmtINR = (p: number) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
 
 interface CapGainEntry {
   id: number;
@@ -207,6 +221,46 @@ export default function CapitalGainsPage() {
           <p className="text-[var(--dxp-text-secondary)]">Realized capital gains for FY {fy}</p>
         </div>
         <div className="flex gap-3">
+          <ContextualImport<CgParsed>
+            buttonLabel="Import statement"
+            title="Import a capital-gains statement"
+            subtitle="KFINTECH / CAMS capital-gains PDF, or a Zerodha tax-P&L .xlsx"
+            accept=".pdf,.xlsx"
+            canImport={(p) => p?.type === 'cg-statement' && p.rows.length > 0 && !!(p.fy || fy)}
+            commit={async (p) => {
+              const r = await fetch('/api/investments/import/commit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'cg-statement', fy: p.fy || fy, rows: p.rows }),
+              });
+              const d = await r.json();
+              if (!r.ok) throw new Error(d?.error || 'Import failed');
+            }}
+            onImported={load}
+            renderPreview={(p) => (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge variant="info">{p.broker}</Badge>
+                  {p.fy && <span className="text-xs text-[var(--dxp-text-muted)]">FY {p.fy}</span>}
+                  <span className="ml-auto text-xs">
+                    STCG <strong>{fmtINR(p.totalStcgPaisa)}</strong> · LTCG <strong>{fmtINR(p.totalLtcgPaisa)}</strong>
+                  </span>
+                </div>
+                {p.rows.map((row, i) => (
+                  <div key={i} className="flex items-center justify-between border-t border-[var(--dxp-border-light)] pt-1 text-xs">
+                    <span>{row.scrip || row.assetType} · {row.holdingPeriod}</span>
+                    <span className={`font-mono ${row.capitalGainPaisa < 0 ? 'text-red-600' : ''}`}>{fmtINR(row.capitalGainPaisa)}</span>
+                  </div>
+                ))}
+                {p.warnings.map((w, i) => (
+                  <p key={i} className="rounded bg-amber-50 p-2 text-xs text-amber-800">⚠ {w}</p>
+                ))}
+                {p.rows.length === 0 && (
+                  <p className="text-xs text-[var(--dxp-text-muted)]">Nothing to import — add manually instead.</p>
+                )}
+              </div>
+            )}
+          />
           <Button variant="primary" onClick={() => setShowForm(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add entry
           </Button>
