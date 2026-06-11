@@ -1,18 +1,6 @@
-import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb, numeric, date, customType } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, real, index, uniqueIndex, timestamp, boolean, serial, primaryKey, jsonb, numeric, date } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AdapterAccountType } from 'next-auth/adapters';
-
-/**
- * Postgres `bytea` custom type — stores raw file bytes (e.g. uploaded
- * PDFs) directly in the DB so they survive container redeploys and are
- * captured by the DB backup, rather than living on an ephemeral disk
- * volume. Returns a Node `Buffer` at runtime.
- */
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({
-  dataType() {
-    return 'bytea';
-  },
-});
 
 /* ─── Auth.js tables ─────────────────────────────────────────────────────
  * Standard Drizzle adapter schema for next-auth v5. Tables intentionally
@@ -2753,9 +2741,6 @@ export const form26asUploads = pgTable('form_26as_uploads', {
    *  Powers per-section reconciliation; falls back to headline totals
    *  when null. */
   parsedDeductorsJson: text('parsed_deductors_json'),
-  /** Raw PDF bytes — source of truth (survives redeploys + backups).
-   *  Nullable so legacy rows (file on disk only) remain valid. */
-  fileBytes: bytea('file_bytes'),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('form_26as_uploads_user_id_idx').on(table.userId),
@@ -2827,10 +2812,6 @@ export const form16Uploads = pgTable('form_16_uploads', {
   // Diagnostic — extracted text + free-form notes.
   rawText: text('raw_text'),
   notes: text('notes'),
-
-  /** Raw PDF bytes — source of truth (survives redeploys + backups).
-   *  Nullable so legacy rows (file on disk only) remain valid. */
-  fileBytes: bytea('file_bytes'),
 
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [

@@ -204,7 +204,6 @@ export async function POST(request: NextRequest) {
         userId,
         fy,
         filePath: relPath,
-        fileBytes: buffer,
         parsedTotalTdsPaisa,
         parsedTotalIncomePaisa,
         parsedDeductorsJson,
