@@ -19,12 +19,15 @@
 5. **Ingestion Engine** `lib/ingestion/` — one StatementParser interface (detect/parse/persist) + xlsx path; onboard Form16/26AS/Yeswanth + existing 5; add capital-gains contract-note parsers (Zerodha/Groww/CAMS/KFintech) → feed aggregate-LTCG.
 
 ## Sequence
-- Phase 1: Deduction Engine (folds in V1 deduction features) ← START HERE
-- Phase 2: Income Resolver (folds in Form-16-authoritative + Tax Paid So Far + salary side-by-side). itr1/itr2 already partially wired (wip commit 2cb0ff6).
-- Phase 3: Tax Pipeline (folds in LTCG aggregation; extract itr3)
+- Phase 1: Deduction Engine — DONE+verified (fbbc205): 20/20 smoke, ₹3,74,500/6 sections
+- Phase 2: Income Resolver — DONE+verified (16b2a60): Form-16-authoritative salary+TDS all consumers; Tax Paid So Far TDS-inclusive
+- Phase 3: LTCG aggregation — DONE+verified (1b9129a): ₹80,125 vs ₹1,05,750 per-row. (itr3 already a lib; single-compute-pipeline deferred: slab math already shared, ITR assembly legitimately differs)
 - Phase 4: Asset Registry
 - Phase 5: Ingestion Engine (+ capital-gains statements)
 - Then: back-port unified engine to V1.
 
 ## V1 status (reference implementation, already shipped on V1 main, pushed)
 Form16 parse/merge/HRA, Form-16-authoritative tax calc, regime-compare deduction engine (the duplicated derivation), salary side-by-side, equity-LTCG aggregation, Income→Tax nav. Commits 596303d…b2ee0cc.
+
+## Status 2026-06-11
+Tax-engine core (Phases 1-3) done + smoke-verified on branch, NOT merged (main = baseline). Dev server: DEV_AUTH_BYPASS=true on :3002. Test userId with data: dcc2a010-bf3e-44e5-8b6b-9fcd3bc521d3. Remaining: Phase 4 asset registry, Phase 5 ingestion engine (independent, non-tax-critical). Permission for dev-server start added to .claude/settings.local.json (gitignored).
