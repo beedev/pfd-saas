@@ -14,6 +14,52 @@ Target market: India-only for v1. INR everywhere. All Indian tax modules
 (NPS / EPF / PPF / 80C / GST / ITR) stay; structure leaves room for other
 countries later.
 
+## Operating model — dev vs production (READ FIRST)
+
+Decided 2026-06-11. Three distinct things — don't conflate them:
+
+| Thing | Where | Role | Cron + Telegram |
+|-------|-------|------|-----------------|
+| **V1** | `~/Desktop/personal-finance-dashboard` (SQLite) | **SUNSET** — reference / original data source only, **no new work** | retired (LaunchAgents stopped) |
+| **pfd-saas** | this repo · `npm run dev` → host Postgres `:5432` (`pfd_saas` DB; holds `demo` + `personal` accounts) | **Dev** — build + validate features locally | none (on-demand only: `POST /api/cron/tick`) |
+| **vaspar-pfd** | Docker container · `:9999` · volume `vaspar-pfd-data:/data` | **Production — runs forever** | **auto** (60 s in-container ticker + real Telegram) |
+
+**vaspar-pfd is production and is left alone.** Single always-on container
+(embedded Postgres + Next standalone + in-container scheduler). Touch it **only**
+when Bharath decides a prod bug needs fixing or a specific change is wanted —
+otherwise never redeploy it. Data lives in the `vaspar-pfd-data` volume; secrets
+(postgres password, `AUTH_SECRET`, `CRON_SECRET`, `TELEGRAM_BOT_TOKEN`) are
+persisted under `/data/.secrets` and **auto-loaded by `docker-entrypoint.sh`** —
+no `-e` secrets needed on redeploy. Monthly DB backup →
+`~/pfd-backups/vaspar-pfd-db-backup-DDMMYYYY.dump` via the
+`com.bharath.vaspar-pfd-backup` LaunchAgent.
+
+Redeploy vaspar-pfd (**only when intentionally shipping a prod change**):
+```bash
+docker build -t vaspar-pfd:latest .          # in ~/Desktop/pfd-saas
+docker rm -f vaspar-pfd
+docker run -d --name vaspar-pfd --restart unless-stopped -p 9999:3000 \
+  -v vaspar-pfd-data:/data -e AUTH_URL=http://localhost:9999 -e DEMO_PERSONAL_SWITCH=true \
+  vaspar-pfd:latest
+```
+
+**Telegram + cron run automatically ONLY in vaspar-pfd.** Dev never auto-sends:
+`npm run dev` has no scheduler, and any throwaway Docker test container must run
+with `-e DISABLE_CRON=true`.
+
+**Do NOT push to remote casually — every push triggers a GHCR image build**, which
+Bharath does not want happening on routine commits. Push only when he explicitly
+says "push"/"publish" (matches the standing no-push rule). Day-to-day = local
+commits on the working branch only; `main` is the rollback baseline.
+
+On-demand Docker image test (validate a build without disturbing prod):
+```bash
+docker run -d --name pfd-test -p 3001:3000 -e DISABLE_CRON=true \
+  -e AUTH_URL=http://localhost:3001 vaspar-pfd:latest
+# ...test at :3001, then...
+docker rm -f pfd-test
+```
+
 ## Status
 
 **Sprint 6.1 complete — Docker self-host preview shipped.**
