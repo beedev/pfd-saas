@@ -21,11 +21,9 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Toaster } from '@/components/ui/sonner';
 import { auth } from '@/auth';
 import { db, businessProfile, userPreferences } from '@/db';
-import {
-  FinancialYearProvider,
-  currentFinancialYear,
-} from '@/components/providers/financial-year-provider';
+import { FinancialYearProvider } from '@/components/providers/financial-year-provider';
 import { FinancialYearBar } from '@/components/layout/financial-year-bar';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
 export default async function DashboardLayout({
   children,
@@ -65,7 +63,7 @@ export default async function DashboardLayout({
 
   // Seed the global FY from the cookie (falls back to the current FY).
   const cookieStore = await cookies();
-  const initialFy = cookieStore.get('pfd-fy')?.value || currentFinancialYear();
+  const initialFy = cookieStore.get('pfd-fy')?.value || getCurrentFinancialYear();
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">

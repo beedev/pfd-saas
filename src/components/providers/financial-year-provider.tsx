@@ -14,6 +14,7 @@
  */
 
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
 export interface FinancialYearOption {
   value: string;
@@ -30,18 +31,10 @@ const FinancialYearContext = createContext<FinancialYearContextValue | null>(nul
 
 const FY_COOKIE = 'pfd-fy';
 
-/** Current Indian FY (April–March) for a JS Date. */
-export function currentFinancialYear(now: Date = new Date()): string {
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-  const start = month >= 4 ? year : year - 1;
-  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
-}
-
 /** A forward-looking range of selectable FYs (4 prior … 2 ahead of current)
  *  so newly-added budget years are always reachable from the global picker. */
 function defaultFyOptions(): FinancialYearOption[] {
-  const current = currentFinancialYear();
+  const current = getCurrentFinancialYear();
   const startYear = Number(current.slice(0, 4));
   const out: FinancialYearOption[] = [];
   for (let y = startYear - 4; y <= startYear + 2; y++) {
@@ -58,7 +51,7 @@ export function FinancialYearProvider({
   initialFy?: string;
   children: React.ReactNode;
 }) {
-  const [fy, setFyState] = useState<string>(initialFy || currentFinancialYear());
+  const [fy, setFyState] = useState<string>(initialFy || getCurrentFinancialYear());
 
   const setFy = useCallback((next: string) => {
     setFyState(next);
