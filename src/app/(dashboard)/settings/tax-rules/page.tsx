@@ -7,12 +7,30 @@
  * when the budget revises them, without a code change. Edits the global
  * (govt-data) tables: tax_slabs, tax_regime_config and tax_rules. All money
  * is shown in RUPEES and converted to paisa on save.
+ *
+ * Layout: the editor's six logical sections are grouped into a horizontal
+ * TAB bar (Slabs & Regime / Deductions / Capital Gains / Surcharge /
+ * Presumptive) so the page is scannable instead of one long scroll. All form
+ * STATE lives in this component regardless of the active tab — switching tabs
+ * only changes which Card(s) mount; nothing is lost, and the single "Save
+ * changes" button always PATCHes the whole form.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, Input, Select } from '@dxp/ui';
-import { Loader2, Plus, Trash2, Save } from 'lucide-react';
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  Save,
+  Layers,
+  Receipt,
+  TrendingUp,
+  Percent,
+  Briefcase,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 type Regime = 'OLD' | 'NEW';
 
@@ -71,6 +89,18 @@ interface ApiResponse {
   availableFys: string[];
 }
 
+// ── Tab definitions ──
+// Purely a presentational grouping of the existing six Card sections. The
+// ids stay stable; switching only toggles which Card(s) render.
+type TabId = 'slabs' | 'deductions' | 'capital-gains' | 'surcharge' | 'presumptive';
+const TABS: { id: TabId; label: string; icon: typeof Layers }[] = [
+  { id: 'slabs', label: 'Slabs & Regime', icon: Layers },
+  { id: 'deductions', label: 'Deductions', icon: Receipt },
+  { id: 'capital-gains', label: 'Capital Gains', icon: TrendingUp },
+  { id: 'surcharge', label: 'Surcharge', icon: Percent },
+  { id: 'presumptive', label: 'Presumptive', icon: Briefcase },
+];
+
 /** "2026-27" → "2027-28" — the natural next financial year. */
 function nextFy(fy: string): string {
   const m = /^(\d{4})-(\d{2})$/.exec(fy);
@@ -116,6 +146,10 @@ export default function TaxRulesPage() {
   const [showAddFy, setShowAddFy] = useState(false);
   const [newFy, setNewFy] = useState('');
   const [isCloning, setIsCloning] = useState(false);
+
+  // Which section group is visible. Purely presentational — edits to any tab
+  // persist in the shared state above, so switching never loses changes.
+  const [activeTab, setActiveTab] = useState<TabId>('slabs');
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -383,396 +417,436 @@ export default function TaxRulesPage() {
         </div>
       )}
 
-      {/* ── 1. Slabs ── */}
-      {(['OLD', 'NEW'] as Regime[]).map((regime) => (
-        <Card key={`slabs-${regime}`}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-[var(--dxp-text)]">
-                  Income Tax Slabs — {regime === 'OLD' ? 'Old' : 'New'} Regime
-                </h2>
-                <p className="text-xs text-[var(--dxp-text-muted)]">
-                  Tax bands applied to taxable income. Leave <em>Upper</em> blank for the top open-ended band.
-                </p>
-              </div>
-              <Button variant="secondary" size="sm" onClick={() => addSlab(regime)}>
-                <Plus className="mr-1 h-3 w-3" /> Add band
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-[1fr_1fr_120px_auto] gap-2 px-2 pb-1 text-xs font-medium text-[var(--dxp-text-muted)]">
-              <span>Lower (₹)</span>
-              <span>Upper (₹, blank = open)</span>
-              <span>Rate %</span>
-              <span className="text-right">Actions</span>
-            </div>
-            <div className="space-y-2">
-              {slabsFor(regime).map(({ s, idx }) => (
-                <div
-                  key={idx}
-                  className="grid grid-cols-[1fr_1fr_120px_auto] items-center gap-2 rounded border border-[var(--dxp-border)] px-2 py-2"
-                >
-                  <Input
-                    type="number"
-                    min={0}
-                    step={10000}
-                    value={toRupees(s.lowerPaisa)}
-                    onChange={(e) => updateSlab(idx, 'lowerPaisa', e.target.value)}
-                    className="font-mono"
-                  />
-                  <Input
-                    type="number"
-                    min={0}
-                    step={10000}
-                    placeholder="open-ended"
-                    value={s.upperPaisa === null ? '' : toRupees(s.upperPaisa)}
-                    onChange={(e) => updateSlab(idx, 'upperPaisa', e.target.value)}
-                    className="font-mono"
-                  />
-                  <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    value={s.ratePct}
-                    onChange={(e) => updateSlab(idx, 'ratePct', e.target.value)}
-                    className="font-mono"
-                  />
-                  <div className="flex justify-end">
-                    <Button variant="ghost" onClick={() => removeSlab(idx)} title="Remove band">
-                      <Trash2 className="h-4 w-4 text-rose-600" />
-                    </Button>
+      {/* ── Tab bar — groups the six editor sections so the page is
+          scannable instead of one long scroll. Switching tabs only
+          changes which Card(s) render; all form state is preserved. ── */}
+      <div className="border-b border-[var(--dxp-border)]">
+        <nav className="-mb-px flex flex-wrap gap-1" aria-label="Tax rule sections">
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={cn(
+                  'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'border-[var(--dxp-primary,#6366f1)] text-[var(--dxp-text)]'
+                    : 'border-transparent text-[var(--dxp-text-muted)] hover:border-[var(--dxp-border)] hover:text-[var(--dxp-text)]',
+                )}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* ── Tab: Slabs & Regime (sections 1 + 2) ── */}
+      {activeTab === 'slabs' && (
+        <>
+          {/* ── 1. Slabs ── */}
+          {(['OLD', 'NEW'] as Regime[]).map((regime) => (
+            <Card key={`slabs-${regime}`}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-[var(--dxp-text)]">
+                      Income Tax Slabs — {regime === 'OLD' ? 'Old' : 'New'} Regime
+                    </h2>
+                    <p className="text-xs text-[var(--dxp-text-muted)]">
+                      Tax bands applied to taxable income. Leave <em>Upper</em> blank for the top open-ended band.
+                    </p>
                   </div>
+                  <Button variant="secondary" size="sm" onClick={() => addSlab(regime)}>
+                    <Plus className="mr-1 h-3 w-3" /> Add band
+                  </Button>
                 </div>
-              ))}
-              {slabsFor(regime).length === 0 && (
-                <p className="px-2 py-4 text-sm text-[var(--dxp-text-muted)]">
-                  No bands yet — add the first one.
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-
-      {/* ── 2. Regime config ── */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-bold text-[var(--dxp-text)]">Regime Constants</h2>
-          <p className="text-xs text-[var(--dxp-text-muted)]">
-            Once-per-return values: standard deduction, the Section 87A rebate (income threshold + max
-            rebate), and the health &amp; education cess.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 md:grid-cols-2">
-            {([
-              ['OLD', oldConfig],
-              ['NEW', newConfig],
-            ] as [Regime, RegimeConfigRow | undefined][]).map(([regime, cfg]) =>
-              cfg ? (
-                <div key={regime} className="space-y-3 rounded-lg border border-[var(--dxp-border)] p-4">
-                  <h3 className="text-sm font-semibold text-[var(--dxp-text)]">
-                    {regime === 'OLD' ? 'Old' : 'New'} Regime
-                  </h3>
-                  <LabeledInput
-                    label="Standard deduction (₹)"
-                    type="number"
-                    value={toRupees(cfg.standardDeductionPaisa)}
-                    onChange={(e) => updateRegimeConfig(regime, 'standardDeductionPaisa', e.target.value)}
-                    className="font-mono"
-                  />
-                  <LabeledInput
-                    label="87A rebate threshold (₹)"
-                    type="number"
-                    value={toRupees(cfg.rebate87aThresholdPaisa)}
-                    onChange={(e) => updateRegimeConfig(regime, 'rebate87aThresholdPaisa', e.target.value)}
-                    className="font-mono"
-                  />
-                  <LabeledInput
-                    label="87A rebate max (₹)"
-                    type="number"
-                    value={toRupees(cfg.rebate87aMaxPaisa)}
-                    onChange={(e) => updateRegimeConfig(regime, 'rebate87aMaxPaisa', e.target.value)}
-                    className="font-mono"
-                  />
-                  <LabeledInput
-                    label="Cess %"
-                    type="number"
-                    step={0.5}
-                    value={cfg.cessPct}
-                    onChange={(e) => updateRegimeConfig(regime, 'cessPct', e.target.value)}
-                    className="font-mono"
-                  />
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-[1fr_1fr_120px_auto] gap-2 px-2 pb-1 text-xs font-medium text-[var(--dxp-text-muted)]">
+                  <span>Lower (₹)</span>
+                  <span>Upper (₹, blank = open)</span>
+                  <span>Rate %</span>
+                  <span className="text-right">Actions</span>
                 </div>
-              ) : null,
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                <div className="space-y-2">
+                  {slabsFor(regime).map(({ s, idx }) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[1fr_1fr_120px_auto] items-center gap-2 rounded border border-[var(--dxp-border)] px-2 py-2"
+                    >
+                      <Input
+                        type="number"
+                        min={0}
+                        step={10000}
+                        value={toRupees(s.lowerPaisa)}
+                        onChange={(e) => updateSlab(idx, 'lowerPaisa', e.target.value)}
+                        className="font-mono"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step={10000}
+                        placeholder="open-ended"
+                        value={s.upperPaisa === null ? '' : toRupees(s.upperPaisa)}
+                        onChange={(e) => updateSlab(idx, 'upperPaisa', e.target.value)}
+                        className="font-mono"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        value={s.ratePct}
+                        onChange={(e) => updateSlab(idx, 'ratePct', e.target.value)}
+                        className="font-mono"
+                      />
+                      <div className="flex justify-end">
+                        <Button variant="ghost" onClick={() => removeSlab(idx)} title="Remove band">
+                          <Trash2 className="h-4 w-4 text-rose-600" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  {slabsFor(regime).length === 0 && (
+                    <p className="px-2 py-4 text-sm text-[var(--dxp-text-muted)]">
+                      No bands yet — add the first one.
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
 
-      {/* ── 3. Deduction caps ── */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-bold text-[var(--dxp-text)]">Deduction Caps</h2>
-          <p className="text-xs text-[var(--dxp-text-muted)]">
-            Maximum claimable amounts for Chapter VI-A and house-property sections (Old regime).
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <LabeledInput
-              label="80C (₹)"
-              type="number"
-              value={toRupees(rules.eightyCCapPaisa)}
-              onChange={(e) => updateCapPaisa('eightyCCapPaisa', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="80CCD(1B) — NPS (₹)"
-              type="number"
-              value={toRupees(rules.eightyCcd1bCapPaisa)}
-              onChange={(e) => updateCapPaisa('eightyCcd1bCapPaisa', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="80D base (₹)"
-              type="number"
-              value={toRupees(rules.eightyDBaseCapPaisa)}
-              onChange={(e) => updateCapPaisa('eightyDBaseCapPaisa', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="80D senior (₹)"
-              type="number"
-              value={toRupees(rules.eightyDSeniorCapPaisa)}
-              onChange={(e) => updateCapPaisa('eightyDSeniorCapPaisa', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="Sec 24(b) self-occupied (₹)"
-              type="number"
-              value={toRupees(rules.sec24bSelfOccupiedCapPaisa)}
-              onChange={(e) => updateCapPaisa('sec24bSelfOccupiedCapPaisa', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="Sec 24(b) pre-1999 (₹)"
-              type="number"
-              value={toRupees(rules.sec24bPre1999CapPaisa)}
-              onChange={(e) => updateCapPaisa('sec24bPre1999CapPaisa', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="80EEA (₹)"
-              type="number"
-              value={toRupees(rules.sec80eeaCapPaisa)}
-              onChange={(e) => updateCapPaisa('sec80eeaCapPaisa', e.target.value)}
-              className="font-mono"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 4. Capital gains ── */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-bold text-[var(--dxp-text)]">Capital Gains</h2>
-          <p className="text-xs text-[var(--dxp-text-muted)]">
-            Rates split around the July 2024 reform cutoff. Sales on/after the cutoff use the &ldquo;post&rdquo;
-            rates; earlier sales use &ldquo;pre&rdquo;.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <LabeledInput
-              label="Reform cutoff date"
-              type="date"
-              value={rules.capitalGainsRules.reformCutoff}
-              onChange={(e) => updateCg('reformCutoff', e.target.value)}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="112A exemption — pre (₹)"
-              type="number"
-              value={toRupees(rules.capitalGainsRules.sec112aExemptionPrePaisa)}
-              onChange={(e) => updateCg('sec112aExemptionPrePaisa', toPaisa(e.target.value))}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="112A exemption — post (₹)"
-              type="number"
-              value={toRupees(rules.capitalGainsRules.sec112aExemptionPostPaisa)}
-              onChange={(e) => updateCg('sec112aExemptionPostPaisa', toPaisa(e.target.value))}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="LTCG equity rate — pre %"
-              type="number"
-              step={0.5}
-              value={rules.capitalGainsRules.ltcgEquityRatePrePct}
-              onChange={(e) => updateCg('ltcgEquityRatePrePct', num(e.target.value))}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="LTCG equity rate — post %"
-              type="number"
-              step={0.5}
-              value={rules.capitalGainsRules.ltcgEquityRatePostPct}
-              onChange={(e) => updateCg('ltcgEquityRatePostPct', num(e.target.value))}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="LTCG general rate %"
-              type="number"
-              step={0.5}
-              value={rules.capitalGainsRules.ltcgGeneralRatePct}
-              onChange={(e) => updateCg('ltcgGeneralRatePct', num(e.target.value))}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="STCG equity rate — pre %"
-              type="number"
-              step={0.5}
-              value={rules.capitalGainsRules.stcgEquityRatePrePct}
-              onChange={(e) => updateCg('stcgEquityRatePrePct', num(e.target.value))}
-              className="font-mono"
-            />
-            <LabeledInput
-              label="STCG equity rate — post %"
-              type="number"
-              step={0.5}
-              value={rules.capitalGainsRules.stcgEquityRatePostPct}
-              onChange={(e) => updateCg('stcgEquityRatePostPct', num(e.target.value))}
-              className="font-mono"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 5. Surcharge brackets ── */}
-      {(['OLD', 'NEW'] as Regime[]).map((regime) => {
-        const list = regime === 'OLD' ? rules.surchargeOldBrackets : rules.surchargeNewBrackets;
-        return (
-          <Card key={`surcharge-${regime}`}>
+          {/* ── 2. Regime config ── */}
+          <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-base font-bold text-[var(--dxp-text)]">
-                    Surcharge — {regime === 'OLD' ? 'Old' : 'New'} Regime
-                  </h2>
-                  <p className="text-xs text-[var(--dxp-text-muted)]">
-                    Additional surcharge on tax for high incomes. Each row is the income from which the rate
-                    applies.
-                  </p>
-                </div>
-                <Button variant="secondary" size="sm" onClick={() => addSurcharge(regime)}>
-                  <Plus className="mr-1 h-3 w-3" /> Add bracket
-                </Button>
-              </div>
+              <h2 className="text-base font-bold text-[var(--dxp-text)]">Regime Constants</h2>
+              <p className="text-xs text-[var(--dxp-text-muted)]">
+                Once-per-return values: standard deduction, the Section 87A rebate (income threshold + max
+                rebate), and the health &amp; education cess.
+              </p>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-[1fr_120px_auto] gap-2 px-2 pb-1 text-xs font-medium text-[var(--dxp-text-muted)]">
-                <span>Income from (₹)</span>
-                <span>Rate %</span>
-                <span className="text-right">Actions</span>
-              </div>
-              <div className="space-y-2">
-                {list.map((b, idx) => (
-                  <div
-                    key={idx}
-                    className="grid grid-cols-[1fr_120px_auto] items-center gap-2 rounded border border-[var(--dxp-border)] px-2 py-2"
-                  >
-                    <Input
-                      type="number"
-                      min={0}
-                      step={100000}
-                      value={toRupees(b.lowerPaisa)}
-                      onChange={(e) => updateSurcharge(regime, idx, 'lowerPaisa', e.target.value)}
-                      className="font-mono"
-                    />
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={b.ratePct}
-                      onChange={(e) => updateSurcharge(regime, idx, 'ratePct', e.target.value)}
-                      className="font-mono"
-                    />
-                    <div className="flex justify-end">
-                      <Button variant="ghost" onClick={() => removeSurcharge(regime, idx)} title="Remove">
-                        <Trash2 className="h-4 w-4 text-rose-600" />
-                      </Button>
+              <div className="grid gap-6 md:grid-cols-2">
+                {([
+                  ['OLD', oldConfig],
+                  ['NEW', newConfig],
+                ] as [Regime, RegimeConfigRow | undefined][]).map(([regime, cfg]) =>
+                  cfg ? (
+                    <div key={regime} className="space-y-3 rounded-lg border border-[var(--dxp-border)] p-4">
+                      <h3 className="text-sm font-semibold text-[var(--dxp-text)]">
+                        {regime === 'OLD' ? 'Old' : 'New'} Regime
+                      </h3>
+                      <LabeledInput
+                        label="Standard deduction (₹)"
+                        type="number"
+                        value={toRupees(cfg.standardDeductionPaisa)}
+                        onChange={(e) => updateRegimeConfig(regime, 'standardDeductionPaisa', e.target.value)}
+                        className="font-mono"
+                      />
+                      <LabeledInput
+                        label="87A rebate threshold (₹)"
+                        type="number"
+                        value={toRupees(cfg.rebate87aThresholdPaisa)}
+                        onChange={(e) => updateRegimeConfig(regime, 'rebate87aThresholdPaisa', e.target.value)}
+                        className="font-mono"
+                      />
+                      <LabeledInput
+                        label="87A rebate max (₹)"
+                        type="number"
+                        value={toRupees(cfg.rebate87aMaxPaisa)}
+                        onChange={(e) => updateRegimeConfig(regime, 'rebate87aMaxPaisa', e.target.value)}
+                        className="font-mono"
+                      />
+                      <LabeledInput
+                        label="Cess %"
+                        type="number"
+                        step={0.5}
+                        value={cfg.cessPct}
+                        onChange={(e) => updateRegimeConfig(regime, 'cessPct', e.target.value)}
+                        className="font-mono"
+                      />
                     </div>
-                  </div>
-                ))}
+                  ) : null,
+                )}
               </div>
             </CardContent>
           </Card>
-        );
-      })}
+        </>
+      )}
 
-      {/* ── 6. Presumptive ── */}
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-bold text-[var(--dxp-text)]">Presumptive Taxation</h2>
-          <p className="text-xs text-[var(--dxp-text-muted)]">
-            Sections 44AD (business) and 44ADA (professionals) — presumed-income percentages and turnover /
-            receipt eligibility limits.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="space-y-3 rounded-lg border border-[var(--dxp-border)] p-4">
-              <h3 className="text-sm font-semibold text-[var(--dxp-text)]">44AD — Business</h3>
+      {/* ── Tab: Deductions (section 3) ── */}
+      {activeTab === 'deductions' && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-base font-bold text-[var(--dxp-text)]">Deduction Caps</h2>
+            <p className="text-xs text-[var(--dxp-text-muted)]">
+              Maximum claimable amounts for Chapter VI-A and house-property sections (Old regime).
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <LabeledInput
-                label="Digital receipts %"
+                label="80C (₹)"
                 type="number"
-                step={0.5}
-                value={rules.presumptiveRules.ad.digitalPct}
-                onChange={(e) => updatePresumptive('ad', 'digitalPct', num(e.target.value))}
+                value={toRupees(rules.eightyCCapPaisa)}
+                onChange={(e) => updateCapPaisa('eightyCCapPaisa', e.target.value)}
                 className="font-mono"
               />
               <LabeledInput
-                label="Cash receipts %"
+                label="80CCD(1B) — NPS (₹)"
                 type="number"
-                step={0.5}
-                value={rules.presumptiveRules.ad.cashPct}
-                onChange={(e) => updatePresumptive('ad', 'cashPct', num(e.target.value))}
+                value={toRupees(rules.eightyCcd1bCapPaisa)}
+                onChange={(e) => updateCapPaisa('eightyCcd1bCapPaisa', e.target.value)}
                 className="font-mono"
               />
               <LabeledInput
-                label="Turnover limit (₹)"
+                label="80D base (₹)"
                 type="number"
-                value={toRupees(rules.presumptiveRules.ad.turnoverLimitPaisa)}
-                onChange={(e) => updatePresumptive('ad', 'turnoverLimitPaisa', toPaisa(e.target.value))}
+                value={toRupees(rules.eightyDBaseCapPaisa)}
+                onChange={(e) => updateCapPaisa('eightyDBaseCapPaisa', e.target.value)}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="80D senior (₹)"
+                type="number"
+                value={toRupees(rules.eightyDSeniorCapPaisa)}
+                onChange={(e) => updateCapPaisa('eightyDSeniorCapPaisa', e.target.value)}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="Sec 24(b) self-occupied (₹)"
+                type="number"
+                value={toRupees(rules.sec24bSelfOccupiedCapPaisa)}
+                onChange={(e) => updateCapPaisa('sec24bSelfOccupiedCapPaisa', e.target.value)}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="Sec 24(b) pre-1999 (₹)"
+                type="number"
+                value={toRupees(rules.sec24bPre1999CapPaisa)}
+                onChange={(e) => updateCapPaisa('sec24bPre1999CapPaisa', e.target.value)}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="80EEA (₹)"
+                type="number"
+                value={toRupees(rules.sec80eeaCapPaisa)}
+                onChange={(e) => updateCapPaisa('sec80eeaCapPaisa', e.target.value)}
                 className="font-mono"
               />
             </div>
-            <div className="space-y-3 rounded-lg border border-[var(--dxp-border)] p-4">
-              <h3 className="text-sm font-semibold text-[var(--dxp-text)]">44ADA — Professionals</h3>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Tab: Capital Gains (section 4) ── */}
+      {activeTab === 'capital-gains' && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-base font-bold text-[var(--dxp-text)]">Capital Gains</h2>
+            <p className="text-xs text-[var(--dxp-text-muted)]">
+              Rates split around the July 2024 reform cutoff. Sales on/after the cutoff use the &ldquo;post&rdquo;
+              rates; earlier sales use &ldquo;pre&rdquo;.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <LabeledInput
-                label="Presumed income %"
-                type="number"
-                step={0.5}
-                value={rules.presumptiveRules.ada.pct}
-                onChange={(e) => updatePresumptive('ada', 'pct', num(e.target.value))}
+                label="Reform cutoff date"
+                type="date"
+                value={rules.capitalGainsRules.reformCutoff}
+                onChange={(e) => updateCg('reformCutoff', e.target.value)}
                 className="font-mono"
               />
               <LabeledInput
-                label="Receipt limit (₹)"
+                label="112A exemption — pre (₹)"
                 type="number"
-                value={toRupees(rules.presumptiveRules.ada.receiptLimitPaisa)}
-                onChange={(e) => updatePresumptive('ada', 'receiptLimitPaisa', toPaisa(e.target.value))}
+                value={toRupees(rules.capitalGainsRules.sec112aExemptionPrePaisa)}
+                onChange={(e) => updateCg('sec112aExemptionPrePaisa', toPaisa(e.target.value))}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="112A exemption — post (₹)"
+                type="number"
+                value={toRupees(rules.capitalGainsRules.sec112aExemptionPostPaisa)}
+                onChange={(e) => updateCg('sec112aExemptionPostPaisa', toPaisa(e.target.value))}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="LTCG equity rate — pre %"
+                type="number"
+                step={0.5}
+                value={rules.capitalGainsRules.ltcgEquityRatePrePct}
+                onChange={(e) => updateCg('ltcgEquityRatePrePct', num(e.target.value))}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="LTCG equity rate — post %"
+                type="number"
+                step={0.5}
+                value={rules.capitalGainsRules.ltcgEquityRatePostPct}
+                onChange={(e) => updateCg('ltcgEquityRatePostPct', num(e.target.value))}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="LTCG general rate %"
+                type="number"
+                step={0.5}
+                value={rules.capitalGainsRules.ltcgGeneralRatePct}
+                onChange={(e) => updateCg('ltcgGeneralRatePct', num(e.target.value))}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="STCG equity rate — pre %"
+                type="number"
+                step={0.5}
+                value={rules.capitalGainsRules.stcgEquityRatePrePct}
+                onChange={(e) => updateCg('stcgEquityRatePrePct', num(e.target.value))}
+                className="font-mono"
+              />
+              <LabeledInput
+                label="STCG equity rate — post %"
+                type="number"
+                step={0.5}
+                value={rules.capitalGainsRules.stcgEquityRatePostPct}
+                onChange={(e) => updateCg('stcgEquityRatePostPct', num(e.target.value))}
                 className="font-mono"
               />
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Tab: Surcharge (section 5) ── */}
+      {activeTab === 'surcharge' &&
+        (['OLD', 'NEW'] as Regime[]).map((regime) => {
+          const list = regime === 'OLD' ? rules.surchargeOldBrackets : rules.surchargeNewBrackets;
+          return (
+            <Card key={`surcharge-${regime}`}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-[var(--dxp-text)]">
+                      Surcharge — {regime === 'OLD' ? 'Old' : 'New'} Regime
+                    </h2>
+                    <p className="text-xs text-[var(--dxp-text-muted)]">
+                      Additional surcharge on tax for high incomes. Each row is the income from which the rate
+                      applies.
+                    </p>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => addSurcharge(regime)}>
+                    <Plus className="mr-1 h-3 w-3" /> Add bracket
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-[1fr_120px_auto] gap-2 px-2 pb-1 text-xs font-medium text-[var(--dxp-text-muted)]">
+                  <span>Income from (₹)</span>
+                  <span>Rate %</span>
+                  <span className="text-right">Actions</span>
+                </div>
+                <div className="space-y-2">
+                  {list.map((b, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[1fr_120px_auto] items-center gap-2 rounded border border-[var(--dxp-border)] px-2 py-2"
+                    >
+                      <Input
+                        type="number"
+                        min={0}
+                        step={100000}
+                        value={toRupees(b.lowerPaisa)}
+                        onChange={(e) => updateSurcharge(regime, idx, 'lowerPaisa', e.target.value)}
+                        className="font-mono"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={b.ratePct}
+                        onChange={(e) => updateSurcharge(regime, idx, 'ratePct', e.target.value)}
+                        className="font-mono"
+                      />
+                      <div className="flex justify-end">
+                        <Button variant="ghost" onClick={() => removeSurcharge(regime, idx)} title="Remove">
+                          <Trash2 className="h-4 w-4 text-rose-600" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+      {/* ── Tab: Presumptive (section 6) ── */}
+      {activeTab === 'presumptive' && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-base font-bold text-[var(--dxp-text)]">Presumptive Taxation</h2>
+            <p className="text-xs text-[var(--dxp-text-muted)]">
+              Sections 44AD (business) and 44ADA (professionals) — presumed-income percentages and turnover /
+              receipt eligibility limits.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="space-y-3 rounded-lg border border-[var(--dxp-border)] p-4">
+                <h3 className="text-sm font-semibold text-[var(--dxp-text)]">44AD — Business</h3>
+                <LabeledInput
+                  label="Digital receipts %"
+                  type="number"
+                  step={0.5}
+                  value={rules.presumptiveRules.ad.digitalPct}
+                  onChange={(e) => updatePresumptive('ad', 'digitalPct', num(e.target.value))}
+                  className="font-mono"
+                />
+                <LabeledInput
+                  label="Cash receipts %"
+                  type="number"
+                  step={0.5}
+                  value={rules.presumptiveRules.ad.cashPct}
+                  onChange={(e) => updatePresumptive('ad', 'cashPct', num(e.target.value))}
+                  className="font-mono"
+                />
+                <LabeledInput
+                  label="Turnover limit (₹)"
+                  type="number"
+                  value={toRupees(rules.presumptiveRules.ad.turnoverLimitPaisa)}
+                  onChange={(e) => updatePresumptive('ad', 'turnoverLimitPaisa', toPaisa(e.target.value))}
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-3 rounded-lg border border-[var(--dxp-border)] p-4">
+                <h3 className="text-sm font-semibold text-[var(--dxp-text)]">44ADA — Professionals</h3>
+                <LabeledInput
+                  label="Presumed income %"
+                  type="number"
+                  step={0.5}
+                  value={rules.presumptiveRules.ada.pct}
+                  onChange={(e) => updatePresumptive('ada', 'pct', num(e.target.value))}
+                  className="font-mono"
+                />
+                <LabeledInput
+                  label="Receipt limit (₹)"
+                  type="number"
+                  value={toRupees(rules.presumptiveRules.ada.receiptLimitPaisa)}
+                  onChange={(e) => updatePresumptive('ada', 'receiptLimitPaisa', toPaisa(e.target.value))}
+                  className="font-mono"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Footer save */}
       <div className="flex justify-end">
