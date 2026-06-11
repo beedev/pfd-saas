@@ -17,6 +17,7 @@ import { detectChit, parseChitStream } from './chit-dsc';
 import { detectMfSip, parseMfSipStream } from './mf-sip';
 import { detectEpfPassbook, parseEpfPassbookStream } from './epf-passbook';
 import { detectNpsSot, parseNpsSotStream } from './nps-sot';
+import { detectCgStatement, parseCgStatementStream } from './cg-statement';
 
 export type { DocType, ParsedStatement } from './types';
 export type {
@@ -30,6 +31,9 @@ export type {
   EpfPassbookData,
   NpsSotParsed,
   NpsSotData,
+  CgStatementParsed,
+  CgStatementRow,
+  CgBroker,
 } from './types';
 
 // Detection order matters when two detectors might fire on the same
@@ -42,6 +46,10 @@ const DETECTORS: Array<{ type: Exclude<DocType, 'unknown'>; detect: (s: string) 
   { type: 'mf-sip', detect: detectMfSip },
   { type: 'epf-passbook', detect: detectEpfPassbook },
   { type: 'nps-sot', detect: detectNpsSot },
+  // Broker capital-gains / realised-P&L statements (Zerodha/Groww/CAMS).
+  // Last — its broker+CG token pair is specific, and we'd rather a
+  // recognised investment statement win its own detector first.
+  { type: 'cg-statement', detect: detectCgStatement },
 ];
 
 export function detectDocType(stream: string): DocType {
@@ -57,6 +65,7 @@ const PARSERS: Record<Exclude<DocType, 'unknown'>, (s: string) => ParsedStatemen
   'mf-sip': parseMfSipStream,
   'epf-passbook': parseEpfPassbookStream,
   'nps-sot': parseNpsSotStream,
+  'cg-statement': parseCgStatementStream,
 };
 
 export interface ParseResult {
@@ -90,7 +99,7 @@ export async function parseStatement(
       parsed: {
         type: 'unknown',
         warnings: [
-          'Could not detect document type. Supported: LIC Premium Statement, Chit Fund Account Copy, Mutual Fund CAS, EPF Passbook, NPS Statement of Transactions.',
+          'Could not detect document type. Supported: LIC Premium Statement, Chit Fund Account Copy, Mutual Fund CAS, EPF Passbook, NPS Statement of Transactions, broker capital-gains statement.',
         ],
       },
     };
