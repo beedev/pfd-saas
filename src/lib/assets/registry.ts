@@ -154,6 +154,36 @@ export const ASSET_CLASSES: AssetClass[] = [
   }),
 ];
 
+/** Keyed view of the registry for callers that want one specific class
+ *  (e.g. a projection consumer sourcing just its aggregate current-value
+ *  legs) without re-listing the table + reduction. Built once at module
+ *  load from the canonical `ASSET_CLASSES` array so it can never drift. */
+export const ASSET_CLASS_BY_KEY: Record<string, AssetClass> = Object.fromEntries(
+  ASSET_CLASSES.map((ac) => [ac.key, ac]),
+);
+
+/**
+ * Current-value (paisa) for a single asset class, sourced from the SAME
+ * fetch + `valuePaisa` rule the net-worth snapshot uses. This is the one
+ * place "what does this asset class total today" is defined; projection
+ * consumers that need an aggregate current-value leg read it from here
+ * instead of re-declaring the `db.select().from(X)` + reduction.
+ *
+ * Only use this where the consumer's notion of "current value" is exactly
+ * the net-worth one. Consumers that value an asset differently for a
+ * projection (per-item maturity payouts, mode-dependent sale prices, etc.)
+ * must keep their own computation — see the projection routes.
+ */
+export async function assetClassCurrentValuePaisa(
+  key: string,
+  userId: string,
+): Promise<number> {
+  const ac = ASSET_CLASS_BY_KEY[key];
+  if (!ac) throw new Error(`Unknown asset class key: ${key}`);
+  const rows = await ac.fetch(userId);
+  return ac.valuePaisa(rows);
+}
+
 export interface AssetClassValue {
   key: string;
   label: string;
