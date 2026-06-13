@@ -21,7 +21,20 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
+/**
+ * Resolve the bot token at CALL time (not module load) so a token set or
+ * changed at runtime — e.g. pasted in Settings → written to
+ * /data/.secrets/telegram_bot_token and applied to process.env — takes
+ * effect immediately, without a restart.
+ */
+function botToken(): string {
+  return process.env.TELEGRAM_BOT_TOKEN ?? '';
+}
+
+/** Clear the getMe username cache after a token change. */
+export function resetBotUsernameCache(): void {
+  cachedBotUsername = null;
+}
 
 const STUB_LOG = path.join(process.cwd(), 'tmp', 'telegram-out.log');
 
@@ -59,6 +72,7 @@ export async function sendTelegramToUser(
   userId: string,
   text: string,
 ): Promise<TelegramSendResult> {
+  const BOT_TOKEN = botToken();
   if (!BOT_TOKEN) {
     writeStub(userId, text);
     return { ok: true };
@@ -117,6 +131,7 @@ export async function sendTelegramToChatId(
   chatId: string | number,
   text: string,
 ): Promise<TelegramSendResult> {
+  const BOT_TOKEN = botToken();
   if (!BOT_TOKEN) {
     console.warn('[telegram] sendTelegramToChatId: no BOT_TOKEN, dropping message');
     return { ok: false, reason: 'no-token' };
@@ -142,5 +157,74 @@ export async function sendTelegramToChatId(
   } catch (err) {
     console.error('[telegram] fetch failed:', err);
     return { ok: false, reason: 'api-error', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ─── getUpdates pairing (self-host / localhost) ──────────────────────────
+// Localhost deployments can't receive webhooks, so pairing reads the bot's
+// inbound `/start <code>` messages via getUpdates (outbound long-poll).
+// webhook and getUpdates are mutually exclusive on a bot — callers in this
+// mode must deleteWebhook first.
+
+let cachedBotUsername: string | null = null;
+
+/** Bot @username via getMe (cached). null when no token / API failure. */
+export async function getBotUsername(): Promise<string | null> {
+  const BOT_TOKEN = botToken();
+  if (!BOT_TOKEN) return null;
+  if (cachedBotUsername) return cachedBotUsername;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`);
+    const j = (await res.json()) as { ok: boolean; result?: { username?: string } };
+    if (j.ok && j.result?.username) cachedBotUsername = j.result.username;
+    return cachedBotUsername;
+  } catch (err) {
+    console.error('[telegram] getMe failed:', err);
+    return null;
+  }
+}
+
+/** Remove any registered webhook so getUpdates is permitted (idempotent). */
+export async function deleteTelegramWebhook(): Promise<void> {
+  const BOT_TOKEN = botToken();
+  if (!BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook`);
+  } catch (err) {
+    console.error('[telegram] deleteWebhook failed:', err);
+  }
+}
+
+export interface TelegramInboundUpdate {
+  update_id: number;
+  message?: {
+    chat?: { id?: number | string };
+    from?: { username?: string | null };
+    text?: string;
+  };
+}
+
+/** Fetch inbound message updates from `offset` (non-blocking, timeout=0). */
+export async function fetchTelegramUpdates(offset: number): Promise<TelegramInboundUpdate[]> {
+  const BOT_TOKEN = botToken();
+  if (!BOT_TOKEN) return [];
+  try {
+    const url =
+      `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates` +
+      `?timeout=0&offset=${offset}&allowed_updates=${encodeURIComponent('["message"]')}`;
+    const res = await fetch(url);
+    const j = (await res.json()) as {
+      ok: boolean;
+      result?: TelegramInboundUpdate[];
+      description?: string;
+    };
+    if (!j.ok) {
+      console.error('[telegram] getUpdates error:', j.description);
+      return [];
+    }
+    return j.result ?? [];
+  } catch (err) {
+    console.error('[telegram] getUpdates failed:', err);
+    return [];
   }
 }

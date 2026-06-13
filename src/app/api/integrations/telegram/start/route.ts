@@ -30,6 +30,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
 import { auth } from '@/auth';
+import { getBotUsername, deleteTelegramWebhook } from '@/lib/services/telegram';
 
 const TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -39,16 +40,27 @@ export async function POST() {
     return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   }
 
-  const botUsername = process.env.TELEGRAM_BOT_USERNAME?.trim();
+  // Self-host/localhost can't receive webhooks → 'getupdates' mode pairs by
+  // polling the bot's inbound messages instead. Default 'webhook' keeps the
+  // public SaaS flow unchanged.
+  const mode = (process.env.TELEGRAM_CONNECT_MODE ?? 'webhook').toLowerCase();
+
+  // Prefer the explicit env username; otherwise resolve it from the token via
+  // getMe (so a self-host only needs TELEGRAM_BOT_TOKEN).
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME?.trim() || (await getBotUsername()) || '';
   if (!botUsername) {
     return NextResponse.json(
       {
         error:
-          'TELEGRAM_BOT_USERNAME not configured. Set it in .env.local to the bot username (no @).',
+          'Telegram bot not configured. Set TELEGRAM_BOT_TOKEN (and optionally TELEGRAM_BOT_USERNAME).',
       },
       { status: 500 },
     );
   }
+
+  // getUpdates and webhook are mutually exclusive on a bot — clear any webhook
+  // so poll-based pairing can read the inbound /start message.
+  if (mode === 'getupdates') await deleteTelegramWebhook();
 
   try {
     const token = randomUUID();
@@ -72,7 +84,13 @@ export async function POST() {
     }
 
     const deepLink = `https://t.me/${botUsername}?start=${token}`;
-    return NextResponse.json({ deepLink, expiresAt: expiresAt.toISOString() });
+    return NextResponse.json({
+      deepLink,
+      code: token,
+      botUsername,
+      mode,
+      expiresAt: expiresAt.toISOString(),
+    });
   } catch (err) {
     console.error('[telegram/start]', err);
     return NextResponse.json({ error: 'Failed to initialise pairing' }, { status: 500 });

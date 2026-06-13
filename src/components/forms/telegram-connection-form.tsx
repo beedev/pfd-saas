@@ -22,6 +22,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
   Card,
   CardContent,
@@ -44,6 +45,55 @@ export function TelegramConnectionForm() {
   const [starting, setStarting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [polling, setPolling] = useState(false);
+  // Pairing code + bot username shown as a fallback if the deep link doesn't
+  // open Telegram (e.g. desktop without the app).
+  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [botUsername, setBotUsername] = useState<string | null>(null);
+  // Bot-token configuration (self-host): when the deployment lets the user
+  // set the bot token from the UI, the card shows a token field first.
+  const [selfHost, setSelfHost] = useState(false);
+  const [botConfigured, setBotConfigured] = useState(false);
+  const [configuredBot, setConfiguredBot] = useState<string | null>(null);
+  const [tokenInput, setTokenInput] = useState('');
+  const [savingToken, setSavingToken] = useState(false);
+
+  const refreshBotStatus = useCallback(async () => {
+    try {
+      const r = await fetch('/api/integrations/telegram/bot-token', { cache: 'no-store' });
+      if (!r.ok) return;
+      const j = (await r.json()) as {
+        configured?: boolean;
+        selfHost?: boolean;
+        botUsername?: string | null;
+      };
+      setSelfHost(Boolean(j.selfHost));
+      setBotConfigured(Boolean(j.configured));
+      setConfiguredBot(j.botUsername ?? null);
+    } catch (err) {
+      console.error('[telegram bot-status]', err);
+    }
+  }, []);
+
+  const handleSaveToken = async () => {
+    setSavingToken(true);
+    try {
+      const r = await fetch('/api/integrations/telegram/bot-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenInput.trim() }),
+      });
+      const j = (await r.json()) as { botUsername?: string; error?: string };
+      if (!r.ok) throw new Error(j.error ?? `Failed (HTTP ${r.status})`);
+      setBotConfigured(true);
+      setConfiguredBot(j.botUsername ?? null);
+      setTokenInput('');
+      toast.success(j.botUsername ? `Bot @${j.botUsername} configured` : 'Bot token saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save token');
+    } finally {
+      setSavingToken(false);
+    }
+  };
 
   // Track the active polling timer so we can cancel it on unmount or
   // on a state transition.
@@ -62,7 +112,7 @@ export function TelegramConnectionForm() {
   useEffect(() => {
     (async () => {
       try {
-        await refresh();
+        await Promise.all([refresh(), refreshBotStatus()]);
       } catch (err) {
         console.error(err);
         toast.error('Could not load preferences');
@@ -73,7 +123,7 @@ export function TelegramConnectionForm() {
     return () => {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [refresh]);
+  }, [refresh, refreshBotStatus]);
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -94,14 +144,14 @@ export function TelegramConnectionForm() {
         return;
       }
       try {
-        const next = await refresh();
-        if (next?.telegramChatId) {
+        // /poll drives getUpdates pairing in self-host mode and reports the
+        // current connection state in both modes.
+        const r = await fetch('/api/integrations/telegram/poll', { method: 'POST' });
+        const j = (await r.json()) as { connected?: boolean; username?: string | null };
+        if (j.connected) {
           stopPolling();
-          toast.success(
-            next.telegramUsername
-              ? `Connected as @${next.telegramUsername}`
-              : 'Telegram connected',
-          );
+          await refresh();
+          toast.success(j.username ? `Connected as @${j.username}` : 'Telegram connected');
           return;
         }
       } catch (err) {
@@ -116,10 +166,17 @@ export function TelegramConnectionForm() {
     setStarting(true);
     try {
       const r = await fetch('/api/integrations/telegram/start', { method: 'POST' });
-      const j = (await r.json()) as { deepLink?: string; error?: string };
+      const j = (await r.json()) as {
+        deepLink?: string;
+        code?: string;
+        botUsername?: string;
+        error?: string;
+      };
       if (!r.ok || !j.deepLink) {
         throw new Error(j.error ?? `Failed (HTTP ${r.status})`);
       }
+      setPairCode(j.code ?? null);
+      setBotUsername(j.botUsername ?? null);
       // Open the Telegram deep link in a new tab — Telegram will pick
       // it up in the desktop/mobile/web app the user has installed.
       window.open(j.deepLink, '_blank', 'noopener,noreferrer');
@@ -172,6 +229,39 @@ export function TelegramConnectionForm() {
       <CardContent>
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : selfHost && !botConfigured ? (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Step 1 — Connect your bot</p>
+            <p className="text-xs text-muted-foreground">
+              Create a bot with{' '}
+              <a
+                href="https://t.me/BotFather"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                @BotFather
+              </a>{' '}
+              (send <code className="rounded bg-muted px-1 py-0.5 font-mono">/newbot</code>),
+              then paste its token here. Stored on this server only.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                type="password"
+                placeholder="123456789:ABC…"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                className="font-mono"
+              />
+              <Button
+                type="button"
+                onClick={handleSaveToken}
+                disabled={savingToken || tokenInput.trim().length < 20}
+              >
+                {savingToken ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
         ) : connected ? (
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -202,6 +292,13 @@ export function TelegramConnectionForm() {
                   ? 'Waiting for confirmation in Telegram… (this tab will update when done).'
                   : 'Click below, then press Start in Telegram to confirm the pairing.'}
               </p>
+              {polling && pairCode && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Didn’t open? In Telegram, message{' '}
+                  <span className="font-medium">{botUsername ? `@${botUsername}` : 'the bot'}</span>:{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">/start {pairCode}</code>
+                </p>
+              )}
             </div>
             <Button
               type="button"
