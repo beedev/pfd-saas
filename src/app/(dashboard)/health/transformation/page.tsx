@@ -129,6 +129,7 @@ export default function TransformationPage() {
     dailyProteinTargetG: string;
   } | null>(null);
   const [savingPlan, setSavingPlan] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   const loadPlan = useCallback(async () => {
     const r = await fetch('/api/health/transformation/plan');
@@ -507,12 +508,34 @@ export default function TransformationPage() {
     );
   }
   if (!plan) {
+    const handleStart = async () => {
+      setStarting(true);
+      try {
+        const r = await fetch('/api/health/transformation/plan', { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error ?? 'Failed to create plan');
+        toast.success('Your 100-day reset is ready!');
+        window.location.reload();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to start');
+        setStarting(false);
+      }
+    };
     return (
       <Card>
         <CardContent>
-          <p className="text-[var(--dxp-text-muted)]">
-            No plan found. Run the seed import or create one via the API.
-          </p>
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <p className="text-lg font-semibold text-[var(--dxp-text)]">
+              Start your 100-day reset
+            </p>
+            <p className="max-w-md text-sm text-[var(--dxp-text-muted)]">
+              Create your plan with starter habits across Morning Routine, Health, Meals,
+              and Night Routine. You can customise everything afterwards.
+            </p>
+            <Button onClick={handleStart} disabled={starting}>
+              {starting ? 'Creating…' : 'Start your 100-day reset'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );

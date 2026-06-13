@@ -20,6 +20,51 @@ import {
 } from '@/db';
 import { auth } from '@/auth';
 
+/** Default starter template for a new plan — the proven V1 structure. */
+const STARTER_TEMPLATE: Array<{
+  name: string;
+  items: Array<{ label: string; kind: string; options?: string }>;
+}> = [
+  {
+    name: 'Morning Routine',
+    items: [
+      { label: 'Wake up 6:00 am', kind: 'check' },
+      { label: 'Drink hot lemon water', kind: 'check' },
+      { label: 'Fresh up', kind: 'check' },
+      { label: 'Morning meditation', kind: 'check' },
+    ],
+  },
+  {
+    name: 'Health',
+    items: [
+      { label: '3 ltr water', kind: 'check' },
+      {
+        label: 'Physical Activity',
+        kind: 'multi',
+        options: JSON.stringify(['Walking 6k steps', 'Stretching', 'Simple weights', 'Gym']),
+      },
+    ],
+  },
+  {
+    name: 'Meals',
+    items: [
+      { label: 'Morning Meals', kind: 'text' },
+      { label: 'Evening Meals', kind: 'text' },
+      { label: 'Protein Less than 50 gms', kind: 'check' },
+      { label: 'Protein adequate', kind: 'check' },
+    ],
+  },
+  {
+    name: 'Night Routine',
+    items: [
+      { label: '5 min journal writing', kind: 'check' },
+      { label: "Plan the next day's tasks", kind: 'check' },
+      { label: 'No screen 1 hour before bed', kind: 'check' },
+      { label: 'Cleaning', kind: 'check' },
+    ],
+  },
+];
+
 // GET /api/health/transformation/plan
 // Returns the active plan with sections + items (omits soft-deleted rows).
 export async function GET() {
@@ -152,5 +197,59 @@ export async function PATCH(request: NextRequest) {
   } catch (err) {
     console.error('[transformation plan PATCH]', err);
     return NextResponse.json({ error: 'Failed to update plan' }, { status: 500 });
+  }
+}
+
+// POST /api/health/transformation/plan
+// Create the user's plan (one per user) and seed the starter template so an
+// empty account can begin from the UI. 409 if a plan already exists.
+export async function POST() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+
+  try {
+    const existing = await db
+      .select({ id: transformationPlans.id })
+      .from(transformationPlans)
+      .where(eq(transformationPlans.userId, session.user.id))
+      .limit(1);
+    if (existing.length) {
+      return NextResponse.json({ error: 'A plan already exists.' }, { status: 409 });
+    }
+
+    const today = new Date().toISOString().substring(0, 10);
+    const [plan] = await db
+      .insert(transformationPlans)
+      .values({
+        userId: session.user.id,
+        name: '100 Days Transformation Challenge',
+        startDate: today,
+        dayCount: 100,
+      })
+      .returning();
+
+    for (let s = 0; s < STARTER_TEMPLATE.length; s++) {
+      const sec = STARTER_TEMPLATE[s];
+      const [section] = await db
+        .insert(transformationSections)
+        .values({ userId: session.user.id, planId: plan.id, name: sec.name, sortOrder: s })
+        .returning({ id: transformationSections.id });
+      for (let i = 0; i < sec.items.length; i++) {
+        const it = sec.items[i];
+        await db.insert(transformationItems).values({
+          userId: session.user.id,
+          sectionId: section.id,
+          label: it.label,
+          kind: it.kind,
+          options: it.options ?? null,
+          sortOrder: i,
+        });
+      }
+    }
+
+    return NextResponse.json({ plan }, { status: 201 });
+  } catch (err) {
+    console.error('[transformation plan POST]', err);
+    return NextResponse.json({ error: 'Failed to create plan' }, { status: 500 });
   }
 }
