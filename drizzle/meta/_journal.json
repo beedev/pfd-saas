@@ -288,6 +288,13 @@
       "when": 1781172601508,
       "tag": "0040_tax_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1781366696405,
+      "tag": "0041_good_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

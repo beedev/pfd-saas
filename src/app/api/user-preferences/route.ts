@@ -29,6 +29,7 @@ export async function GET() {
         financialYearStartMonth: userPreferences.financialYearStartMonth,
         onboardedAt: userPreferences.onboardedAt,
         habitsEnabled: userPreferences.habitsEnabled,
+        gstEnabled: userPreferences.gstEnabled,
         telegramChatId: userPreferences.telegramChatId,
         telegramUsername: userPreferences.telegramUsername,
         taxRegimeDefault: userPreferences.taxRegimeDefault,
@@ -58,6 +59,7 @@ export async function GET() {
 
 interface PatchBody {
   habitsEnabled?: boolean;
+  gstEnabled?: boolean;
   taxRegimeDefault?: 'NEW' | 'OLD' | 'EVALUATE';
   metroCity?: boolean;
   isSrCitizen?: boolean;
@@ -79,6 +81,7 @@ export async function PATCH(request: NextRequest) {
     const body = (await request.json()) as PatchBody;
     const update: Partial<typeof userPreferences.$inferInsert> = { updatedAt: new Date() };
     if (typeof body.habitsEnabled === 'boolean') update.habitsEnabled = body.habitsEnabled;
+    if (typeof body.gstEnabled === 'boolean') update.gstEnabled = body.gstEnabled;
     if (
       body.taxRegimeDefault === 'NEW' ||
       body.taxRegimeDefault === 'OLD' ||

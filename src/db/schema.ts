@@ -99,6 +99,9 @@ export const userPreferences = pgTable('user_preferences', {
   // and the routes still respond 200 (no-op) so existing bookmarks
   // never 500.
   habitsEnabled: boolean('habits_enabled').notNull().default(false),
+  // Optional GST/business module. Off by default (finance-first); when on,
+  // the GST sidebar section appears. Toggled from Settings → Optional modules.
+  gstEnabled: boolean('gst_enabled').notNull().default(false),
   // Sprint 3.5 follow-up — per-user Telegram routing. TELEGRAM_BOT_TOKEN
   // remains an env var (one bot serves all users); the chat_id where
   // messages land is per-user. NULL = user hasn't paired yet, so cron
