@@ -115,6 +115,28 @@ elif [ -f "$SECRETS/telegram_bot_token" ]; then
   export TELEGRAM_BOT_TOKEN=$(cat "$SECRETS/telegram_bot_token")
 fi
 
+# ─── OpenAI API key (optional, persisted in the volume) ──────────────
+# Powers the Transformation tracker's nutrition estimator. Pasted in
+# Settings → written here → auto-loaded on boot. Absent → estimates skipped.
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+  printf '%s' "$OPENAI_API_KEY" > "$SECRETS/openai_api_key"
+  chmod 600 "$SECRETS/openai_api_key"
+  chown postgres:postgres "$SECRETS/openai_api_key"
+elif [ -f "$SECRETS/openai_api_key" ]; then
+  export OPENAI_API_KEY=$(cat "$SECRETS/openai_api_key")
+fi
+
+# ─── Instance owner name (optional, persisted in the volume) ─────────
+# Shows as "<Owner>’s Artha". Set via -e APP_OWNER (persisted) or in
+# Settings → Personalize. Absent → plain "Artha".
+if [ -n "${APP_OWNER:-}" ]; then
+  printf '%s' "$APP_OWNER" > "$SECRETS/app_owner"
+  chmod 600 "$SECRETS/app_owner"
+  chown postgres:postgres "$SECRETS/app_owner"
+elif [ -f "$SECRETS/app_owner" ]; then
+  export APP_OWNER=$(cat "$SECRETS/app_owner")
+fi
+
 # ─── Start postgres in background ────────────────────────────────────
 # `-l /dev/stdout` fails on Alpine because postgres can't open /dev/stdout
 # with the permissions it wants. Use a regular log file under /data

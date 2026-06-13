@@ -1,6 +1,8 @@
+import { InstanceNameForm } from '@/components/forms/instance-name-form';
 import { BusinessProfileForm } from '@/components/forms/business-profile-form';
 import { PersonalModulesForm } from '@/components/forms/personal-modules-form';
 import { TelegramConnectionForm } from '@/components/forms/telegram-connection-form';
+import { OpenAiKeyForm } from '@/components/forms/openai-key-form';
 import { AssetClassReturnsForm } from '@/components/forms/asset-class-returns-form';
 import { TaxSetupForm } from '@/components/forms/tax-setup-form';
 import { RetirementTaxBracketsForm } from '@/components/forms/retirement-tax-brackets-form';
@@ -17,10 +19,12 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      <InstanceNameForm />
       <BusinessProfileForm />
       <TaxSetupForm />
       <PersonalModulesForm />
       <TelegramConnectionForm />
+      <OpenAiKeyForm />
       <AssetClassReturnsForm />
       <RetirementTaxBracketsForm />
       {/* Sprint 6.1.6 — wipe demo data CTA. Visible to everyone; harmless
