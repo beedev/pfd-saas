@@ -169,7 +169,30 @@ export default function DailyDigestPage() {
     );
   }
 
-  const { portfolio, marketPulse, actionItems, mfMovers, news } = data;
+  // Fail soft: default every section so a missing/partial payload renders
+  // empty-states instead of throwing (one absent field used to white-screen
+  // the whole page — e.g. `news` dropped from the API). The inner `.length`
+  // guards downstream then operate on real (possibly empty) arrays.
+  const {
+    portfolio = {
+      hasSnapshot: false,
+      netWorth: 0,
+      previousNetWorth: 0,
+      netWorthChange: 0,
+      netWorthChangePercent: 0,
+      previousDate: null,
+      breakdown: [],
+    },
+    marketPulse = {
+      indices: [],
+      commodities: [],
+      forex: { usdInr: 0, change: 0, changePercent: 0 },
+      marketState: 'CLOSED',
+    },
+    actionItems = { sipsDue: [], chitsDue: [], insuranceDue: [], loansDue: [] },
+    mfMovers = { gainers: [], losers: [] },
+    news = { markets: [], personalFinance: [] },
+  } = data;
   const totalActions =
     actionItems.sipsDue.length +
     actionItems.chitsDue.length +

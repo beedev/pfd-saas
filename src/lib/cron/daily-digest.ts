@@ -43,6 +43,73 @@ import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const MARKET_SYMBOLS = ['^NSEI', '^BSESN', '^NSEBANK', '^INDIAVIX', 'GC=F', 'SI=F', 'USDINR=X'];
 
+// ─── News (Economic Times RSS) ──────────────────────────────────────────
+// Markets feed is V1's; Personal-Finance uses the ET Wealth feed because
+// V1's old PF feed (…/personal-finance-news/rssfeeds/17999498.cms) now
+// returns an empty channel.
+const ET_MARKETS_RSS = 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms';
+const ET_WEALTH_RSS = 'https://economictimes.indiatimes.com/wealth/rssfeeds/837555174.cms';
+
+type Headline = { title: string; link: string; pubDate: string };
+
+// 15-minute in-memory cache so the two RSS calls don't run on every digest
+// load (the page POSTs a snapshot + fetches the digest on each open).
+// Module-scoped → shared across requests in the same server process.
+const NEWS_TTL_MS = 15 * 60 * 1000;
+const newsCache = new Map<string, { at: number; items: Headline[] }>();
+
+/** Decode the XML/HTML entities RSS titles carry (e.g. `F&amp;O` → `F&O`).
+ *  `&amp;` is decoded last so pre-encoded entities aren't double-decoded. */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#0?39;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * Fetch up to `limit` RSS headlines from an ET feed. Parses item title/link/
+ * pubDate (CDATA or plain). Degrades to [] on network/parse failure (serving
+ * stale cache if available) so the digest never throws on a flaky feed.
+ */
+async function fetchRssHeadlines(url: string, limit: number): Promise<Headline[]> {
+  const cached = newsCache.get(url);
+  if (cached && Date.now() - cached.at < NEWS_TTL_MS) {
+    return cached.items.slice(0, limit);
+  }
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    const xml = await res.text();
+    const items: Headline[] = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    let match: RegExpExecArray | null;
+    // Cache up to 10 so one fetch serves both the 5- and 3-item callers.
+    while ((match = itemRegex.exec(xml)) !== null && items.length < 10) {
+      const block = match[1];
+      const title =
+        block.match(/<title><!\[CDATA\[(.*?)\]\]>/)?.[1] ??
+        block.match(/<title>(.*?)<\/title>/)?.[1] ??
+        '';
+      const link =
+        block.match(/<link><!\[CDATA\[(.*?)\]\]>/)?.[1] ??
+        block.match(/<link>(.*?)<\/link>/)?.[1] ??
+        '';
+      const pubDate = block.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? '';
+      if (title.trim()) {
+        items.push({ title: decodeEntities(title.trim()), link: link.trim(), pubDate: pubDate.trim() });
+      }
+    }
+    newsCache.set(url, { at: Date.now(), items });
+    return items.slice(0, limit);
+  } catch {
+    return cached?.items.slice(0, limit) ?? [];
+  }
+}
+
 type BudgetStatus = 'paid' | 'unpaid' | 'partial';
 
 function currentPeriod(): string {
@@ -196,6 +263,10 @@ export interface DailyDigest {
     cardsDue: Array<{ name: string; creditor: string | null; amount: number; dueDate: string; isOverdue: boolean }>;
   };
   budget: Awaited<ReturnType<typeof buildBudgetSummary>>;
+  news: {
+    markets: Array<{ title: string; link: string; pubDate: string }>;
+    personalFinance: Array<{ title: string; link: string; pubDate: string }>;
+  };
 }
 
 export async function buildDailyDigest(userId: string): Promise<DailyDigest> {
@@ -431,7 +502,16 @@ export async function buildDailyDigest(userId: string): Promise<DailyDigest> {
 
   const budget = await buildBudgetSummary(userId, currentPeriod());
 
-  return { date: today, portfolio, mfMovers: { gainers: mfGainers, losers: mfLosers }, marketPulse, actionItems, budget };
+  // News: Economic Times RSS (Markets + Wealth), fetched in parallel and
+  // 15-min cached. Each feed degrades to [] on failure, so the page renders
+  // its "No headlines available" empty-state rather than crashing.
+  const [marketsNews, pfNews] = await Promise.all([
+    fetchRssHeadlines(ET_MARKETS_RSS, 5),
+    fetchRssHeadlines(ET_WEALTH_RSS, 3),
+  ]);
+  const news = { markets: marketsNews, personalFinance: pfNews };
+
+  return { date: today, portfolio, mfMovers: { gainers: mfGainers, losers: mfLosers }, marketPulse, actionItems, budget, news };
 }
 
 /**
