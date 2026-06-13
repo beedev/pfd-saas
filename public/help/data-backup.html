@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Data &amp; Backup — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html" class="active">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Data &amp; Backup</nav>
+      <article>
+        <h1>Data &amp; Backup</h1>
+        <p class="lede">Your financial data is yours. Export it to a single file whenever you like,
+          restore from a saved export, and understand exactly what is — and isn't — captured.</p>
+
+        <p>Everything here lives under <a href="/settings">Settings → Data portability</a>. There are two
+          actions: <strong>Download JSON</strong> (export) and <strong>Replace from JSON</strong>
+          (restore).</p>
+
+        <div class="applinks">
+          <a class="applink" href="/settings">Open Settings →</a>
+        </div>
+
+        <h2>Export — Download JSON</h2>
+        <p><strong>Download JSON</strong> bundles everything you've entered — investments, insurance,
+          loans, real estate, chit funds, tax records, budgets, goals, the lot — into a single
+          <code>.json</code> file and saves it to your device. It's a complete, portable snapshot of your
+          account at that moment.</p>
+        <div class="callout tip">
+          <p><strong>Make it a habit.</strong> Download an export before any big change — a bulk import, a
+          replace, or a major edit. It's your personal undo button and takes two seconds.</p>
+        </div>
+
+        <h2>Restore — Replace from JSON</h2>
+        <p><strong>Replace from JSON</strong> takes a previously-saved export and rebuilds your account
+          from it. It <strong>wipes every row you own</strong> and re-imports from the file — all in a
+          single transaction, so it either fully succeeds or makes no change at all.</p>
+        <ol class="steps">
+          <li>Click <strong>Replace from JSON…</strong> and pick a <code>.json</code> export file.</li>
+          <li>Review the preview — it shows when the export was taken, how many rows it contains, how many
+            of your current rows will be wiped, and a per-table breakdown of what gets removed and added.</li>
+          <li>Type <strong>REPLACE</strong> in the confirmation box to unlock the button.</li>
+          <li>Click <strong>Replace my data</strong>. The page reloads with the restored data.</li>
+        </ol>
+        <div class="callout danger">
+          <p><strong>Replace is destructive and cannot be undone from inside the app.</strong> It deletes
+          all of your current data first. Only ever replace from an export you trust, and keep a fresh
+          <strong>Download JSON</strong> on hand before you do. It only ever affects <em>your own</em>
+          account's data — never anyone else's.</p>
+        </div>
+        <div class="callout note">
+          <p>If the file contains fields the app no longer recognises, the preview tells you how many will
+          be safely ignored — the import still proceeds with everything it understands.</p>
+        </div>
+
+        <h2>What's covered — and what isn't</h2>
+        <p>The export captures the <strong>structured, parsed data</strong> you've entered or imported —
+          the numbers, dates, and records that make up your dashboard.</p>
+        <table>
+          <thead><tr><th>Included in the export</th><th>Not bundled</th></tr></thead>
+          <tbody>
+            <tr><td>Investments, SIPs, gold, NPS, EPF, small savings, FDs, forex</td><td>The original source PDFs you uploaded (statements, CAS, etc.)</td></tr>
+            <tr><td>Insurance, liabilities, real estate, chit funds</td><td>Live market prices (these are fetched fresh, not stored)</td></tr>
+            <tr><td>Tax records, deductions, capital gains, budgets, goals</td><td>App configuration that isn't your data</td></tr>
+            <tr><td>Your settings, assumptions, and profile</td><td></td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <p><strong>About uploaded documents.</strong> When you import from a PDF, the app reads the
+          numbers out of it and stores those. The export references such sources by <em>filename</em> — the
+          PDF file itself is not packed into the JSON. Keep your original statements in your own records if
+          you need them later.</p>
+        </div>
+
+        <h2>Server-side backups (self-host)</h2>
+        <p>Your data lives in the server's database. On a self-hosted instance, the deployment runs an
+          <strong>automated periodic backup</strong> of that database, so there's a safety net at the
+          infrastructure level independent of anything you do in the app.</p>
+        <div class="callout tip">
+          <p><strong>Belt and suspenders.</strong> The server backup protects against disk or container
+          loss; your own <strong>Download JSON</strong> protects against mistaken edits and gives you a
+          file you can take anywhere. Use both.</p>
+        </div>
+
+        <h2>Quick recommendations</h2>
+        <ul>
+          <li>Export with <strong>Download JSON</strong> after any session where you added a lot.</li>
+          <li>Always export <em>immediately before</em> using <strong>Replace from JSON</strong>.</li>
+          <li>Store exports somewhere you control — they contain your full financial picture.</li>
+          <li>Keep your original statement PDFs separately; they aren't inside the export.</li>
+        </ul>
+
+        <div class="applinks">
+          <a class="applink" href="/settings">Open Settings →</a>
+          <a class="applink" href="/help/faq.html">Next: FAQ &amp; Troubleshooting →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/settings.html">← Settings</a></span>
+          <span><a href="/help/faq.html">FAQ &amp; Troubleshooting →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

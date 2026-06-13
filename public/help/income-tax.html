@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Income Tax — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html" class="active">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Income Tax</nav>
+      <article>
+        <h1>Income Tax</h1>
+        <p class="lede">A complete, end-to-end income-tax workspace: pull your income together,
+          build your Chapter VI-A deductions from real records, compare the old and new regimes,
+          log capital gains, reconcile Form 16 and 26AS, and assemble everything you need to file —
+          all in ₹ and scoped to one financial year at a time.</p>
+
+        <div class="callout warn">
+          <p><strong>Important — this is not tax advice.</strong> These tools assist your
+            understanding and preparation only. Figures are estimates based on the data you enter
+            and on rules as we understand them. Always verify against the official Income Tax portal
+            at <a href="https://www.incometax.gov.in" rel="noopener">incometax.gov.in</a> and consult
+            a qualified professional before you file.</p>
+        </div>
+
+        <h2>The Financial Year selector</h2>
+        <p>Every screen in this section is scoped to a single <strong>financial year</strong>. Use
+          the <strong>FY dropdown at the top-right</strong> of the page (e.g. <em>FY 2025-26</em>) to
+          switch years. Changing it re-scopes everything you see:</p>
+        <ul>
+          <li>Which salary, income, and TDS rows count.</li>
+          <li>Which deductions and donations apply.</li>
+          <li>Which capital-gain sales fall inside the year (1 April → 31 March).</li>
+          <li>Which Form 16 / 26AS uploads are the authoritative source for that year.</li>
+        </ul>
+        <div class="callout note">
+          <p>A <strong>financial year (FY)</strong> runs 1 April to 31 March. The
+            <strong>assessment year (AY)</strong> is the year you file in — FY 2025-26 is assessed in
+            <strong>AY 2026-27</strong>. The ITR Wizard and forms speak in AY.</p>
+        </div>
+
+        <h2>Income</h2>
+        <p>Start on the <a href="/income">Income</a> page. This is where every rupee you earned in the
+          chosen FY comes together so the rest of the tax engine has something to work with.</p>
+        <h3>What you record here</h3>
+        <ul>
+          <li><strong>Salary</strong> — gross salary, allowances, and exemptions such as HRA.</li>
+          <li><strong>Other income</strong> — interest, dividends, rental income, and any other
+            taxable receipts.</li>
+        </ul>
+        <h3>Form 16 becomes the source of truth</h3>
+        <p>The moment you upload a <strong>Form 16</strong> for the year (see below), the app treats it
+          as the <strong>authoritative source for salary and TDS</strong>. Your manually keyed figures
+          stay visible for comparison, but the Form 16 numbers drive the tax computation — because that
+          is the document your employer has already reported to the department.</p>
+        <div class="callout tip">
+          <p>Enter income by hand early in the year for planning, then upload Form 16 once it arrives.
+            The <a href="/tax/reconciliation">Reconciliation</a> screen will flag any gap between what
+            you booked and what your employer reported.</p>
+        </div>
+
+        <h2>Deductions &amp; regime comparison</h2>
+        <p>The <a href="/tax">Deductions</a> page is the heart of the section. It assembles your
+          <strong>Chapter VI-A deductions automatically from your real records</strong> — you do not
+          re-type numbers you have already entered elsewhere in the app.</p>
+        <h3>Where each deduction comes from</h3>
+        <table>
+          <thead><tr><th>Section</th><th>Covers</th><th>Pulled from</th></tr></thead>
+          <tbody>
+            <tr><td><strong>80C</strong></td><td>Life-insurance premiums, EPF/PPF, home-loan principal, ELSS, etc.</td><td>Insurance, EPF, Provident Fund, home-loan records</td></tr>
+            <tr><td><strong>80D</strong></td><td>Health-insurance premiums (self, family, parents)</td><td>Health-insurance policies</td></tr>
+            <tr><td><strong>80CCD(1B)</strong></td><td>Extra NPS contribution (up to ₹50,000)</td><td>NPS accounts</td></tr>
+            <tr><td><strong>80CCD(2)</strong></td><td>Employer NPS contribution</td><td>NPS / salary records</td></tr>
+            <tr><td><strong>80G</strong></td><td>Eligible donations</td><td><a href="/tax/80g">80G Donations</a> ledger</td></tr>
+            <tr><td><strong>24(b)</strong></td><td>Home-loan interest</td><td>Home-loan / liability records</td></tr>
+          </tbody>
+        </table>
+        <p>Each section shows a <strong>progress bar</strong> against its statutory cap and a
+          <strong>regime-eligibility badge</strong> so you can see at a glance which deductions survive
+          under the new regime. You can <strong>exclude a section</strong> from the calculation with a
+          single toggle if you do not want to claim it.</p>
+
+        <h3>Old regime vs New regime</h3>
+        <p>The <strong>regime comparison card</strong> runs your numbers through both tax regimes side
+          by side and tells you which one costs you less — with a clear
+          <strong>recommended pick</strong>.</p>
+        <ul>
+          <li><strong>Old regime</strong> — higher slab rates, but you keep your full Chapter VI-A
+            deductions (80C, 80D, HRA, 24(b)…).</li>
+          <li><strong>New regime</strong> — lower slab rates and a higher standard deduction, but most
+            Chapter VI-A deductions are switched off. A few (such as employer NPS under 80CCD(2)) still
+            apply.</li>
+        </ul>
+        <div class="callout note">
+          <p>The recommendation is a <strong>numerical comparison only</strong>. Your actual best choice
+            can depend on factors the app does not model — confirm before locking it in for filing.</p>
+        </div>
+
+        <h2>Capital Gains</h2>
+        <p>Log every sale of shares, mutual funds, or property on the
+          <a href="/tax/ltcg-stcg">Capital Gains (LTCG / STCG)</a> page. Each sale is classified
+          automatically:</p>
+        <table>
+          <thead><tr><th>Type</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><strong>LTCG</strong></td><td>Long-Term Capital Gain — held beyond the long-term threshold for that asset class.</td></tr>
+            <tr><td><strong>STCG</strong></td><td>Short-Term Capital Gain — held for a shorter period; taxed differently.</td></tr>
+          </tbody>
+        </table>
+        <h3>Equity LTCG under Section 112A</h3>
+        <p>For listed equity and equity mutual funds, the app applies Section 112A correctly across
+          <em>all</em> your sales in the year — not sale-by-sale:</p>
+        <ol class="steps">
+          <li>It <strong>nets losses against gains</strong> across every equity sale you logged.</li>
+          <li>It applies a <strong>single ₹1.25 lakh exemption</strong> to the aggregate (not one
+            exemption per transaction).</li>
+          <li>It taxes only the balance above that exemption at the 112A rate.</li>
+        </ol>
+        <h3>Indexation</h3>
+        <p>Where indexation applies (e.g. certain property and debt gains), the app uses the
+          <strong>Cost Inflation Index (CII)</strong> to inflate your purchase cost and reduce the
+          taxable gain.</p>
+        <div class="callout tip">
+          <p>Capital gains feed the <a href="/tax/itr-wizard">ITR Wizard</a>. Logging even one
+            capital-gain sale typically rules out the simplest forms — keep this page up to date.</p>
+        </div>
+
+        <h2>Form 16</h2>
+        <p>On the <a href="/tax/form-16">Form 16</a> page, upload the PDF your employer issued. The app
+          parses it and extracts:</p>
+        <ul>
+          <li><strong>Salary</strong> — gross and taxable salary figures.</li>
+          <li><strong>Exemptions</strong> — including HRA.</li>
+          <li><strong>TDS</strong> — tax already deducted and deposited by your employer.</li>
+        </ul>
+        <p>Once uploaded, Form 16 becomes the <strong>authoritative salary + TDS source</strong> for the
+          year, overriding hand-entered figures in the tax computation.</p>
+
+        <h2>Form 26AS</h2>
+        <p>Upload your <strong>Form 26AS</strong> on the <a href="/tax/form-26as">Form 26AS</a> page to
+          <strong>reconcile TDS credits</strong>. Form 26AS is the department's consolidated tax-credit
+          statement — it shows every deductor who reported tax against your PAN. Matching it against your
+          records ensures you claim the right credit and nothing is missing.</p>
+
+        <h2>Reconciliation</h2>
+        <p>The <a href="/tax/reconciliation">Reconciliation</a> screen puts three columns side by side —
+          <strong>your books</strong>, <strong>Form 16</strong>, and <strong>Form 26AS</strong> — so you
+          can catch mismatches before they become a notice:</p>
+        <ul>
+          <li>Salary you booked vs salary on Form 16.</li>
+          <li>TDS you expected vs TDS on Form 16 vs TDS credited in 26AS.</li>
+          <li>Gaps where a deductor reported tax that you have not recorded (or vice-versa).</li>
+        </ul>
+        <div class="callout tip">
+          <p>Reconcile <em>before</em> you build your filing pack. A mismatch here usually means a
+            missing income entry or an employer correction you haven't picked up yet.</p>
+        </div>
+
+        <h2>80G Donations</h2>
+        <p>Record eligible charitable donations on the <a href="/tax/80g">80G Donations</a> page. These
+          flow into your 80G deduction on the Deductions screen and into the filing pack. Keep the donee
+          name, PAN, and receipt details handy — they are required when you claim 80G.</p>
+
+        <h2>Documents</h2>
+        <p>The <a href="/tax/documents">Documents</a> page is your tax document locker for the year —
+          a single place to keep proofs, statements, and receipts so they are all together when you file
+          or if you are ever asked to substantiate a claim.</p>
+
+        <h2>Filing Pack</h2>
+        <p>The <a href="/tax/filing-pack">Filing Pack</a> bundles everything for the chosen FY into one
+          place to take to filing (or to your accountant): your income summary, computed deductions, the
+          regime recommendation, capital-gains schedule, TDS credits, and supporting documents.</p>
+        <div class="callout tip">
+          <p>Run <a href="/tax/reconciliation">Reconciliation</a> and confirm your
+            <a href="/tax/ltcg-stcg">Capital Gains</a> are complete before generating the pack — it is
+            only as accurate as the data behind it.</p>
+        </div>
+
+        <h2>ITR Wizard &amp; forms</h2>
+        <p>The <a href="/tax/itr-wizard">ITR Wizard</a> recommends the <strong>right ITR form by
+          eligibility</strong> for <strong>AY 2026-27</strong>, based on the income and gains you have
+          entered. It checks the disqualifiers for you — for example:</p>
+        <ul>
+          <li>Capital gains or more than one house property <strong>disqualify ITR-4</strong>.</li>
+          <li><strong>ITR-1 and ITR-4 now allow a small LTCG under Section 112A</strong> of up to
+            <strong>₹1.25 lakh</strong> — above that you move to a richer form.</li>
+        </ul>
+        <p>Once the wizard points you to a form, jump straight to the matching worksheet:</p>
+        <table>
+          <thead><tr><th>Form</th><th>Best for</th><th>Open</th></tr></thead>
+          <tbody>
+            <tr><td><strong>ITR-1 Sahaj</strong></td><td>Salary, one house property, modest interest income, small 112A LTCG</td><td><a href="/tax/itr1">/tax/itr1</a></td></tr>
+            <tr><td><strong>ITR-2</strong></td><td>Capital gains, multiple house properties, no business income</td><td><a href="/tax/itr2">/tax/itr2</a></td></tr>
+            <tr><td><strong>ITR-3</strong></td><td>Business or professional income</td><td><a href="/tax/itr3">/tax/itr3</a></td></tr>
+            <tr><td><strong>ITR-4 Sugam</strong></td><td>Presumptive business/profession income (within limits)</td><td><a href="/tax/itr4">/tax/itr4</a></td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <p>Eligibility rules change every assessment year. The wizard targets AY 2026-27 — always
+            cross-check the current rules on the official portal before you file.</p>
+        </div>
+
+        <h2>Import from TaxCalc</h2>
+        <p>Already keep a tax-calculation spreadsheet? Use <a href="/tax/import">Import from TaxCalc</a>
+          to pull those figures into the app instead of re-keying them — handy if you maintain your own
+          working file and want it reflected here.</p>
+
+        <h2>A sensible filing-season workflow</h2>
+        <ol class="steps">
+          <li>Pick the right FY in the top-right selector.</li>
+          <li>Make sure <a href="/income">Income</a> is complete; upload <a href="/tax/form-16">Form 16</a>.</li>
+          <li>Upload <a href="/tax/form-26as">Form 26AS</a> and run <a href="/tax/reconciliation">Reconciliation</a>.</li>
+          <li>Review <a href="/tax">Deductions</a> and the old-vs-new <strong>regime recommendation</strong>.</li>
+          <li>Log all sales in <a href="/tax/ltcg-stcg">Capital Gains</a>; add donations in <a href="/tax/80g">80G</a>.</li>
+          <li>Let the <a href="/tax/itr-wizard">ITR Wizard</a> pick your form, then fill the worksheet.</li>
+          <li>Generate the <a href="/tax/filing-pack">Filing Pack</a> and verify everything on
+            <a href="https://www.incometax.gov.in" rel="noopener">incometax.gov.in</a> before submitting.</li>
+        </ol>
+
+        <div class="applinks">
+          <a class="applink" href="/tax">Open Deductions →</a>
+          <a class="applink" href="/tax/itr-wizard">Open ITR Wizard →</a>
+          <a class="applink" href="/tax/filing-pack">Open Filing Pack →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/planning.html">← Planning &amp; Budget</a></span>
+          <span><a href="/help/gst.html">GST →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Digest — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html" class="active">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Daily Digest</nav>
+      <article>
+        <h1>Daily Digest</h1>
+        <p class="lede">A single morning snapshot of your finances and the markets — what your
+          portfolio is worth, what moved overnight, what's due, and the headlines that matter — all
+          on one screen at <a href="/daily-digest">/daily-digest</a>.</p>
+
+        <p>The Daily Digest is built to be glanced at, not studied. Open it with your coffee and you'll
+          know, in ten seconds, whether anything needs your attention today. The very same digest can
+          land in your Telegram chat every morning automatically — see
+          <a href="/help/integrations.html">Integrations</a>.</p>
+
+        <div class="applinks">
+          <a class="applink" href="/daily-digest">Open Daily Digest →</a>
+        </div>
+
+        <h2>Portfolio Snapshot</h2>
+        <p>The top section answers the first question of the day: <em>how much am I worth, and which way
+          did it move?</em></p>
+        <ul>
+          <li><strong>Net Worth</strong> — your total across every asset class, in ₹, with the change
+            against the previous snapshot shown beneath it.</li>
+          <li><strong>Day Change</strong> — the rupee movement since the last snapshot (often, but not
+            always, yesterday — see the gotcha below).</li>
+          <li><strong>Assets Tracked</strong> — how many holdings are feeding the total.</li>
+        </ul>
+        <p>Below those three numbers is a <strong>per-asset-class breakdown</strong>: one card for each
+          class (stocks, mutual funds, gold, NPS, EPF, real estate, chit funds, and so on), each showing
+          its current value <em>and</em> its rupee change versus the previous snapshot. This is where you
+          spot, at a glance, that equities slipped while gold ticked up.</p>
+
+        <div class="callout note">
+          <p>The day-over-day change is measured against your <strong>most recent earlier snapshot</strong>,
+          not literally yesterday. If you didn't open the app over a long weekend, the comparison spans
+          that gap — the digest labels it <code>vs &lt;date&gt;</code> so you always know the baseline.</p>
+        </div>
+
+        <h2>MF movers — Top Gainers &amp; Underperformers</h2>
+        <p>Two compact lists call out your mutual funds that moved the most:</p>
+        <ul>
+          <li><strong>Top Gainers</strong> — up to three funds with the largest positive change.</li>
+          <li><strong>Underperformers</strong> — up to three funds in the red.</li>
+        </ul>
+        <p>Each row shows the fund name and its percentage move, so you can tell whether a dip in the
+          total came from one fund or the whole book.</p>
+
+        <h2>Market Pulse</h2>
+        <p>A quick read of the wider market, with live quotes pulled from market sources. The day's change
+          (value and %) is shown for each.</p>
+        <table>
+          <thead><tr><th>What</th><th>Shows</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Nifty 50</strong></td><td>NSE benchmark index</td></tr>
+            <tr><td><strong>Sensex</strong></td><td>BSE benchmark index</td></tr>
+            <tr><td><strong>Bank Nifty</strong></td><td>Banking sector index</td></tr>
+            <tr><td><strong>India VIX</strong></td><td>Volatility / "fear" gauge (shown to 2 decimals)</td></tr>
+            <tr><td><strong>Gold 24KT</strong></td><td>Per-gram price in ₹</td></tr>
+            <tr><td><strong>Silver</strong></td><td>Per-kg price in ₹</td></tr>
+            <tr><td><strong>USD / INR</strong></td><td>Rupee exchange rate</td></tr>
+          </tbody>
+        </table>
+        <p>A small badge near the page title tells you whether the market is <strong>Open</strong> or
+          <strong>Closed</strong> right now, so you know how fresh those numbers are.</p>
+
+        <h2>Action Items</h2>
+        <p>The to-do list of money. The digest scans your records and surfaces anything coming due, grouped
+          by type and ordered with the most urgent first:</p>
+        <ul>
+          <li><strong>SIPs Due</strong> — systematic investments scheduled to run.</li>
+          <li><strong>Chit Installments Due</strong> — upcoming chit-fund payments.</li>
+          <li><strong>Insurance Premiums Due</strong> — life, health, and vehicle premiums.</li>
+          <li><strong>Loan EMIs Due</strong> — equated monthly instalments.</li>
+        </ul>
+        <p>Each row shows the label, the amount in ₹, and the due date; anything already past its date is
+          tagged with a red <strong>Overdue</strong> badge. When nothing is pending you'll see a cheerful
+          <em>"You're all caught up!"</em></p>
+        <div class="callout tip">
+          <p>Credit-card due dates and a budget summary are also computed and included in the
+          <strong>Telegram</strong> version of the digest. Want notifications the moment something is
+          actually due, rather than a once-a-day round-up? Set up rules on the
+          <a href="/help/alerts.html">Alerts</a> page.</p>
+        </div>
+
+        <h2>News</h2>
+        <p>Two curated feeds from <em>The Economic Times</em>, refreshed through the day:</p>
+        <ul>
+          <li><strong>Market Headlines</strong> — the top market stories.</li>
+          <li><strong>Personal Finance</strong> — wealth and money headlines.</li>
+        </ul>
+        <p>Each headline links out to the full article with a relative timestamp (e.g. "2h ago").</p>
+
+        <h2>Taking a snapshot &amp; refreshing</h2>
+        <p>The digest needs a record of today's values to compute the day change. It handles this for you:</p>
+        <ol class="steps">
+          <li>When the page loads, it quietly records today's net-worth snapshot so the numbers stay current.</li>
+          <li>If for some reason today's snapshot is missing, the Portfolio Snapshot shows
+            <em>"No snapshot for today yet"</em> with a <strong>Take Snapshot</strong> button — click it to
+            record today's values on the spot.</li>
+          <li>Use <strong>Refresh</strong> (top-right) any time to re-pull live prices and rebuild the page.</li>
+        </ol>
+
+        <div class="callout warn">
+          <p><strong>The day-change needs history.</strong> The very first time you use the app there's
+          nothing to compare against, so the day-over-day figures stay blank until at least one prior
+          snapshot exists — they'll appear from your second day onward.</p>
+        </div>
+
+        <div class="callout note">
+          <p>If the Economic Times feed is briefly unavailable, the News cards may come up empty and you'll
+          see <em>"No headlines available"</em>. That never blocks the rest of the page — your snapshot,
+          market pulse, and action items still load normally.</p>
+        </div>
+
+        <h2>Get it in Telegram every morning</h2>
+        <p>Once your Telegram account is connected, the digest is formatted and delivered to your chat
+          automatically each morning — no need to open the app at all. Connecting takes a minute; the full
+          walkthrough is on the <a href="/help/integrations.html">Integrations</a> page.</p>
+
+        <div class="applinks">
+          <a class="applink" href="/daily-digest">Open Daily Digest →</a>
+          <a class="applink" href="/help/integrations.html">Set up Telegram delivery →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/chit-funds.html">← Chit Funds</a></span>
+          <span><a href="/help/alerts.html">Alerts →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

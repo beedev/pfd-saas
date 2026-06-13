@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Investments — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html" class="active">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Investments</nav>
+      <article>
+        <h1>Investments</h1>
+        <p class="lede">The Investments section is where your wealth actually lives. This page covers the
+          <strong>market-priced</strong> classes — stocks, mutual funds, SIPs and gold — plus the bulk PDF
+          importer. Each one updates from live sources so your <a href="/">net worth</a> stays honest.</p>
+
+        <h2>How every detail page works</h2>
+        <p>Across the whole section the pattern is the same, so once you've learned one you've learned them all:</p>
+        <ul>
+          <li><strong>List page</strong> — totals at the top, one card or row per holding, an <em>Add</em> button
+            top-right.</li>
+          <li><strong>Detail page</strong> — open a holding to see its full breakdown. Hit <strong>Edit</strong>,
+            change only the fields you want, then <strong>Save</strong> (or <strong>Cancel</strong> to discard).
+            You only ever change what you touch.</li>
+          <li><strong>Money is ₹ (INR)</strong> everywhere, formatted Indian-style (lakhs/crores).</li>
+        </ul>
+        <div class="callout tip">
+          <p>You don't need a brokerage login. Artha tracks <em>what you hold</em> and prices it live — you
+            enter quantity and cost once, and the app keeps the valuation current.</p>
+        </div>
+
+        <h2>Stocks</h2>
+        <p>Track Indian equities at live prices.</p>
+        <ol class="steps">
+          <li>Open <a href="/investments/stocks">Stocks</a> and click <strong>Add stock</strong>.</li>
+          <li>Enter the <strong>symbol</strong> with its exchange suffix — <code>RELIANCE.NS</code> for NSE,
+            <code>500325.BO</code> for BSE — and use the lookup to confirm the name and current price.</li>
+          <li>Enter your <strong>quantity</strong> and <strong>average buy price</strong> (your cost per share).</li>
+          <li>Save. The card now shows <strong>current value</strong>, your cost, and the
+            <strong>profit/loss</strong> in ₹ and %.</li>
+        </ol>
+        <div class="callout note">
+          <p>Live quotes come from Yahoo Finance. Use the right suffix — <code>.NS</code> (NSE) or
+            <code>.BO</code> (BSE) — or the price lookup won't find your stock. Your gainers and losers also
+            surface in <strong>Top movers</strong> on the home dashboard.</p>
+        </div>
+
+        <h2>Mutual Funds</h2>
+        <p>Track fund holdings by their official AMFI scheme, valued at the latest NAV.</p>
+        <ol class="steps">
+          <li>Open <a href="/investments/mutual-funds">Mutual Funds</a> → <strong>Add fund</strong>.</li>
+          <li><strong>Search the AMFI catalogue</strong> and pick the exact scheme (e.g. the right Direct/Growth
+            plan) — this locks in the scheme code used to fetch NAV.</li>
+          <li>Enter the <strong>units</strong> you hold. Current value = units × latest NAV.</li>
+          <li>Set the <strong>category</strong> — Equity, Debt or Hybrid.</li>
+        </ol>
+        <div class="callout tip">
+          <p>The <strong>category</strong> isn't cosmetic: it drives the growth-rate assumption used in goal and
+            retirement <a href="/help/planning.html">projections</a>. Equity, debt and hybrid funds are projected
+            forward at different expected returns, so categorise honestly for realistic forecasts.</p>
+        </div>
+
+        <h2>SIPs</h2>
+        <p>A SIP is a recurring monthly investment <em>linked to a fund</em> you already track. Artha can run
+          them for you.</p>
+        <ol class="steps">
+          <li>Open <a href="/investments/sips">SIPs</a> → <strong>Add SIP</strong> and pick the linked fund.</li>
+          <li>Set the <strong>monthly amount</strong> and frequency (monthly is typical) and the start date.</li>
+          <li>On each due date the SIP <strong>auto-executes</strong> — it buys units using <em>that day's</em>
+            NAV and adds them to the linked fund, so your unit count grows automatically.</li>
+        </ol>
+        <p>Each SIP shows its <strong>XIRR</strong> — the annualised return that accounts for the timing of every
+          instalment, which is the right way to judge a staggered investment (a simple average would mislead).</p>
+        <div class="callout note">
+          <p>If the app was offline on a due date, the overdue instalment is caught up the next time it runs —
+            using the NAV for the original due date, not today's — so your history stays accurate.</p>
+        </div>
+
+        <h2>Gold</h2>
+        <p>Track gold across all four forms, valued at the live rate.</p>
+        <ol class="steps">
+          <li>Open <a href="/investments/gold">Gold</a> → <strong>Add gold</strong> and choose the type:
+            <strong>Sovereign Gold Bond (SGB)</strong>, <strong>Gold ETF</strong>, <strong>Physical</strong>, or
+            <strong>Digital</strong>.</li>
+          <li>For weight-based forms (SGB / physical / digital) enter <strong>grams</strong> and
+            <strong>purity</strong> (999, 995 or 916). For an ETF, enter the symbol and units instead.</li>
+          <li>Enter what you actually paid as the <strong>cost basis</strong>.</li>
+        </ol>
+        <div class="callout tip">
+          <p>Use your <em>full</em> purchase cost — including GST and any making/wastage charges on physical gold
+            — as the cost basis. That's the real amount out of your pocket, so your profit/loss reflects reality
+            rather than the bare metal price. Current value is always recomputed from the live rate
+            (grams × purity), never a stale stored figure.</p>
+        </div>
+
+        <h2>Import from a statement</h2>
+        <p>Rather than typing balances by hand, you can bulk-import from an official PDF.</p>
+        <ol class="steps">
+          <li>Open <a href="/investments/import-statement">Import from statement</a>.</li>
+          <li>Upload your PDF (e.g. an <strong>EPFO member passbook</strong> or an
+            <strong>NPS Statement of Transactions</strong>). The app <strong>auto-detects</strong> the format.</li>
+          <li><strong>Preview</strong> what was extracted, then <strong>confirm</strong> to save it into the right
+            asset class.</li>
+        </ol>
+        <div class="callout note">
+          <p>Only PDFs are accepted, and the file is parsed on the server — nothing is shared with a third party.
+            Always eyeball the preview before confirming; a scanned or password-protected PDF may not parse
+            cleanly, in which case add the holding manually.</p>
+        </div>
+
+        <h2>The rest of the section</h2>
+        <p>Investments also houses balance-style and specialised classes covered on their own pages:
+          <strong>NPS</strong>, <strong>Provident Fund (EPF)</strong> and <strong>Small Savings</strong> and
+          <strong>Fixed/Forex Deposits</strong> are detailed under
+          <a href="/help/retirement-assets.html">Retirement Assets</a>;
+          <a href="/help/real-estate.html">Real Estate</a> and <a href="/help/chit-funds.html">Chit Funds</a> have
+          dedicated guides.</p>
+
+        <div class="applinks">
+          <a class="applink" href="/investments/stocks">Open Stocks →</a>
+          <a class="applink" href="/investments/mutual-funds">Open Mutual Funds →</a>
+          <a class="applink" href="/investments/sips">Open SIPs →</a>
+          <a class="applink" href="/investments/gold">Open Gold →</a>
+          <a class="applink" href="/investments/import-statement">Import from statement →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/net-worth.html">← Net Worth</a></span>
+          <span><a href="/help/retirement-assets.html">Retirement Assets →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

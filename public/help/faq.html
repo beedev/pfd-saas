@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FAQ &amp; Troubleshooting — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html" class="active">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / FAQ &amp; Troubleshooting</nav>
+      <article>
+        <h1>FAQ &amp; Troubleshooting</h1>
+        <p class="lede">Quick answers to the questions that come up most — what's a demo account, why a
+          number looks stale, and how to get notifications working.</p>
+
+        <h2>Accounts &amp; data</h2>
+
+        <h3>Demo vs Personal — what's the difference?</h3>
+        <p>The <strong>Demo</strong> account is pre-loaded with realistic sample data so you can click
+          around every screen without entering anything. Your <strong>Personal</strong> account is your
+          real one — it starts empty and fills up only with what you add. They're completely separate;
+          switch between them anytime from the <strong>account chip</strong> in the sidebar. When you're
+          done exploring, clear the samples from
+          <a href="/settings">Settings → Wipe demo data</a> (it only removes demo rows, never your own).</p>
+
+        <h3>Can others see my data?</h3>
+        <p>No. This is a single-user dashboard — the data in your account is yours and yours alone. Your
+          Personal data isn't visible to anyone else using the app.</p>
+
+        <h3>How is net worth calculated?</h3>
+        <p>Net worth is the <strong>sum of all your asset classes</strong> — stocks, mutual funds, gold,
+          NPS, EPF, small savings, FDs, real estate, forex, chit funds, insurance value, and so on —
+          <strong>minus your liabilities</strong> (loans and credit-card balances), all measured at
+          today's live values. See <a href="/help/net-worth.html">Net Worth</a> for the full breakdown.</p>
+
+        <h2>Prices &amp; the dashboard</h2>
+
+        <h3>My prices / net worth look stale.</h3>
+        <p>Live values — stock prices, mutual-fund NAVs, gold rates — come from external market sources.
+          They can lag when <strong>markets are closed</strong> (overnight, weekends, holidays) or during
+          an <strong>occasional rate limit</strong> from the data provider. Nothing is broken — just
+          reopen the page a little later and the latest values will load.</p>
+
+        <h3>The Daily Digest shows no day-change.</h3>
+        <p>The digest compares today against a previous snapshot. If you've never taken one, there's
+          nothing to compare to yet, so the day-change appears blank. <strong>Take a snapshot first</strong>
+          and the next digest will show the delta. See <a href="/help/daily-digest.html">Daily Digest</a>.</p>
+
+        <h3>News headlines are empty.</h3>
+        <p>The news feed occasionally goes unavailable upstream. When that happens the headlines section
+          is simply blank — every other part of the page (portfolio, prices, action items) keeps working
+          normally. Check back later and the feed usually returns on its own.</p>
+
+        <h2>Notifications &amp; AI features</h2>
+
+        <h3>Telegram isn't sending me anything.</h3>
+        <p>Work through these, in order:</p>
+        <ol class="steps">
+          <li>Make sure Telegram is actually <strong>connected</strong> in
+            <a href="/settings">Settings → Telegram notifications</a> (the badge should read
+            <em>Connected</em>).</li>
+          <li>Use a <strong>new, dedicated bot</strong> created via <strong>@BotFather</strong> — not one
+            you share with anything else.</li>
+          <li>Double-check the <strong>bot token</strong> was pasted correctly (self-host).</li>
+          <li>Confirm you pressed <strong>Start</strong> in the chat to finish the pairing.</li>
+        </ol>
+        <p>Full setup walkthrough on the <a href="/help/integrations.html">Integrations</a> page.</p>
+
+        <h3>Meal calorie / protein estimates are blank.</h3>
+        <p>AI nutrition estimates are an <strong>optional</strong> feature. They only appear once you've
+          added an <strong>OpenAI key</strong> in
+          <a href="/settings">Settings → AI nutrition estimates</a>. Without a key the Transformation
+          tracker still works fine — it just skips the estimates. See
+          <a href="/help/integrations.html">Integrations</a> to set it up.</p>
+
+        <h3>How do I start the Transformation tracker?</h3>
+        <p>It's off by default. Turn it on in
+          <a href="/settings">Settings → Personal modules</a> by clicking <strong>Enable</strong> — it
+          appears in the sidebar. Then open it and click <strong>Start your 100-day reset</strong>. More
+          on the <a href="/help/transformation.html">Transformation Tracker</a> page.</p>
+
+        <h2>Tax &amp; trust</h2>
+
+        <h3>Is this tax advice?</h3>
+        <p>No. The app <strong>assists you in preparing</strong> your taxes — it organises deductions,
+          computes estimates, and helps you compare regimes — but it is not professional tax advice.
+          Always verify the final numbers against
+          <a href="https://incometax.gov.in" target="_blank" rel="noopener">incometax.gov.in</a> and
+          consult a qualified professional before filing. See <a href="/help/income-tax.html">Income Tax</a>.</p>
+
+        <div class="callout note">
+          <p>Still stuck? Most pages have their own help section in the sidebar with step-by-step guidance
+          for that exact feature. Start from <a href="/help/index.html">Help Home</a>.</p>
+        </div>
+
+        <div class="applinks">
+          <a class="applink" href="/help/getting-started.html">Back to Getting Started →</a>
+          <a class="applink" href="/help/index.html">Help Home →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/data-backup.html">← Data &amp; Backup</a></span>
+          <span><a href="/help/getting-started.html">Getting Started →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

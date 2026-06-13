@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alerts — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html" class="active">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Alerts</nav>
+      <article>
+        <h1>Alerts</h1>
+        <p class="lede">Rules you define, watching your portfolio and the markets, that ping your Telegram
+          chat the moment something happens — a price level breaks, a milestone is hit, or a payment is
+          coming due. Set them up at <a href="/alerts">/alerts</a>.</p>
+
+        <p>Where the <a href="/help/daily-digest.html">Daily Digest</a> is a scheduled morning round-up,
+          Alerts are <strong>reactive</strong>: each rule is a condition, and when it becomes true you get
+          a message. Between scheduled checks (every couple of hours during market hours) you can also fire
+          all your rules on demand.</p>
+
+        <div class="callout warn">
+          <p><strong>Telegram is required to actually receive alerts.</strong> A rule can trigger, but with
+          no chat connected there's nowhere to deliver the message — so it's skipped quietly until you pair
+          Telegram. Connect it first: see <a href="/help/integrations.html">Integrations</a>.</p>
+        </div>
+
+        <div class="applinks">
+          <a class="applink" href="/alerts">Open Alerts →</a>
+          <a class="applink" href="/help/integrations.html">Connect Telegram →</a>
+        </div>
+
+        <h2>The three families of rules</h2>
+        <p>Every rule belongs to one of three categories. Add one with the <strong>Add Rule</strong> button,
+          pick a rule type, and fill in the threshold.</p>
+
+        <h3>Market</h3>
+        <p>Watch prices and indices. These rules use a <strong>symbol</strong> (e.g. <code>^NSEI</code> for
+          Nifty 50, <code>GC=F</code> for gold) and, where relevant, an <strong>operator</strong>.</p>
+        <table>
+          <thead><tr><th>Rule type</th><th>Fires when…</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Price level</strong></td><td>A symbol crosses above / below, or is greater-than / less-than, a level you set</td><td>Gold &gt; ₹16,000 / gram</td></tr>
+            <tr><td><strong>Index % change</strong></td><td>An index moves by your % threshold in a day (either direction)</td><td>Nifty moves 3% today</td></tr>
+            <tr><td><strong>VIX breach</strong></td><td>India VIX reaches your level — a volatility / risk warning</td><td>India VIX ≥ 20</td></tr>
+          </tbody>
+        </table>
+        <p>For the Price-level rule you choose how to compare: <em>Crosses above</em> / <em>Crosses below</em>
+          (fires on the edge of crossing, vs the previous close) or a plain <em>greater-than</em> /
+          <em>less-than</em> level.</p>
+
+        <h3>Portfolio</h3>
+        <table>
+          <thead><tr><th>Rule type</th><th>Fires when…</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Net-worth milestone</strong></td><td>Your total net worth reaches a ₹ figure</td><td>Net worth ≥ ₹1 crore</td></tr>
+            <tr><td><strong>MF weekly drop</strong></td><td>A mutual fund falls by more than your % threshold (checked per week)</td><td>Any fund down &gt; 5% this week</td></tr>
+            <tr><td><strong>Budget overspend</strong></td><td>Spending in a budget category exceeds the plan by your % threshold</td><td>Overspent a category by 20%</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Payments</h3>
+        <p>Never miss a due date. These rules look at your records and warn you a chosen number of
+          <strong>days before</strong> something is due.</p>
+        <table>
+          <thead><tr><th>Rule type</th><th>Fires when…</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Credit-card due</strong></td><td>A card payment is due within N days</td></tr>
+            <tr><td><strong>Chit installment due</strong></td><td>A chit-fund instalment is due within N days</td></tr>
+            <tr><td><strong>Insurance premium due</strong></td><td>A life / health premium is due within N days</td></tr>
+            <tr><td><strong>Loan EMI due</strong></td><td>A loan instalment is due within N days</td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <p><strong>Vehicle-insurance renewal</strong> and <strong>PUC-expiry</strong> reminders also exist
+          in the alert engine. They run when configured, though they aren't yet offered in the Add-Rule
+          dropdown — your <a href="/insurance/vehicles">vehicle</a> renewal and PUC dates are tracked under
+          Insurance in the meantime.</p>
+        </div>
+
+        <h2>What every rule has</h2>
+        <ul>
+          <li><strong>Name</strong> — a label so you recognise it in the list.</li>
+          <li><strong>Category &amp; rule type</strong> — what it watches (above).</li>
+          <li><strong>Symbol &amp; operator</strong> — for Market rules, the ticker and how to compare.</li>
+          <li><strong>Threshold</strong> — the number that triggers it (a price, a %, a ₹ amount, or "days before").</li>
+          <li><strong>Enable toggle</strong> — switch a rule off without deleting it. Disabled rules are
+            dimmed and skipped during checks.</li>
+          <li><strong>Cooldown (hours)</strong> — the minimum gap before the same rule can notify you again.
+            Default is 24 hours.</li>
+        </ul>
+
+        <div class="callout tip">
+          <p><strong>The cooldown is your spam shield.</strong> Without it, a rule like "Nifty down 3%"
+          could fire on every single check while the condition stays true. A 24-hour cooldown means you
+          hear about it once, then not again until the next day.</p>
+        </div>
+
+        <h2>Check now</h2>
+        <p>You don't have to wait for the scheduled run. Press <strong>Run Check Now</strong> and every
+          enabled rule is evaluated immediately against live data. A toast tells you the outcome — how many
+          rules were checked, how many alerts were sent, and how many were de-duplicated.</p>
+
+        <h2>De-duplication &amp; history</h2>
+        <p>Two safeguards keep alerts useful rather than noisy:</p>
+        <ul>
+          <li><strong>De-duplication</strong> — within a rule's cooldown window, the same condition won't
+            notify you twice. If you click <em>Run Check Now</em> repeatedly, repeats are counted as
+            "deduped" rather than re-sent.</li>
+          <li><strong>History</strong> — every alert that actually fires and is delivered is recorded in the
+            <strong>Alert History</strong> table (time, rule, category, message, and the value that tripped
+            it), so you have a paper trail of what notified you and when.</li>
+        </ul>
+        <div class="callout note">
+          <p>If a rule triggers while Telegram isn't connected, the message is skipped and <em>not</em>
+          logged to history — so once you connect Telegram, that same condition can still alert you the next
+          time it's checked.</p>
+        </div>
+
+        <div class="applinks">
+          <a class="applink" href="/alerts">Open Alerts →</a>
+          <a class="applink" href="/help/integrations.html">Connect Telegram →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/daily-digest.html">← Daily Digest</a></span>
+          <span><a href="/help/planning.html">Planning &amp; Budget →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

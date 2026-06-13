@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chit Funds — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html" class="active">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Chit Funds</nav>
+      <article>
+        <h1>Chit Funds</h1>
+        <p class="lede">Chit funds are a traditional Indian group-savings scheme — part savings,
+          part borrowing, part investment. This page tracks your subscriptions, records each monthly
+          installment, works out the dividend you earned, and estimates your annualised return (XIRR)
+          so you can see whether a chit is actually paying off.</p>
+
+        <div class="applinks">
+          <a class="applink" href="/investments/chit-funds">Open Chit Funds →</a>
+          <a class="applink" href="/investments/chit-funds/new">Register a chit →</a>
+        </div>
+
+        <h2>New to chit funds? Start here</h2>
+        <p>A chit fund is a group of people (say 25 members) who agree to pool money every month for
+          a fixed number of months. Here's the cycle in plain terms:</p>
+        <ul>
+          <li>A <strong>foreman</strong> (the organiser) runs the scheme. The total monthly pool is
+            the <strong>chit value</strong> — e.g. 25 members × ₹20,000 = ₹5,00,000.</li>
+          <li>Each month every member pays a <strong>monthly installment</strong> into the pot.</li>
+          <li>That month, members <strong>bid</strong> in an auction for the pot. Whoever is willing
+            to take the <em>least</em> money (i.e. accept the biggest discount, usually because they
+            need cash) <strong>wins</strong> the pot for that month.</li>
+          <li>The <strong>discount</strong> the winner gave up (minus the foreman's commission) is
+            shared back to <em>every</em> member as a <strong>dividend</strong> — so in months you
+            don't win, you still get a little money back, which lowers your effective outgo.</li>
+          <li>Once you've won, you keep paying your installments until the scheme ends, but you can't
+            bid again.</li>
+        </ul>
+        <p>So a chit is a savings plan if you win late (you accumulate, then collect a lump sum), and
+          a loan if you win early (you get a big sum up front and repay it over the remaining months).
+          The dividends are your "interest earned" along the way.</p>
+
+        <div class="callout note">
+          <p><strong>The key number:</strong> what you actually pay each month is the
+          <em>installment minus the dividend</em>. That net figure — added up across all months — is
+          your real cost, and it's what the app uses to judge your return.</p>
+        </div>
+
+        <h2>Registering a chit</h2>
+        <p>Two ways to set one up:</p>
+        <ol class="steps">
+          <li><strong>Register manually.</strong> Click <strong>Register chit</strong> and enter the
+            foreman, scheme name, chit value, monthly installment and duration (number of months).</li>
+          <li><strong>Import a Form XIV PDF.</strong> Click <strong>Import from PDF</strong> and
+            upload the chit ledger statement (the "Form XIV" your foreman issues). The app reads the
+            scheme details and your installment history straight off the document.</li>
+        </ol>
+        <div class="callout tip">
+          <p><strong>Importing saves the most time.</strong> A Form XIV ledger already lists every
+          installment you've paid and the dividend on each — importing it back-fills your whole
+          history in one go instead of recording months one by one.</p>
+        </div>
+
+        <h2>Recording a monthly installment</h2>
+        <p>Each month, log what you paid. On the list page, chits due in the next 30 days appear in a
+          <strong>Due in next 30 days</strong> panel with a <em>Pay installment</em> button (the
+          quick-pay modal); you can also record from the chit's detail page.</p>
+        <ol class="steps">
+          <li>Open the quick-pay modal — it shows the month number and the monthly installment for
+            reference.</li>
+          <li>Enter the <strong>amount you actually paid</strong> (this is your net cheque after the
+            dividend was adjusted).</li>
+          <li>The <strong>dividend auto-calculates</strong> as <code>installment − amount paid</code>.
+            Pick the date and payment method, then record.</li>
+        </ol>
+
+        <div class="callout warn">
+          <p><strong>Don't double-subtract the dividend.</strong> The amount you type <em>is</em> the
+          net you paid. The app derives the dividend from it (<code>dividend = monthly installment −
+          amount paid</code>). If you've already netted the dividend off in your head, just enter the
+          cheque amount — don't subtract it again.</p>
+        </div>
+
+        <div class="callout note">
+          <p><strong>Months are 1-indexed.</strong> Month 1 is the chit's start date, month 2 is one
+          month later, and so on. The app counts installments from the start month, not from zero.</p>
+        </div>
+
+        <h3>Example</h3>
+        <table>
+          <thead><tr><th>Field</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Monthly installment</td><td>₹20,000</td></tr>
+            <tr><td>Amount you actually paid</td><td>₹18,500</td></tr>
+            <tr><td>Dividend (auto)</td><td>₹1,500</td></tr>
+          </tbody>
+        </table>
+        <p>You enter ₹18,500; the app records a ₹1,500 dividend. Your net outgo for the month is
+          ₹18,500.</p>
+
+        <h2>Marking a chit as WON</h2>
+        <p>When you win the auction and collect the pot, mark the chit <strong>WON</strong> from its
+          detail page and record the <strong>amount received</strong> (your winning cheque after the
+          foreman's discount/commission). The chit's status badge turns green, and the winnings show
+          up in your totals. You keep recording installments afterwards — a won chit still runs to the
+          end of its term.</p>
+
+        <h2>XIRR — is this chit worth it?</h2>
+        <p>XIRR (annualised internal rate of return) turns a messy stream of payments and receipts
+          into a single yearly % you can compare against an FD or a mutual fund. The app builds the
+          cash flows from your chit's current state and recomputes XIRR automatically as you record
+          installments and winnings.</p>
+        <p>The estimate is deliberately <strong>conservative</strong>:</p>
+        <ul>
+          <li><strong>Past months</strong> use your actual net outgo.</li>
+          <li><strong>Future months</strong> assume the full installment with <em>no</em> dividend —
+            a worst-case assumption.</li>
+          <li>If you haven't won yet, it assumes the <strong>worst-case win timing</strong> (winning
+            at the very end), which understates rather than overstates your return.</li>
+        </ul>
+        <div class="callout tip">
+          <p><strong>Read XIRR as a floor, not a forecast.</strong> Because future dividends are
+          ignored and a late win is assumed, your real return is usually a bit better than the number
+          shown. A positive XIRR on an un-won chit is a genuinely good sign.</p>
+        </div>
+        <p>The list page also shows a <strong>Portfolio XIRR</strong> — your chits' returns weighted
+          by net outgo — alongside totals for dividends and winnings received.</p>
+
+        <h2>Chit funds &amp; your net worth</h2>
+        <p>Your <strong>net contribution</strong> across every chit — what you've put in, net of
+          dividends — counts toward your <a href="/">net worth</a>, including chits you've already
+          <strong>WON</strong> (you're still on the hook for remaining installments, so the
+          contribution is real). Keeping installments up to date keeps this figure accurate.</p>
+
+        <h2>Reading the dashboard</h2>
+        <table>
+          <thead><tr><th>Figure</th><th>What it means</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Active chits</strong></td><td>Subscriptions still running (not yet completed/withdrawn).</td></tr>
+            <tr><td><strong>Net outgo</strong></td><td>Total you've actually paid in, net of dividends.</td></tr>
+            <tr><td><strong>Dividends received</strong></td><td>Sum of all auction dividends credited to you.</td></tr>
+            <tr><td><strong>Winnings received</strong></td><td>Pot amounts collected on chits you've won.</td></tr>
+            <tr><td><strong>Progress</strong></td><td>Installments paid out of total duration (e.g. 14 / 25).</td></tr>
+            <tr><td><strong>Paid this month</strong></td><td>Recent installments logged in the last 30 days, with a running total.</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Tips &amp; gotchas</h2>
+        <ul>
+          <li><strong>Enter the cheque, not the net.</strong> The amount-paid field is your actual
+            payment; the app computes the dividend — never pre-subtract it.</li>
+          <li><strong>Month 1 = start date.</strong> If your installment numbers look off by one,
+            check the chit's start date.</li>
+          <li><strong>Two chits, same name?</strong> If a payment lands on the wrong chit, look for a
+            duplicate scheme name — near-identical chits are easy to mix up. Rename one to tell them
+            apart.</li>
+          <li><strong>XIRR is conservative by design.</strong> Don't be alarmed by a modest figure on
+            a chit you expect to win early — the estimate assumes the worst case.</li>
+          <li><strong>Record dividends as they happen.</strong> Logging each month keeps both your
+            net worth and XIRR honest; back-fill via the Form XIV import if you've fallen behind.</li>
+          <li><strong>Deleting a chit removes its history.</strong> The installment ledger is deleted
+            with the chit.</li>
+        </ul>
+
+        <div class="applinks">
+          <a class="applink" href="/investments/chit-funds">Open Chit Funds →</a>
+          <a class="applink" href="/investments/import?type=chit">Import a Form XIV PDF →</a>
+          <a class="applink" href="/help/net-worth.html">How net worth adds up →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/liabilities.html">← Liabilities</a></span>
+          <span><a href="/help/daily-digest.html">Daily Digest →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

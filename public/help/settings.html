@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html" class="active">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Settings</nav>
+      <article>
+        <h1>Settings</h1>
+        <p class="lede">One place to configure your business profile, the tax assumptions that drive
+          your exemption math, the growth rates behind every projection, notifications, and your data —
+          all in Indian rupees.</p>
+
+        <p>Open <a href="/settings">Settings</a> from the sidebar. The page stacks a series of cards top
+          to bottom; each card saves independently with its own button, so you can change just one thing
+          and leave the rest untouched. Two settings live on their own pages —
+          <a href="/settings/tax-rules">Tax Rates &amp; Rules</a> and
+          <a href="/settings/fy-close">FY Close</a> — both covered below.</p>
+
+        <div class="applinks">
+          <a class="applink" href="/settings">Open Settings →</a>
+        </div>
+
+        <div class="callout note">
+          <p><strong>Self-host vs hosted.</strong> A couple of cards — the Telegram <em>bot token</em>
+          step and the <em>OpenAI key</em> for nutrition estimates — appear only on self-hosted
+          instances, where those secrets live on your own server. On the hosted edition they are managed
+          for you and stay hidden.</p>
+        </div>
+
+        <h2>Business profile</h2>
+        <p>Your business identity, used across invoices and the GST module. It's split into three
+          sub-cards, all saved together with one <strong>Save Business Profile</strong> button.</p>
+
+        <h3>GST registration details</h3>
+        <p>Enter your <strong>GSTIN</strong> (the 15-character GST number, e.g.
+          <code>29AABCU9603R1ZM</code>). As you type, the app validates it and shows a green check when
+          it's well-formed. From a valid GSTIN it <strong>auto-extracts</strong>:</p>
+        <ul>
+          <li><strong>PAN</strong> — your 10-character PAN, embedded inside the GSTIN.</li>
+          <li><strong>State</strong> — derived from the first two digits (the state code).</li>
+          <li><strong>Entity type</strong> — inferred from the GSTIN structure.</li>
+        </ul>
+        <div class="callout tip">
+          <p><strong>You don't type PAN or state by hand.</strong> Get the GSTIN right and the rest fills
+          itself in. The GSTIN must be exactly 15 characters.</p>
+        </div>
+
+        <h3>Business details</h3>
+        <table>
+          <thead><tr><th>Field</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Business name</strong></td><td>Legal name as per GST registration. Minimum 3 characters.</td></tr>
+            <tr><td>Trade name</td><td>Trading name, if different from the legal name.</td></tr>
+            <tr><td>Address</td><td>Your registered address.</td></tr>
+            <tr><td>City</td><td></td></tr>
+            <tr><td>Pincode</td><td>6-digit PIN code.</td></tr>
+            <tr><td>State</td><td>Read-only — auto-detected from your GSTIN.</td></tr>
+            <tr><td>Email</td><td>Contact email shown on invoices.</td></tr>
+            <tr><td>Phone</td><td>10-digit phone number.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Invoice settings</h3>
+        <ul>
+          <li><strong>Financial year</strong> — the FY this profile applies to (e.g.
+            <em>FY 2026-27</em>). Required.</li>
+          <li><strong>Invoice prefix</strong> — prepended to every invoice number. Default
+            <code>INV-</code>.</li>
+          <li><strong>Starting number</strong> — the first invoice number to issue. Default
+            <code>1</code>, minimum 1.</li>
+        </ul>
+
+        <h2>Tax setup</h2>
+        <p>A handful of toggles that drive the <strong>OLD-regime exemption math</strong> (HRA, 80D
+          ceilings, the 80U bump) and the 80CCD(2) cap under the NEW regime. These rarely change from
+          year to year — set them once and the tax module does the rest. Save with
+          <strong>Save tax setup</strong>.</p>
+        <table>
+          <thead><tr><th>Toggle</th><th>What it changes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Metro city</strong></td><td>Mumbai / Delhi / Kolkata / Chennai qualify for a <strong>50%</strong> HRA exemption; non-metro is <strong>40%</strong>. On by default.</td></tr>
+            <tr><td><strong>Senior citizen (60+)</strong></td><td>Raises your 80D self/family ceiling from ₹25,000 to ₹50,000.</td></tr>
+            <tr><td><strong>Parents are senior citizens</strong></td><td>Raises the 80D <em>parents</em> ceiling from ₹25,000 to ₹50,000.</td></tr>
+            <tr><td><strong>Permanent disability (sec 80U)</strong></td><td>Adds the 80U deduction — <strong>₹75,000</strong> (Regular, 40–80%) or <strong>₹1.25 lakh</strong> (Severe, &gt;80%). Turning this on reveals a <strong>severity</strong> dropdown.</td></tr>
+            <tr><td><strong>Family pensioner</strong></td><td>Sec 57(iia) deduction — lesser of ⅓ of pension or ₹15,000 (Old) / ₹25,000 (New).</td></tr>
+            <tr><td><strong>Govt employee</strong></td><td>Sets the 80CCD(2) employer-NPS cap to <strong>14%</strong> of salary (vs <strong>10%</strong> for private-sector employees).</td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <p><strong>Why it matters.</strong> Get these right once and your
+          <a href="/tax">Income Tax</a> deductions, HRA exemption, and regime comparison all compute with
+          the correct ceilings — no per-return fiddling.</p>
+        </div>
+
+        <h2>Personal modules</h2>
+        <p>Optional, non-finance tools that stay <strong>off by default</strong> so the sidebar stays
+          focused on money.</p>
+        <ul>
+          <li><strong>Transformation tracker</strong> — daily habits, a weight log, a journal, and a
+            calorie/protein checklist for a 100-day reset. Click <strong>Enable</strong> to add it to the
+            sidebar (or <strong>Disable</strong> to remove it). See
+            <a href="/help/transformation.html">Transformation Tracker</a>.</li>
+        </ul>
+
+        <h2>Notifications &amp; AI estimates</h2>
+        <h3>Telegram notifications</h3>
+        <p>Pair your Telegram account to receive your <a href="/help/daily-digest.html">Daily Digest</a>
+          and <a href="/help/alerts.html">Alerts</a> directly in chat. The card header shows
+          <em>Connected</em> or <em>Not connected</em>. Click <strong>Connect Telegram</strong>, then
+          press <strong>Start</strong> in the chat that opens to confirm the pairing.</p>
+        <div class="callout tip">
+          <p><strong>Use a fresh, dedicated bot.</strong> On a self-hosted instance you'll first paste a
+          bot token from <strong>@BotFather</strong> (send it <code>/newbot</code>). Always create a
+          <em>new</em> bot just for your dashboard — don't reuse one shared with anything else. Full
+          walkthrough on the <a href="/help/integrations.html">Integrations</a> page.</p>
+        </div>
+
+        <h3>AI nutrition estimates</h3>
+        <p>Optional. Add an <strong>OpenAI key</strong> and the Transformation tracker will auto-estimate
+          calories and protein from the meals you log. Without a key the tracker still works perfectly —
+          estimates are simply skipped. Setup details are on the
+          <a href="/help/integrations.html">Integrations</a> page.</p>
+
+        <h2>Asset growth assumptions</h2>
+        <p>The expected <strong>annual return for each asset class</strong>, used by every goal
+          projection, retirement forecast, and corpus estimate. Each row is a percentage you can edit;
+          the change commits when you click away from the box (0–50% allowed).</p>
+        <div class="callout warn">
+          <p><strong>Set these conservatively.</strong> Past performance is no guarantee — a pleasant
+          surprise beats a missed target. The defaults are deliberately cautious.</p>
+        </div>
+        <table>
+          <thead><tr><th>Asset class</th><th>Guidance</th></tr></thead>
+          <tbody>
+            <tr><td>Stocks</td><td>Nifty 50 long-term ~12% — set conservatively.</td></tr>
+            <tr><td>Mutual Funds (uncategorised)</td><td>Umbrella rate — used only when a fund's category is still Unknown.</td></tr>
+            <tr><td>MF — Equity</td><td>Equity funds (large/mid/small/flexi/ELSS) ~10–12%.</td></tr>
+            <tr><td>MF — Debt</td><td>Debt funds (corp bond, liquid, gilt) ~6–8%.</td></tr>
+            <tr><td>MF — Hybrid</td><td>Hybrid / multi-asset / arbitrage ~8–10%.</td></tr>
+            <tr><td>Gold</td><td>INR gold ~9–11% — historically bumpy.</td></tr>
+            <tr><td>NPS</td><td>Tier-I 75/25 ~9.5%; lower if debt-heavy.</td></tr>
+            <tr><td>EPF</td><td>~8.25%.</td></tr>
+            <tr><td>Small Savings</td><td>Govt rates 7–8.2% — varies by scheme.</td></tr>
+            <tr><td>Fixed Deposits</td><td>Bank rates 6–8%.</td></tr>
+            <tr><td>Chit Funds</td><td>Historical XIRR is not guaranteed — plan low.</td></tr>
+            <tr><td>Real Estate</td><td>Indian residential ~5–7% appreciation.</td></tr>
+            <tr><td>Insurance Policies</td><td>LIC endowment ~5% including bonus.</td></tr>
+            <tr><td>Forex Deposits</td><td>~5% — INR depreciation roughly offsets foreign interest.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Mutual-fund sub-rates</h3>
+        <p>The <strong>MF — Equity / Debt / Hybrid</strong> rates apply only when you've set a fund's
+          category on its detail page. Funds still marked <em>Unknown</em> fall back to the umbrella
+          <em>Mutual Funds</em> rate.</p>
+
+        <h3>Per-instrument rates (FD, Small Savings, Chit Funds)</h3>
+        <p>For these three classes you get an extra checkbox: <strong>use each instrument's actual rate
+          instead of one class rate</strong>. Turn it on and projections use each FD's own interest rate,
+          each small-savings scheme's rate, and each chit's own XIRR. Leave it off (the default) and the
+          single conservative class rate applies to every instrument in that class.</p>
+
+        <h2>Retirement tax brackets</h2>
+        <p>Planning slabs applied to your <strong>retirement-year taxable income</strong> (rental +
+          annuity + NPS pension). These aren't the real income-tax slabs — they're your own proxy for how
+          much of your retirement income survives tax. Found on the main Settings page (the editable tax
+          <em>rates</em> live separately under
+          <a href="/settings/tax-rules">Tax Rates &amp; Rules</a>).</p>
+        <p>Each row is a <strong>threshold</strong> (the lower bound of the band, in ₹) and a
+          <strong>rate</strong> (%). The default ladder is:</p>
+        <table>
+          <thead><tr><th>Taxable income</th><th>Rate</th></tr></thead>
+          <tbody>
+            <tr><td>Up to ₹10,00,000</td><td>0%</td></tr>
+            <tr><td>₹10,00,000 – ₹30,00,000</td><td>15%</td></tr>
+            <tr><td>Above ₹30,00,000</td><td>25%</td></tr>
+          </tbody>
+        </table>
+        <div class="callout warn">
+          <p><strong>Rules the editor enforces:</strong> the <strong>first row is locked at ₹0</strong>
+          (you can't edit or delete it), thresholds must be <strong>strictly ascending</strong>, and you
+          can have at most <strong>8 brackets</strong>. <em>+ Add bracket</em> appends a new band;
+          <em>Reset to defaults</em> restores the 0/15/25 ladder; <em>Save brackets</em> commits.</p>
+        </div>
+
+        <h2>Tax Rates &amp; Rules <span style="font-weight:400;font-size:1rem;color:var(--text-2)">(/settings/tax-rules)</span></h2>
+        <p>India's tax parameters change with each Budget. This page lets you keep them current —
+          per financial year, no code change needed. Pick an FY from the selector, edit, and
+          <strong>Save changes</strong>. <strong>Add FY</strong> clones the latest year's values as a
+          starting template for a new one.</p>
+        <p>The editor is organised into five tabs:</p>
+        <table>
+          <thead><tr><th>Tab</th><th>What you edit</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Slabs &amp; Regime</strong></td><td>Old- and New-regime income-tax bands, plus standard deduction, the Section 87A rebate, and cess.</td></tr>
+            <tr><td><strong>Deductions</strong></td><td>Caps for 80C, 80CCD(1B), 80D, Section 24(b), 80EEA and more.</td></tr>
+            <tr><td><strong>Capital Gains</strong></td><td>LTCG/STCG rates and 112A exemption, split around the July 2024 reform cutoff.</td></tr>
+            <tr><td><strong>Surcharge</strong></td><td>High-income surcharge brackets for each regime.</td></tr>
+            <tr><td><strong>Presumptive</strong></td><td>Sections 44AD and 44ADA — presumed-income percentages and turnover limits.</td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <p>Amounts are entered in <strong>rupees</strong>. If no saved row exists for a year yet, you'll
+          see the built-in defaults with a reminder to <strong>Save changes</strong> to persist them.</p>
+        </div>
+        <div class="applinks">
+          <a class="applink" href="/settings/tax-rules">Open Tax Rates &amp; Rules →</a>
+        </div>
+
+        <h2>FY Close <span style="font-weight:400;font-size:1rem;color:var(--text-2)">(/settings/fy-close)</span></h2>
+        <p>An end-of-year checklist that walks you through wrapping up a financial year — tax documents,
+          capital gains, insurance audit, and so on. Each item shows a status
+          (<em>Complete</em> / <em>Partial</em> / <em>Pending</em>) and a <strong>Lock</strong> toggle so
+          you can freeze a category once you're satisfied. A progress bar tracks how far along you are.</p>
+        <ol class="steps">
+          <li>Pick the financial year you're closing from the selector.</li>
+          <li>Work down the checklist; lock each item as it's confirmed.</li>
+          <li>Click <strong>Close FY</strong> to advance your business profile to the next year.</li>
+        </ol>
+        <div class="applinks">
+          <a class="applink" href="/settings/fy-close">Open FY Close →</a>
+        </div>
+
+        <h2>Demo data &amp; your own data</h2>
+        <h3>Wipe demo data</h3>
+        <p>Loaded the sample portfolio to explore? <strong>Wipe demo data</strong> removes only the rows
+          that were seeded as demo content — your own real entries are left completely untouched. You'll
+          be asked to confirm, and the app reports how many demo rows it removed.</p>
+
+        <h3>Data portability</h3>
+        <p>Export everything you've entered as one JSON file, or replace your data from a previously-saved
+          export. The full walkthrough — including the safety warnings around <em>Replace</em> — is on the
+          <a href="/help/data-backup.html">Data &amp; Backup</a> page.</p>
+        <div class="callout danger">
+          <p><strong>Replace is destructive.</strong> It wipes every row you own and re-imports from the
+          file in a single transaction. Always keep your latest export safe. Read
+          <a href="/help/data-backup.html">Data &amp; Backup</a> before using it.</p>
+        </div>
+
+        <div class="applinks">
+          <a class="applink" href="/settings">Open Settings →</a>
+          <a class="applink" href="/help/data-backup.html">Next: Data &amp; Backup →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/transformation.html">← Transformation Tracker</a></span>
+          <span><a href="/help/data-backup.html">Data &amp; Backup →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

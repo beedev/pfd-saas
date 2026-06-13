@@ -38,6 +38,7 @@ const PUBLIC_PATHS = new Set([
 
 const PUBLIC_PREFIXES = [
   '/_next/',
+  '/help/', // static user-guide HTML — no user data, readable without login
   '/api/auth/',
   '/api/cron/', // cron endpoints gate on Authorization: Bearer <CRON_SECRET>
   // Telegram bot posts here on /start; auth happens via the

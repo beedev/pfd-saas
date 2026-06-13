@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GST — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html" class="active">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / GST</nav>
+      <article>
+        <h1>GST</h1>
+        <p class="lede">The business side of Artha: raise GST sales invoices, track your purchases,
+          keep customers and vendors on file, and assemble GSTR-1 and GSTR-3B summaries — so when it's
+          time to file, your numbers are already in order.</p>
+
+        <div class="callout note">
+          <p>This workspace helps you <strong>prepare and organise</strong> your GST data. You still
+            <strong>file your actual returns on the official GST portal</strong> at
+            <a href="https://www.gst.gov.in" rel="noopener">gst.gov.in</a>.</p>
+        </div>
+
+        <h2>Setting up your GSTIN</h2>
+        <p>Before raising invoices, enter your <strong>GSTIN</strong> in
+          <a href="/settings">Settings</a>. From it, the app <strong>auto-extracts your PAN and
+          state</strong> — the GSTIN encodes both — so you don't enter them twice and your invoices
+          carry the correct place of supply.</p>
+        <div class="callout tip">
+          <p>A GSTIN is 15 characters: the first two are the <strong>state code</strong>, the next ten
+            are your <strong>PAN</strong>, and the rest are entity/check digits. That's why entering the
+            GSTIN is enough to fill in PAN and state automatically.</p>
+        </div>
+
+        <h3>Invoice numbering</h3>
+        <p>Invoice numbers are generated from a <strong>prefix plus a starting number, per financial
+          year</strong>. Set the prefix and the first number you want to use, and the app increments
+          from there for each new invoice — giving you a clean, sequential, GST-compliant series that
+          resets the way you choose each year.</p>
+
+        <h2>Sales Invoices</h2>
+        <p>Create and manage outward invoices on the <a href="/gst/invoices">Sales Invoices</a> page.
+          Each invoice records the customer (with their GSTIN), line items, applicable GST, and totals.
+          These are your <strong>outward supplies</strong> and feed directly into GSTR-1.</p>
+        <ol class="steps">
+          <li>Open <a href="/gst/invoices">Sales Invoices</a> and start a new invoice.</li>
+          <li>Pick a <a href="/gst/customers">customer</a> — their GSTIN and details fill in.</li>
+          <li>Add line items; GST is applied and totals computed for you.</li>
+          <li>Save — the invoice takes the next number in your FY series.</li>
+        </ol>
+
+        <h2>Purchases</h2>
+        <p>Record the invoices you receive from suppliers on the <a href="/gst/purchases">Purchases</a>
+          page. These are your <strong>inward supplies</strong> and the basis for your input tax credit
+          (ITC) — the GST you've already paid that offsets the GST you owe. Each purchase links to a
+          <a href="/gst/vendors">vendor</a>.</p>
+
+        <h2>GSTR-1 — outward supplies</h2>
+        <p>The <a href="/gst/gstr-1">GSTR-1</a> view summarises your <strong>outward supplies</strong>
+          (sales) for the period, drawn from your sales invoices. It organises the figures the way the
+          return expects, so you can review your outward tax liability before filing it on the portal.</p>
+
+        <h2>GSTR-3B — summary return</h2>
+        <p>The <a href="/gst/gstr-3b">GSTR-3B</a> view is the <strong>summary return</strong> — a
+          consolidated picture of outward supplies, input tax credit, and net tax payable for the
+          period. Use it to sanity-check what you'll declare before submitting on the GST portal.</p>
+        <table>
+          <thead><tr><th>Return</th><th>What it covers</th><th>Built from</th></tr></thead>
+          <tbody>
+            <tr><td><strong>GSTR-1</strong></td><td>Detailed outward supplies (sales)</td><td><a href="/gst/invoices">Sales Invoices</a></td></tr>
+            <tr><td><strong>GSTR-3B</strong></td><td>Summary of outward supplies, ITC &amp; net tax</td><td>Sales + <a href="/gst/purchases">Purchases</a></td></tr>
+          </tbody>
+        </table>
+
+        <h2>Customers</h2>
+        <p>Keep your buyers on file in <a href="/gst/customers">Customers</a>, each with their GSTIN and
+          PAN. Saved customers drop straight into new invoices, so you raise sales faster and with the
+          correct tax details every time.</p>
+
+        <h2>Vendors</h2>
+        <p>Maintain your suppliers in <a href="/gst/vendors">Vendors</a>, with their GSTIN and PAN.
+          Vendors link to purchase invoices and underpin your input tax credit.</p>
+
+        <h2>Import CSV</h2>
+        <p>Have invoices or master data in a spreadsheet? Use <a href="/gst/import">Import CSV</a> to
+          bring them in in bulk rather than entering each row by hand — useful when migrating from
+          another tool or onboarding a backlog.</p>
+
+        <h2>A typical GST cycle</h2>
+        <ol class="steps">
+          <li>One-time: enter your GSTIN in <a href="/settings">Settings</a> and set your invoice
+            prefix and starting number for the FY.</li>
+          <li>Add your <a href="/gst/customers">customers</a> and <a href="/gst/vendors">vendors</a>
+            (or <a href="/gst/import">import</a> them).</li>
+          <li>Through the period: raise <a href="/gst/invoices">sales invoices</a> and log
+            <a href="/gst/purchases">purchases</a> as they happen.</li>
+          <li>At period end: review <a href="/gst/gstr-1">GSTR-1</a> and <a href="/gst/gstr-3b">GSTR-3B</a>.</li>
+          <li>File the actual returns on <a href="https://www.gst.gov.in" rel="noopener">gst.gov.in</a>.</li>
+        </ol>
+
+        <div class="applinks">
+          <a class="applink" href="/gst/invoices">Open Sales Invoices →</a>
+          <a class="applink" href="/gst/gstr-1">Open GSTR-1 →</a>
+          <a class="applink" href="/gst/gstr-3b">Open GSTR-3B →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/income-tax.html">← Income Tax</a></span>
+          <span><a href="/help/transformation.html">Transformation Tracker →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Integrations — Artha Help</title>
+  <link rel="stylesheet" href="/help/help.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidenav">
+      <a class="brand" href="/help/index.html">📊 Artha <span>Help</span></a>
+      <nav>
+        <a href="/help/index.html">Help Home</a>
+        <a href="/help/getting-started.html">Getting Started</a>
+        <div class="group">Your Money</div>
+        <a href="/help/net-worth.html">Net Worth</a>
+        <a href="/help/investments.html">Investments</a>
+        <a href="/help/retirement-assets.html">Retirement Assets</a>
+        <a href="/help/insurance.html">Insurance</a>
+        <a href="/help/liabilities.html">Liabilities</a>
+        <a href="/help/real-estate.html">Real Estate</a>
+        <a href="/help/chit-funds.html">Chit Funds</a>
+        <div class="group">Stay on Top</div>
+        <a href="/help/daily-digest.html">Daily Digest</a>
+        <a href="/help/alerts.html">Alerts</a>
+        <a href="/help/planning.html">Planning &amp; Budget</a>
+        <div class="group">Tax &amp; Business</div>
+        <a href="/help/income-tax.html">Income Tax</a>
+        <a href="/help/gst.html">GST</a>
+        <div class="group">More</div>
+        <a href="/help/transformation.html">Transformation Tracker</a>
+        <a href="/help/integrations.html" class="active">Integrations</a>
+        <a href="/help/settings.html">Settings</a>
+        <a href="/help/data-backup.html">Data &amp; Backup</a>
+        <a href="/help/faq.html">FAQ &amp; Troubleshooting</a>
+      </nav>
+      <a class="backapp" href="/">← Back to the app</a>
+    </aside>
+
+    <main id="main" class="content">
+      <nav class="breadcrumb"><a href="/help/index.html">Help</a> / Integrations</nav>
+      <article>
+        <h1>Integrations</h1>
+        <p class="lede">Two optional integrations make Artha come to you instead of the other way around:
+          <strong>Telegram</strong> delivers your digest and alerts to chat, and an
+          <strong>OpenAI key</strong> auto-estimates the nutrition of meals in the Transformation tracker.
+          Both are configured in <a href="/settings">Settings</a>.</p>
+
+        <div class="applinks">
+          <a class="applink" href="/settings">Open Settings →</a>
+        </div>
+
+        <h2>Telegram</h2>
+        <p>This is the one most people want. Connect Telegram and your
+          <a href="/help/daily-digest.html">Daily Digest</a> arrives in chat every morning, and your
+          <a href="/help/alerts.html">Alerts</a> ping you the moment they fire. You create a small private
+          bot, tell Artha its token, and pair your account — about two minutes, once.</p>
+
+        <h3>Set it up</h3>
+        <ol class="steps">
+          <li><strong>Create a bot.</strong> In Telegram, open <a href="https://t.me/BotFather">@BotFather</a>
+            and send <code>/newbot</code>. Give it a name, then pick a username that ends in
+            <code>bot</code>. BotFather replies with a <strong>token</strong> (a long string like
+            <code>123456789:ABC…</code>) — copy it.</li>
+          <li><strong>Save the token.</strong> In Artha, go to
+            <a href="/settings">Settings → "Telegram notifications"</a>, paste the token into the bot-token
+            field, and click <strong>Save</strong>. You'll see a confirmation naming your bot.</li>
+          <li><strong>Connect your account.</strong> Click <strong>Connect Telegram</strong>. Tap the deep
+            link it opens (or, in Telegram, message your bot with <code>/start &lt;code&gt;</code>), then
+            press <strong>Start</strong>. The bot replies to confirm, and the page flips to
+            <em>Connected</em>.</li>
+          <li><strong>You're done.</strong> Your daily digest and alerts will now be delivered to that chat.</li>
+        </ol>
+
+        <div class="callout warn">
+          <p><strong>Use a brand-new, dedicated bot.</strong> Create a fresh bot from BotFather just for
+          Artha — do <em>not</em> reuse a bot that's already wired up to something else. A Telegram bot
+          can only have <strong>one</strong> listener at a time, so a shared bot will fail to pair (or
+          silently break the other tool). One bot, one app.</p>
+        </div>
+
+        <div class="callout note">
+          <p>Each person who connects gets their own <strong>private chat</strong> with the bot — your digest
+          and alerts only ever go to you. A new user pairs exactly the same way: create their own bot, save
+          its token, and connect.</p>
+        </div>
+
+        <p>To stop receiving messages, return to the same card and click <strong>Disconnect</strong>.</p>
+
+        <h2>OpenAI key <span style="font-weight:normal">(optional)</span></h2>
+        <p>This one powers a single nicety: in the
+          <a href="/help/transformation.html">Transformation tracker</a>, when you log a meal, an OpenAI key
+          lets the app automatically estimate the meal's <strong>calories and protein</strong> for you. It's
+          entirely optional.</p>
+
+        <ol class="steps">
+          <li>Get a key from <a href="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a>
+            — it starts with <code>sk-</code>.</li>
+          <li>In Artha, go to <a href="/settings">Settings → "AI nutrition estimates"</a>, paste the key,
+            and click <strong>Save</strong>.</li>
+        </ol>
+
+        <div class="callout tip">
+          <p>The tracker works <strong>fully without a key</strong> — you can log every meal and see all your
+          history. The only thing skipped is the automatic nutrition number, which you can still type in
+          yourself. Behind the scenes it uses OpenAI's inexpensive <code>gpt-4o-mini</code> model, so the
+          cost is typically a few pennies a month.</p>
+        </div>
+
+        <h2>Where the keys live</h2>
+        <div class="callout note">
+          <p>On a self-hosted instance, both the Telegram bot token and the OpenAI key are stored on
+          <strong>your own server</strong> and take effect <strong>immediately</strong> — no redeploy or
+          restart needed. Save, and the next digest, alert, or meal estimate uses them right away.</p>
+        </div>
+
+        <div class="applinks">
+          <a class="applink" href="/settings">Open Settings →</a>
+          <a class="applink" href="/help/transformation.html">Transformation tracker →</a>
+          <a class="applink" href="/help/settings.html">Settings reference →</a>
+        </div>
+
+        <div class="pagefoot">
+          <span><a href="/help/alerts.html">← Alerts</a></span>
+          <span><a href="/help/transformation.html">Transformation Tracker →</a></span>
+        </div>
+      </article>
+    </main>
+  </div>
+</body>
+</html>
