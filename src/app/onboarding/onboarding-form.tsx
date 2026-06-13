@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { PRODUCT_NAME } from '@/lib/brand';
 
 const MONTHS = [
   { value: 1, label: 'January' },
@@ -115,7 +116,7 @@ export function OnboardingForm({ defaultName, email }: Props) {
         <div className="rounded-2xl bg-white p-8 shadow-xl border border-amber-200">
           <div className="text-center mb-8">
             <h1 className="text-2xl font-semibold text-gray-900">
-              Welcome to pfd-saas
+              Welcome to {PRODUCT_NAME}
             </h1>
             <p className="text-sm text-gray-500 mt-2">
               Signed in as <span className="font-medium text-gray-700">{email}</span>.
@@ -153,7 +154,7 @@ export function OnboardingForm({ defaultName, email }: Props) {
                 INR · Indian Rupee
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                pfd-saas is India-only for now. More currencies later.
+                {PRODUCT_NAME} is India-only for now. More currencies later.
               </p>
             </div>
 

@@ -20,7 +20,8 @@ import { cookies } from 'next/headers';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Toaster } from '@/components/ui/sonner';
 import { auth } from '@/auth';
-import { db, businessProfile, userPreferences } from '@/db';
+import { db, userPreferences } from '@/db';
+import { appName } from '@/lib/brand';
 import { FinancialYearProvider } from '@/components/providers/financial-year-provider';
 import { FinancialYearBar } from '@/components/layout/financial-year-bar';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
@@ -43,6 +44,7 @@ export default async function DashboardLayout({
     .select({
       userId: userPreferences.userId,
       habitsEnabled: userPreferences.habitsEnabled,
+      gstEnabled: userPreferences.gstEnabled,
     })
     .from(userPreferences)
     .where(eq(userPreferences.userId, session.user.id))
@@ -52,14 +54,8 @@ export default async function DashboardLayout({
     redirect('/onboarding');
   }
   const habitsEnabled = prefs[0].habitsEnabled === true;
-
-  // GST sidebar gate.
-  const bp = await db
-    .select({ id: businessProfile.id })
-    .from(businessProfile)
-    .where(eq(businessProfile.userId, session.user.id))
-    .limit(1);
-  const hasBusinessProfile = bp.length > 0;
+  // GST is an opt-in module (Settings → Optional modules), like the tracker.
+  const gstEnabled = prefs[0].gstEnabled === true;
 
   // Seed the global FY from the cookie (falls back to the current FY).
   const cookieStore = await cookies();
@@ -68,7 +64,8 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
       <Sidebar
-        hasBusinessProfile={hasBusinessProfile}
+        appName={appName()}
+        gstEnabled={gstEnabled}
         habitsEnabled={habitsEnabled}
         feedbackUrl={
           // Sprint 6.1.6 — runtime-resolvable feedback link. Defaults

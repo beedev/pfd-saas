@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
         recordFailedPairing(chatKey, now);
         await sendTelegramToChatId(
           chatId,
-          '⚠️ *Pairing token expired or invalid.*\n\nOpen Settings → Telegram in pfd-saas and click *Connect Telegram* again.',
+          '⚠️ *Pairing token expired or invalid.*\n\nOpen Settings → Telegram in Artha and click *Connect Telegram* again.',
         );
         return NextResponse.json({ ok: true, paired: false, reason: 'token-not-found' });
       }
@@ -164,7 +164,7 @@ export async function POST(request: NextRequest) {
 
       await sendTelegramToChatId(
         chatId,
-        '✅ *Connected to pfd-saas.*\n\nYou will now receive your daily digest and alerts here. To disconnect, open Settings → Telegram in pfd-saas.',
+        '✅ *Connected to Artha.*\n\nYou will now receive your daily digest and alerts here. To disconnect, open Settings → Telegram in Artha.',
       );
       return NextResponse.json({ ok: true, paired: true });
     } catch (err) {
@@ -183,7 +183,7 @@ export async function POST(request: NextRequest) {
   if (text === '/start') {
     await sendTelegramToChatId(
       chatId,
-      'Hi! To connect this Telegram account to pfd-saas, open Settings → Telegram in the web app and click *Connect Telegram*.',
+      'Hi! To connect this Telegram account to Artha, open Settings → Telegram in the web app and click *Connect Telegram*.',
     );
   }
   // Silently ack everything else — we're not a chatbot, just a one-way

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
+import { PRODUCT_NAME } from '@/lib/brand';
 
 /**
  * Email magic-link sign-in form (production SaaS path).
@@ -104,7 +105,7 @@ export function MagicLinkForm() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4">
-          Personal Finance Dashboard · India
+          {PRODUCT_NAME} · India
         </p>
       </div>
     </div>

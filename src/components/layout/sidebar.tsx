@@ -4,11 +4,13 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
+import { PRODUCT_NAME } from '@/lib/brand';
 import {
   LogOut,
   Menu,
   X,
   MessageSquare,
+  HelpCircle,
   UserCircle,
   ArrowLeftRight,
   ChevronRight,
@@ -189,9 +191,13 @@ const navigation: NavSection[] = [
 ];
 
 type SidebarProps = {
-  /** Whether the current user filed GST during onboarding. When false,
-   *  the GST section is hidden — the rest of the app still loads. */
-  hasBusinessProfile: boolean;
+  /** Owner-prefixed product name (e.g. "Bharath’s Artha"), computed in the
+   *  dashboard layout from APP_OWNER. */
+  appName: string;
+  /** Whether the GST/business module is enabled (Settings → Optional
+   *  modules). Off by default; when false the GST section is hidden — the
+   *  rest of the app still loads. */
+  gstEnabled: boolean;
   /** Whether the user has opted into the optional personal-development
    *  modules (Transformation tracker, etc.). Off by default — pfd-saas
    *  is finance-first. Hide the "Personal" section when false. */
@@ -243,7 +249,8 @@ function activeSectionsFor(sections: NavSection[], pathname: string): string[] {
  * only one is visible at any width. Drawer state lives here.
  */
 export function Sidebar({
-  hasBusinessProfile,
+  appName,
+  gstEnabled,
   habitsEnabled,
   feedbackUrl,
   accountSwitcherEnabled,
@@ -255,11 +262,11 @@ export function Sidebar({
   const visibleNav = useMemo(
     () =>
       navigation.filter((s) => {
-        if (s.section === 'GST' && !hasBusinessProfile) return false;
+        if (s.section === 'GST' && !gstEnabled) return false;
         if (s.section === 'Personal' && !habitsEnabled) return false;
         return true;
       }),
-    [hasBusinessProfile, habitsEnabled],
+    [gstEnabled, habitsEnabled],
   );
 
   // ─── Collapsible-section state ──────────────────────────────────
@@ -458,6 +465,16 @@ export function Sidebar({
   const footer = (
     <div className="border-t border-gray-800 p-4 space-y-1">
       <a
+        href="/help/index.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open the user guide"
+        className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+      >
+        <HelpCircle className="mr-3 h-5 w-5 text-gray-400" />
+        Help &amp; Guide
+      </a>
+      <a
         href={feedbackUrl}
         target={feedbackUrl.startsWith('http') ? '_blank' : undefined}
         rel={feedbackUrl.startsWith('http') ? 'noopener noreferrer' : undefined}
@@ -475,7 +492,7 @@ export function Sidebar({
         <LogOut className="mr-3 h-5 w-5 text-gray-400" />
         Sign out
       </button>
-      <p className="pt-2 text-xs text-gray-500">pfd-saas · v0.1</p>
+      <p className="pt-2 text-xs text-gray-500">{PRODUCT_NAME} · v0.1</p>
     </div>
   );
 
@@ -485,9 +502,7 @@ export function Sidebar({
       <div className="hidden md:flex h-full w-64 flex-col bg-gray-900">
         <div className="flex h-16 items-center justify-center border-b border-gray-800 px-4">
           <h1 className="text-lg font-bold text-white text-center leading-tight">
-            Personal Finance
-            <br />
-            Dashboard
+            {appName}
           </h1>
         </div>
         {accountSwitcherRow}
@@ -507,7 +522,7 @@ export function Sidebar({
         >
           <Menu className="h-5 w-5" />
         </button>
-        <h1 className="text-sm font-bold text-white">Personal Finance</h1>
+        <h1 className="text-sm font-bold text-white">{appName}</h1>
         <button
           type="button"
           onClick={() => signOut({ callbackUrl: '/login' })}
@@ -528,7 +543,7 @@ export function Sidebar({
           />
           <div className="relative flex h-full w-64 flex-col bg-gray-900 shadow-xl">
             <div className="flex h-14 items-center justify-between border-b border-gray-800 px-4">
-              <h1 className="text-sm font-bold text-white">Personal Finance</h1>
+              <h1 className="text-sm font-bold text-white">{appName}</h1>
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}

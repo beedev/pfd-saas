@@ -1,6 +1,6 @@
 {
-  "name": "Personal Finance Dashboard",
-  "short_name": "pfd",
+  "name": "Artha",
+  "short_name": "Artha",
   "description": "Investments, taxes, GST, and net-worth tracking for Indian retail investors.",
   "start_url": "/",
   "scope": "/",

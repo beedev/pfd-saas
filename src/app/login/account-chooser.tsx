@@ -12,6 +12,8 @@
  * browsers — the click-to-sign-in flow degrades to a single HTTP POST.
  */
 
+import { appName } from '@/lib/brand';
+
 export function AccountChooser() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-white to-amber-100 px-4 py-12">
@@ -33,7 +35,7 @@ export function AccountChooser() {
             </svg>
           </div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Welcome to Personal Finance Dashboard
+            Welcome to {appName()}
           </h1>
           <p className="text-sm text-gray-500 mt-2">
             Pick how you&rsquo;d like to start. You can switch between accounts
@@ -95,8 +97,7 @@ export function AccountChooser() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          Switch between them anytime from the sidebar. · Personal Finance
-          Dashboard · India
+          Switch between them anytime from the sidebar. · {appName()} · India
         </p>
       </div>
     </div>

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/sw-register";
+import { appName, PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,13 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Personal Finance Dashboard",
-  description: "Investments · GST filing · Tax planning · Net worth tracking",
+  title: appName(),
+  description: PRODUCT_TAGLINE,
   manifest: "/manifest.webmanifest",
-  applicationName: "pfd-saas",
+  applicationName: PRODUCT_NAME,
   appleWebApp: {
     capable: true,
-    title: "Personal Finance",
+    title: appName(),
     statusBarStyle: "default",
   },
   icons: {
