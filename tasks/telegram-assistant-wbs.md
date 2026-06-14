@@ -44,7 +44,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Phase 1 — Registry + invoker + Settings curation
 
-- [ ] **1.1 Code registry** (`src/lib/assistant/registry.ts`)
+- [x] **1.1 Code registry** (`src/lib/assistant/registry.ts`)
   - Output: `Capability[]` for the v1 set (spec §4c) with param schemas + `invoke()` wrappers over existing routes/lib.
   - Verify: each `invoke` works when called directly with valid args, scoped to the user.
 
@@ -66,7 +66,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Phase 2 — LLM agent (reads + non-integrity writes)
 
-- [ ] **2.1 LLM router**
+- [x] **2.1 LLM router**
   - Output: build OpenAI function-call tools from **included + dataIntegrity=false** capabilities; map a free-text message → `{capabilityId, args}` | clarify | none.
   - Verify: "what's my net worth" → `get_net_worth`; "log breakfast: idli" → `log_meal` with extracted args; gibberish → graceful "I didn't get that".
 
