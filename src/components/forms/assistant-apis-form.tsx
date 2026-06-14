@@ -79,53 +79,65 @@ export function AssistantApisForm() {
 
   if (loading) return null;
 
+  const writes = caps.filter((c) => c.kind === 'write');
+  const reads = caps.filter((c) => c.kind === 'read');
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Assistant APIs</CardTitle>
         <CardDescription>
-          Control what the Telegram assistant can do. <strong>In assistant</strong> includes a
-          capability in the conversation; <strong>Slash-only</strong> requires a slash command for
-          writes (deduped, no double-writes) instead of free-text AI.
+          <strong>Writes</strong> touch your data, so you curate them: <strong>In assistant</strong>{' '}
+          exposes the action; <strong>Slash-only</strong> requires a slash command (deduped, no
+          double-writes) instead of free-text AI. <strong>Reads</strong> can’t change anything, so
+          they’re always available to the assistant.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="divide-y">
-          {caps.map((c) => (
-            <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{c.summary}</span>
-                  <Badge variant={c.kind === 'write' ? 'destructive' : 'secondary'}>{c.kind}</Badge>
-                  {c.slashCommand && (
-                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{c.slashCommand}</code>
-                  )}
+      <CardContent className="space-y-6">
+        <div>
+          <h4 className="mb-2 text-sm font-semibold">Writes (curated)</h4>
+          <div className="divide-y">
+            {writes.map((c) => (
+              <div key={c.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{c.summary}</span>
+                    {c.slashCommand && <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{c.slashCommand}</code>}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">{c.id}</p>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">{c.id}</p>
+                <div className="flex items-center gap-2">
+                  <Button type="button" size="sm" variant={c.included ? 'default' : 'outline'} disabled={busy === c.id} onClick={() => patch(c.id, { included: !c.included })}>
+                    {c.included ? 'In assistant' : 'Excluded'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={c.dataIntegrity ? 'secondary' : 'outline'}
+                    disabled={busy === c.id || !c.included}
+                    title="Require a slash command (deduped) for this action instead of free-text AI"
+                    onClick={() => patch(c.id, { dataIntegrity: !c.dataIntegrity })}
+                  >
+                    {c.dataIntegrity ? 'Slash-only' : 'AI-eligible'}
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={c.included ? 'default' : 'outline'}
-                  disabled={busy === c.id}
-                  onClick={() => patch(c.id, { included: !c.included })}
-                >
-                  {c.included ? 'In assistant' : 'Excluded'}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={c.dataIntegrity ? 'secondary' : 'outline'}
-                  disabled={busy === c.id || !c.included}
-                  title="Require a slash command (deduped) for this action instead of free-text AI"
-                  onClick={() => patch(c.id, { dataIntegrity: !c.dataIntegrity })}
-                >
-                  {c.dataIntegrity ? 'Slash-only' : 'AI-eligible'}
-                </Button>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <h4 className="text-sm font-semibold">Reads</h4>
+            <Badge variant="secondary">always available</Badge>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {reads.map((c) => (
+              <span key={c.id} className="rounded-full border px-2.5 py-1 text-xs" title={c.summary}>
+                {c.slashCommand ?? c.id}
+              </span>
+            ))}
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -55,6 +55,10 @@ export async function PATCH(req: NextRequest) {
   const capabilityId = (body.capabilityId ?? '').trim();
   const cap = findCapability(capabilityId);
   if (!cap) return NextResponse.json({ error: 'Unknown capability.' }, { status: 400 });
+  // Curation is writes-only — reads are always available and can't mutate data.
+  if (cap.kind === 'read') {
+    return NextResponse.json({ error: 'Reads are always available and not configurable.' }, { status: 400 });
+  }
 
   // Read the current effective values so a partial PATCH preserves the other flag.
   const existing = await db

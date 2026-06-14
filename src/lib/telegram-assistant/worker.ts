@@ -72,6 +72,29 @@ async function askSlot(chatId: string, cap: EffectiveCapability, args: Record<st
   await enqueueOutbox(chatId, `${cap.summary}\nWhat's the *${param.name}*? (${param.description})\n_Reply with the value, or "cancel"._`, { kind: 'notice' });
 }
 
+/** The message matched >1 capability — ask the user to pick one (Phase 2.2/your
+ *  disambiguation spec). Candidates are stashed in collectedArgs for the reply. */
+async function askChoice(
+  chatId: string,
+  caps: EffectiveCapability[],
+  candidates: Array<{ capabilityId: string; args: Record<string, unknown> }>,
+  sourceMessageId: number | null,
+): Promise<void> {
+  const lines = candidates.map((c, i) => {
+    const cap = findEffectiveById(caps, c.capabilityId);
+    return `${i + 1}) ${cap?.summary ?? c.capabilityId}`;
+  });
+  const expiresAt = new Date(Date.now() + PENDING_TTL_MS);
+  await db
+    .insert(telegramConversations)
+    .values({ chatId, pendingCapability: null, collectedArgs: { candidates } as never, awaiting: 'choice', sourceMessageId, expiresAt })
+    .onConflictDoUpdate({
+      target: telegramConversations.chatId,
+      set: { pendingCapability: null, collectedArgs: { candidates } as never, awaiting: 'choice', sourceMessageId, expiresAt, updatedAt: new Date() },
+    });
+  await enqueueOutbox(chatId, `Did you mean:\n${lines.join('\n')}\n\n_Reply with the number, or "cancel"._`, { kind: 'notice' });
+}
+
 interface LogInput {
   userId?: string | null;
   chatId: string;
@@ -205,6 +228,25 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
     return;
   }
 
+  if (live && pending?.awaiting === 'choice') {
+    await db.delete(telegramConversations).where(eq(telegramConversations.chatId, chatId));
+    if (/^(cancel|stop|nvm|never\s?mind)$/i.test(text)) {
+      await enqueueOutbox(chatId, 'Cancelled.');
+      return;
+    }
+    const candidates = ((pending.collectedArgs ?? {}) as { candidates?: Array<{ capabilityId: string; args: Record<string, unknown> }> }).candidates ?? [];
+    const n = parseInt(text.trim(), 10);
+    const chosen = Number.isFinite(n) && n >= 1 && n <= candidates.length ? candidates[n - 1] : undefined;
+    const cap = chosen ? findEffectiveById(caps, chosen.capabilityId) : undefined;
+    if (!chosen || !cap || !cap.included) {
+      await enqueueOutbox(chatId, 'I didn’t get that choice — ask again.', { kind: 'notice' });
+      await logCmd({ userId, chatId, messageId: pending.sourceMessageId, rawText: text, route: 'choice', resultStatus: 'no-match' });
+      return;
+    }
+    await dispatch(userId, chatId, cap, chosen.args, { route: 'choice', sourceMessageId: pending.sourceMessageId ?? null, rawText: text, verbose });
+    return;
+  }
+
   if (live && pending?.awaiting === 'confirm') {
     await db.delete(telegramConversations).where(eq(telegramConversations.chatId, chatId));
     const cap = pending.pendingCapability ? findEffectiveById(caps, pending.pendingCapability) : undefined;
@@ -240,6 +282,11 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
   if (!text.startsWith('/')) {
     const eligible = included.filter((c) => !c.integrity);
     const route = await routeWithLLM(text, eligible);
+    if (route.candidates && route.candidates.length > 1) {
+      await askChoice(chatId, included, route.candidates, row.messageId ?? null);
+      await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', resultStatus: 'ambiguous', resultSummary: route.candidates.map((c) => c.capabilityId).join(',') });
+      return;
+    }
     if (!route.capabilityId) {
       await enqueueOutbox(chatId, route.clarify || ('I didn’t catch a request.\n' + helpText(included)), { kind: 'notice' });
       await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', resultStatus: 'no-match' });

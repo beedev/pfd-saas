@@ -13,6 +13,21 @@ import { getDuePayments } from '@/lib/finance/due-payments';
 import { getTodayStatus, setTodayWeight, tickHabit } from '@/lib/health/transformation-actions';
 import { deriveDeductions } from '@/lib/finance/deduction-engine';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import {
+  readGold,
+  readMutualFunds,
+  readStocks,
+  readSips,
+  readInsurance,
+  readChitFunds,
+  readLiabilities,
+  readNps,
+  readProvidentFund,
+  readRealEstate,
+  readForex,
+  readCapitalGains,
+  readSpending,
+} from './reads';
 
 export interface CapParam {
   name: string;
@@ -152,6 +167,21 @@ export const CAPABILITIES: Capability[] = [
       };
     },
   },
+
+  // ── Broad read surface (always LLM-available; reads can't mutate data) ──
+  { id: 'get_gold', summary: 'Gold holdings and their current value', kind: 'read', dataIntegrity: false, slashCommand: '/gold', params: [], invoke: (u) => readGold(u) },
+  { id: 'get_mutual_funds', summary: 'Mutual fund portfolio and value', kind: 'read', dataIntegrity: false, slashCommand: '/mf', params: [], invoke: (u) => readMutualFunds(u) },
+  { id: 'get_stocks', summary: 'Stock holdings and value', kind: 'read', dataIntegrity: false, slashCommand: '/stocks', params: [], invoke: (u) => readStocks(u) },
+  { id: 'get_sips', summary: 'Active SIPs and their monthly amounts / next dates', kind: 'read', dataIntegrity: false, slashCommand: '/sips', params: [], invoke: (u) => readSips(u) },
+  { id: 'get_insurance', summary: 'Insurance policies (LIC + health) — premiums, cover, due dates', kind: 'read', dataIntegrity: false, slashCommand: '/insurance', params: [], invoke: (u) => readInsurance(u) },
+  { id: 'get_chit_funds', summary: 'Chit fund positions — installments, due dates, XIRR', kind: 'read', dataIntegrity: false, slashCommand: '/chits', params: [], invoke: (u) => readChitFunds(u) },
+  { id: 'get_liabilities', summary: 'Loans and credit cards — outstanding balances and EMIs', kind: 'read', dataIntegrity: false, slashCommand: '/loans', params: [], invoke: (u) => readLiabilities(u) },
+  { id: 'get_nps', summary: 'NPS balance', kind: 'read', dataIntegrity: false, slashCommand: '/nps', params: [], invoke: (u) => readNps(u) },
+  { id: 'get_provident_fund', summary: 'Provident fund (EPF/PPF/VPF) balance', kind: 'read', dataIntegrity: false, slashCommand: '/pf', params: [], invoke: (u) => readProvidentFund(u) },
+  { id: 'get_real_estate', summary: 'Real-estate properties and valuations', kind: 'read', dataIntegrity: false, slashCommand: '/property', params: [], invoke: (u) => readRealEstate(u) },
+  { id: 'get_forex_deposits', summary: 'Foreign-currency deposits and their INR value', kind: 'read', dataIntegrity: false, slashCommand: '/forex', params: [], invoke: (u) => readForex(u) },
+  { id: 'get_capital_gains', summary: 'Capital gains this financial year (LTCG/STCG and tax)', kind: 'read', dataIntegrity: false, slashCommand: '/gains', params: [], invoke: (u) => readCapitalGains(u) },
+  { id: 'get_spending', summary: "This month's spending vs budget by category", kind: 'read', dataIntegrity: false, slashCommand: '/spend', params: [], invoke: (u) => readSpending(u) },
 ];
 
 export const findCapability = (id: string) => CAPABILITIES.find((c) => c.id === id);

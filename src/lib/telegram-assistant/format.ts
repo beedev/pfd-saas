@@ -5,8 +5,20 @@
 import type { NetWorthResult } from '@/lib/assets/registry';
 import type { DueItem } from '@/lib/finance/due-payments';
 import type { TodayStatus } from '@/lib/health/transformation-actions';
+import type { ReadView } from './reads';
 
 const inr = (paisa: number) => '₹' + Math.round(paisa / 100).toLocaleString('en-IN');
+
+function isReadView(r: unknown): r is ReadView {
+  return typeof r === 'object' && r !== null && (r as { kind?: string }).kind === 'read-view';
+}
+
+/** Generic renderer for the broad read surface: *title* + optional total + lines. */
+function formatReadView(v: ReadView): string {
+  if (v.lines.length === 0) return v.empty ?? `*${v.title}*\n_Nothing to show._`;
+  const head = v.totalPaisa != null ? `*${v.title}: ${inr(v.totalPaisa)}*` : `*${v.title}*`;
+  return `${head}\n${v.lines.join('\n')}`;
+}
 
 export interface FormatOpts {
   /** Expand the reply (the user asked for "details"/"full"/"breakdown"). */
@@ -14,6 +26,8 @@ export interface FormatOpts {
 }
 
 export function formatResult(capabilityId: string, result: unknown, opts: FormatOpts = {}): string {
+  // Broad read surface — any capability returning a ReadView renders generically.
+  if (isReadView(result)) return formatReadView(result);
   switch (capabilityId) {
     case 'get_net_worth': {
       const nw = result as NetWorthResult;
