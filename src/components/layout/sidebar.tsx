@@ -414,7 +414,7 @@ export function Sidebar({
               type="button"
               onClick={() => toggleSection(section.section)}
               aria-expanded={isOpen}
-              className="group flex w-full items-center rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500 transition-colors hover:bg-gray-800/60 hover:text-gray-300"
+              className="group flex w-full items-center rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 transition-colors hover:bg-gray-800/60 hover:text-gray-300"
             >
               {isOpen ? (
                 <ChevronDown className="mr-1.5 h-3.5 w-3.5 flex-shrink-0 text-gray-500 group-hover:text-gray-300" />
