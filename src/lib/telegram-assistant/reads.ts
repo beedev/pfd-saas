@@ -64,7 +64,7 @@ export async function readMutualFunds(userId: string): Promise<ReadView> {
   const total = await assetClassCurrentValuePaisa('mutualFunds', userId);
   return view(
     'Mutual Funds',
-    rows.slice(0, 12).map((r) => `• ${r.schemeName}: ${inr(r.currentValue ?? 0)}${pct(r.gainLossPercent)}`),
+    rows.slice(0, 40).map((r) => `• ${r.schemeName}: ${inr(r.currentValue ?? 0)}${pct(r.gainLossPercent)}`),
     total,
     'No mutual funds.',
   );
@@ -75,7 +75,7 @@ export async function readStocks(userId: string): Promise<ReadView> {
   const total = await assetClassCurrentValuePaisa('stocks', userId);
   return view(
     'Stocks',
-    rows.slice(0, 15).map((r) => `• ${r.symbol} ×${r.quantity}: ${inr(r.currentValue ?? 0)}${pct(r.gainLossPercent)}`),
+    rows.slice(0, 40).map((r) => `• ${r.symbol} ×${r.quantity}: ${inr(r.currentValue ?? 0)}${pct(r.gainLossPercent)}`),
     total,
     'No stock holdings.',
   );
@@ -232,7 +232,7 @@ export async function readSpending(userId: string): Promise<ReadView> {
   const lines = expense
     .filter((r) => Number(r.actual ?? 0) > 0 || Number(r.planned ?? 0) > 0)
     .sort((a, b) => Number(b.actual ?? 0) - Number(a.actual ?? 0))
-    .slice(0, 12)
+    .slice(0, 40)
     .map((r) => `• ${r.name}: ${inr(Number(r.actual ?? 0))} / ${inr(Number(r.planned ?? 0))}`);
   return view(
     `Spending this month (${inr(spent)} of ${inr(planned)} planned)`,

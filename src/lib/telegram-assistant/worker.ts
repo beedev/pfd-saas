@@ -22,6 +22,7 @@ import { assertRegistryIntegrity, type CapParam } from './registry';
 import { getEffectiveCapabilities, findEffectiveById, type EffectiveCapability } from './effective';
 import { formatResult } from './format';
 import { routeWithLLM } from './llm';
+import { composeAnswer } from './compose';
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
@@ -352,8 +353,22 @@ async function runAndReply(
 ): Promise<void> {
   try {
     const result = await cap.invoke(userId, args);
-    let body = formatResult(cap.id, result, { verbose: meta.verbose });
-    if (meta.echo) body = `🔎 _${cap.summary}_\n\n${body}`; // 2.3 echo: what was understood
+    let body: string;
+    if (cap.kind === 'read') {
+      // RAG: the deterministic rendering is the faithful API data; the LLM
+      // answers the user's actual question grounded strictly in it (filters,
+      // picks, counts) without inventing values. Falls back to the rendering.
+      const grounding = formatResult(cap.id, result, { verbose: true });
+      const composed = await composeAnswer({
+        userMessage: meta.rawText,
+        summary: cap.summary,
+        grounding,
+        todayISO: new Date().toISOString().slice(0, 10),
+      });
+      body = composed ?? grounding;
+    } else {
+      body = formatResult(cap.id, result, { verbose: meta.verbose });
+    }
     await enqueueOutbox(chatId, body);
     await logCmd({ userId, chatId, messageId: meta.messageId, rawText: meta.rawText, route: meta.route, capabilityId: cap.id, args, confirmed: meta.confirmed ?? false, executed: true, resultStatus: 'ok' });
   } catch (err) {
