@@ -26,15 +26,15 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   - Output: loop that sends `telegram_outbox` pending rows (retry on failure), marks sent.
   - Verify: enqueue a row → message arrives; kill Telegram reachability → row stays pending → retried on recovery.
 
-- [ ] **0.5 Worker skeleton + authz + audit**
+- [x] **0.5 Worker skeleton + authz + audit**
   - Input: inbox rows. Output: worker that picks pending rows in `update_id` order, rejects non-paired `chat_id` (reply "not authorized"), writes a `telegram_command_log` row, marks inbox done.
   - Verify: message from the paired chat is processed; a different chat_id is rejected + logged.
 
-- [ ] **0.6 Slash parser + confirm flow + dedupe**
+- [x] **0.6 Slash parser + confirm flow + dedupe**
   - Output: parse `/command args`; for a `write` capability, enqueue an inline ✅/✖ confirm and persist pending; on the confirm callback, invoke; `dataIntegrity=true` skips if `(message_id, capability)` already in the log.
   - Verify: `/paid` shows a confirm; ✅ executes once; replaying the same update does **not** double-execute.
 
-- [ ] **0.7 Two end-to-end commands**
+- [x] **0.7 Two end-to-end commands**
   - Output: `/networth` (read) and `/paid <card>` (integrity write) fully working through the loop, invoking existing app logic AS the user.
   - Verify: `/networth` returns correct totals; `/paid HDFC` → confirm → marks the statement paid exactly once; both logged.
 
