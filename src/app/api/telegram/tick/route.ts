@@ -9,6 +9,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { pollTelegram } from '@/lib/telegram-assistant/poll';
+import { processInbox } from '@/lib/telegram-assistant/worker';
 import { drainOutbox } from '@/lib/telegram-assistant/send';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
@@ -22,9 +23,9 @@ export async function POST(req: NextRequest) {
   }
   try {
     const poll = await pollTelegram();
-    // Phase 0.5: const worked = await processInbox();
+    const work = await processInbox();
     const out = await drainOutbox();
-    return NextResponse.json({ ok: true, poll, out });
+    return NextResponse.json({ ok: true, poll, work, out });
   } catch (err) {
     console.error('[telegram/tick]', err);
     return NextResponse.json({ error: 'tick failed' }, { status: 500 });
