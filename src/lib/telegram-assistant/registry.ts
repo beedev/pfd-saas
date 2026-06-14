@@ -7,13 +7,12 @@
  */
 import { and, desc, eq, ilike, isNull } from 'drizzle-orm';
 import { db, liabilities, creditCardExpenses } from '@/db';
-import { computeNetWorth } from '@/lib/assets/registry';
 import { recomputeCreditCardBudgetForPeriod } from '@/lib/finance/budget-sync';
-import { getDuePayments } from '@/lib/finance/due-payments';
 import { getTodayStatus, setTodayWeight, tickHabit } from '@/lib/health/transformation-actions';
-import { deriveDeductions } from '@/lib/finance/deduction-engine';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import {
+  readNetWorth,
+  readDuePayments,
+  readTaxDeductions,
   readGold,
   readMutualFunds,
   readStocks,
@@ -29,6 +28,10 @@ import {
   readSpending,
   readGoals,
   readRetirement,
+  readTax,
+  readNetWorthHistory,
+  readAlerts,
+  readGst,
 } from './reads';
 
 export interface CapParam {
@@ -56,7 +59,7 @@ export const CAPABILITIES: Capability[] = [
     dataIntegrity: false,
     slashCommand: '/networth',
     params: [],
-    invoke: async (userId) => computeNetWorth(userId),
+    invoke: (u) => readNetWorth(u),
   },
   {
     id: 'mark_card_paid',
@@ -120,7 +123,7 @@ export const CAPABILITIES: Capability[] = [
     dataIntegrity: false,
     slashCommand: '/due',
     params: [],
-    invoke: async (userId) => getDuePayments(userId),
+    invoke: (u) => readDuePayments(u),
   },
   {
     id: 'get_today_status',
@@ -158,16 +161,7 @@ export const CAPABILITIES: Capability[] = [
     dataIntegrity: false,
     slashCommand: '/tax',
     params: [],
-    invoke: async (userId) => {
-      const fy = getCurrentFinancialYear();
-      const r = await deriveDeductions(userId, fy);
-      return {
-        fy,
-        oldRegimeTotalPaisa: r.oldRegimeTotalPaisa,
-        newRegimeTotalPaisa: r.newRegimeTotalPaisa,
-        breakdown: r.breakdown,
-      };
-    },
+    invoke: (u) => readTaxDeductions(u),
   },
 
   // ── Broad read surface (always LLM-available; reads can't mutate data) ──
@@ -186,6 +180,10 @@ export const CAPABILITIES: Capability[] = [
   { id: 'get_spending', summary: "This month's spending vs budget by category", kind: 'read', dataIntegrity: false, slashCommand: '/spend', params: [], invoke: (u) => readSpending(u) },
   { id: 'get_goals', summary: 'Named savings goals and their funding status — target, amount saved, on-track, monthly contribution needed (e.g. child education/pilot training, marriage, emergency fund). NOT retirement.', kind: 'read', dataIntegrity: false, slashCommand: '/goals', params: [], invoke: (u) => readGoals(u) },
   { id: 'get_retirement', summary: 'Retirement plan and year-by-year corpus projection — retirement age, monthly expense, corpus growth/withdrawals/returns each year, whether the corpus lasts. Use for any retirement question.', kind: 'read', dataIntegrity: false, slashCommand: '/retirement', params: [], invoke: (u) => readRetirement(u) },
+  { id: 'get_tax', summary: 'Income tax for this financial year — taxable income, total tax under OLD vs NEW regime, which regime is recommended and how much it saves. Use for "what is my tax", "which regime is better".', kind: 'read', dataIntegrity: false, slashCommand: '/incometax', params: [], invoke: (u) => readTax(u) },
+  { id: 'get_networth_history', summary: 'Net worth over time — historical snapshots and how net worth has grown. Use for "how has my net worth changed", "net worth a year ago".', kind: 'read', dataIntegrity: false, slashCommand: '/nwhistory', params: [], invoke: (u) => readNetWorthHistory(u) },
+  { id: 'get_alerts', summary: 'Configured market/payment/portfolio alert rules and recently triggered alerts.', kind: 'read', dataIntegrity: false, slashCommand: '/alerts', params: [], invoke: (u) => readAlerts(u) },
+  { id: 'get_gst', summary: 'GST / business summary for the current return period — sales, output tax, input tax credit (ITC) and net GST payable.', kind: 'read', dataIntegrity: false, slashCommand: '/gst', params: [], invoke: (u) => readGst(u) },
 ];
 
 export const findCapability = (id: string) => CAPABILITIES.find((c) => c.id === id);

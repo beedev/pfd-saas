@@ -13,12 +13,46 @@
  */
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
+/**
+ * Generic fallback renderer (no OpenAI key) — walks a raw read object and prints
+ * it readably. `*Rupees` fields are shown as ₹ with Indian grouping; arrays
+ * become bullet lists. One renderer for every read, no per-domain formatting.
+ */
+export function renderRaw(data: unknown): string {
+  if (data == null || typeof data !== 'object') return String(data ?? 'No data.');
+  const o = data as Record<string, unknown>;
+  const fmtVal = (k: string, v: unknown): string => {
+    if (typeof v === 'number' && /rupees$/i.test(k)) return '₹' + Math.round(v).toLocaleString('en-IN');
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    return String(v);
+  };
+  const scalarLine = (obj: Record<string, unknown>) =>
+    Object.entries(obj)
+      .filter(([, v]) => v != null && typeof v !== 'object')
+      .map(([k, v]) => `${k}: ${fmtVal(k, v)}`)
+      .join(', ');
+  const parts: string[] = [];
+  if (typeof o.title === 'string') parts.push(`*${o.title}*`);
+  const scalars = scalarLine(Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'title')));
+  if (scalars) parts.push(scalars);
+  for (const [k, v] of Object.entries(o)) {
+    if (Array.isArray(v) && v.length) {
+      parts.push(`${k}:`);
+      for (const item of v.slice(0, 40)) {
+        parts.push('• ' + (item && typeof item === 'object' ? scalarLine(item as Record<string, unknown>) : String(item)));
+      }
+    }
+  }
+  return parts.filter(Boolean).join('\n') || 'No data.';
+}
+
 const SYSTEM = (todayISO: string) => {
   const [y, m] = todayISO.split('-');
   return (
     `You are Artha, a personal-finance assistant replying on Telegram.\n` +
     `Answer the user's question using ONLY the DATA provided below it.\n` +
-    `NEVER state an amount, name, policy/account number, or date that is not present in the DATA — never estimate or invent. Copy amounts exactly as written (e.g. ₹78,244).\n\n` +
+    `NEVER state an amount, name, policy/account number, or date that is not present in the DATA — never estimate or invent.\n` +
+    `Money fields are WHOLE RUPEES (names end in "Rupees"). Never change a value — only format it. Show every amount as ₹ in the INDIAN numbering system (lakh/crore grouping): ₹9,99,11,514 (NOT ₹99,911,514), ₹59,77,697 (NOT ₹5,977,697), ₹4,32,000, ₹6,156. Drop the "Rupees" suffix in your reply.\n\n` +
     `Today's date is ${todayISO} (year ${y}, month ${m}). Resolve relative time against it.\n` +
     `FILTER PRECISELY — this is critical:\n` +
     `• "this month" / "due this month" = ONLY items whose date is in year ${y} AND month ${m} (i.e. starts with "${y}-${m}"). A ${y}-${String(Number(m) - 1).padStart(2, '0')} or any other month is NOT this month — exclude it.\n` +

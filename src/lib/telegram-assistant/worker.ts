@@ -22,7 +22,7 @@ import { assertRegistryIntegrity, type CapParam } from './registry';
 import { getEffectiveCapabilities, findEffectiveById, type EffectiveCapability } from './effective';
 import { formatResult } from './format';
 import { routeWithLLM } from './llm';
-import { composeAnswer } from './compose';
+import { composeAnswer, renderRaw } from './compose';
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
@@ -39,7 +39,6 @@ function rateLimited(chatId: string): boolean {
   return arr.length > RATE_MAX;
 }
 
-const VERBOSE_RE = /\b(detail|details|full|expand|breakdown|everything)\b/i;
 
 /** Persist pending state + ask. `awaiting` is 'confirm' or 'slot'. */
 async function setPending(
@@ -147,7 +146,16 @@ export async function processInbox(limit = 10): Promise<{ processed: number }> {
 
   let processed = 0;
   for (const row of rows) {
-    await db.update(telegramInbox).set({ status: 'processing' }).where(eq(telegramInbox.id, row.id));
+    // Atomic claim: only ONE concurrent tick can flip pending→processing for a
+    // row (the conditional UPDATE takes a row lock). The loser gets 0 rows back
+    // and skips — prevents double-processing / double-sends when ticks overlap
+    // (e.g. a slow LLM tick still running when the next 5s tick fires).
+    const claimed = await db
+      .update(telegramInbox)
+      .set({ status: 'processing' })
+      .where(and(eq(telegramInbox.id, row.id), eq(telegramInbox.status, 'pending')))
+      .returning({ id: telegramInbox.id });
+    if (claimed.length === 0) continue;
     try {
       await handle(row);
       await db
@@ -202,7 +210,6 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
   // Per-user effective registry (Settings → Assistant APIs).
   const caps = await getEffectiveCapabilities(userId);
   const included = caps.filter((c) => c.included);
-  const verbose = VERBOSE_RE.test(text);
 
   // 3. resolve a pending slot / confirm
   const pend = await db.select().from(telegramConversations).where(eq(telegramConversations.chatId, chatId)).limit(1);
@@ -225,7 +232,7 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
     const args = { ...((pending.collectedArgs ?? {}) as Record<string, unknown>) };
     const firstMissing = cap.params.find((p) => p.required && (args[p.name] == null || args[p.name] === ''));
     if (firstMissing) args[firstMissing.name] = text;
-    await dispatch(userId, chatId, cap, args, { route: 'slot', sourceMessageId: pending.sourceMessageId ?? null, rawText: text, verbose });
+    await dispatch(userId, chatId, cap, args, { route: 'slot', sourceMessageId: pending.sourceMessageId ?? null, rawText: text });
     return;
   }
 
@@ -244,7 +251,7 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
       await logCmd({ userId, chatId, messageId: pending.sourceMessageId, rawText: text, route: 'choice', resultStatus: 'no-match' });
       return;
     }
-    await dispatch(userId, chatId, cap, chosen.args, { route: 'choice', sourceMessageId: pending.sourceMessageId ?? null, rawText: text, verbose });
+    await dispatch(userId, chatId, cap, chosen.args, { route: 'choice', sourceMessageId: pending.sourceMessageId ?? null, rawText: text });
     return;
   }
 
@@ -268,7 +275,7 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
       }
     }
     await runAndReply(userId, chatId, cap, (pending.collectedArgs ?? {}) as Record<string, unknown>, {
-      messageId: pending.sourceMessageId, rawText: text, route: 'confirm', confirmed: true, verbose,
+      messageId: pending.sourceMessageId, rawText: text, route: 'confirm', confirmed: true,
     });
     return;
   }
@@ -299,7 +306,7 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
       await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: route.capabilityId, resultStatus: 'blocked-integrity' });
       return;
     }
-    await dispatch(userId, chatId, cap, route.args, { route: 'llm', sourceMessageId: row.messageId ?? null, rawText: text, verbose });
+    await dispatch(userId, chatId, cap, route.args, { route: 'llm', sourceMessageId: row.messageId ?? null, rawText: text });
     return;
   }
 
@@ -309,14 +316,13 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
     await enqueueOutbox(chatId, 'Unknown command.\n' + helpText(included), { kind: 'notice' });
     return;
   }
-  await dispatch(userId, chatId, parsed.capability, parsed.args, { route: 'slash', sourceMessageId: row.messageId ?? null, rawText: text, verbose });
+  await dispatch(userId, chatId, parsed.capability, parsed.args, { route: 'slash', sourceMessageId: row.messageId ?? null, rawText: text });
 }
 
 interface DispatchOpts {
   route: string;
   sourceMessageId: number | null;
   rawText: string;
-  verbose: boolean;
 }
 
 /** Shared tail for every route (slash / llm / slot-completion): missing required
@@ -339,7 +345,7 @@ async function dispatch(
     await logCmd({ userId, chatId, messageId: opts.sourceMessageId, rawText: opts.rawText, route: opts.route, capabilityId: cap.id, args, resultStatus: 'awaiting-confirm' });
     return;
   }
-  await runAndReply(userId, chatId, cap, args, { messageId: opts.sourceMessageId, rawText: opts.rawText, route: opts.route, echo: opts.route === 'llm', verbose: opts.verbose });
+  await runAndReply(userId, chatId, cap, args, { messageId: opts.sourceMessageId, rawText: opts.rawText, route: opts.route });
 }
 
 /** Invoke a capability, reply with the formatted result, and audit-log success
@@ -349,25 +355,24 @@ async function runAndReply(
   chatId: string,
   cap: EffectiveCapability,
   args: Record<string, unknown>,
-  meta: { messageId: number | null; rawText: string; route: string; confirmed?: boolean; echo?: boolean; verbose?: boolean },
+  meta: { messageId: number | null; rawText: string; route: string; confirmed?: boolean },
 ): Promise<void> {
   try {
     const result = await cap.invoke(userId, args);
     let body: string;
     if (cap.kind === 'read') {
-      // RAG: the deterministic rendering is the faithful API data; the LLM
-      // answers the user's actual question grounded strictly in it (filters,
-      // picks, counts) without inventing values. Falls back to the rendering.
-      const grounding = formatResult(cap.id, result, { verbose: true });
+      // RAG: the read returns raw data; the LLM answers the user's actual
+      // question grounded strictly in it (filter/pick/count) without inventing
+      // values. renderRaw is the no-key fallback over the same object.
       const composed = await composeAnswer({
         userMessage: meta.rawText,
         summary: cap.summary,
-        grounding,
+        grounding: JSON.stringify(result),
         todayISO: new Date().toISOString().slice(0, 10),
       });
-      body = composed ?? grounding;
+      body = composed ?? renderRaw(result);
     } else {
-      body = formatResult(cap.id, result, { verbose: meta.verbose });
+      body = formatResult(cap.id, result);
     }
     await enqueueOutbox(chatId, body);
     await logCmd({ userId, chatId, messageId: meta.messageId, rawText: meta.rawText, route: meta.route, capabilityId: cap.id, args, confirmed: meta.confirmed ?? false, executed: true, resultStatus: 'ok' });

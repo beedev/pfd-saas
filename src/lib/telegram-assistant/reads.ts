@@ -1,10 +1,13 @@
 /**
- * Assistant read capabilities (the broad, always-available read surface).
+ * Assistant read capabilities — DATA PROVIDERS ONLY.
  *
- * Each function wraps existing tables/helpers, scoped by userId, and returns a
- * uniform {@link ReadView} so a single generic formatter renders them all.
- * Reads can't mutate anything, so they're exposed to the LLM without the
- * include/integrity curation that governs writes.
+ * Each function fetches its domain's real data (wrapping existing tables/libs,
+ * scoped by userId) and returns a plain object with **rupee-valued numbers**
+ * (paisa ÷ 100 — the one deterministic, money-safe step), ISO dates, and
+ * labelled fields. NO presentation: the LLM compose pass formats per request,
+ * and a generic fallback renders the object when no key. So the only thing
+ * specialised here is the fetch (genuinely different per domain); formatting is
+ * generic and lives elsewhere.
  */
 import { and, desc, eq } from 'drizzle-orm';
 import {
@@ -24,8 +27,14 @@ import {
   budgetCategories,
   financialGoals,
   cashflowEvents,
+  priceSnapshots,
+  alertRules,
+  alertHistory,
+  invoices,
+  purchaseInvoices,
+  businessProfile,
 } from '@/db';
-import { assetClassCurrentValuePaisa } from '@/lib/assets/registry';
+import { assetClassCurrentValuePaisa, computeNetWorth } from '@/lib/assets/registry';
 import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 import { fetchCapitalGains } from '@/lib/reports/data/fetchCapitalGains';
 import { fetchRetirementProjection } from '@/lib/reports/data/fetchRetirementProjection';
@@ -33,284 +42,341 @@ import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { dateToPeriod } from '@/lib/finance/budget-sync';
 import { loadCorpusContext, corpusForGoal, yearlyContributionForGoal, weightedReturnForGoal } from '@/lib/finance/goal-corpus';
 import { projectGoal } from '@/lib/finance/goal-projection';
+import { computeFyTaxComparison, isComputeError } from '@/lib/finance/tax-compute';
+import { getDuePayments } from '@/lib/finance/due-payments';
+import { deriveDeductions } from '@/lib/finance/deduction-engine';
 
-export interface ReadView {
-  /** marks the object as a generic read view for formatResult */
-  kind: 'read-view';
-  title: string;
-  totalPaisa?: number;
-  lines: string[];
-  empty?: string;
+/** paisa → whole rupees (the single deterministic money step). */
+const r = (paisa: number | bigint | null | undefined) => Math.round(Number(paisa ?? 0) / 100);
+const isoTax = () => getCurrentFinancialYear();
+
+// ── Core ──────────────────────────────────────────────────────────────
+export async function readNetWorth(userId: string) {
+  const nw = await computeNetWorth(userId);
+  return {
+    title: 'Net worth',
+    netWorthRupees: r(nw.netWorthPaisa),
+    totalAssetsRupees: r(nw.totalAssetsPaisa),
+    liabilitiesRupees: r(nw.liabilitiesPaisa),
+    breakdown: nw.breakdown
+      .filter((b) => b.valuePaisa > 0)
+      .map((b) => ({ label: b.label, valueRupees: r(b.valuePaisa), isLiability: b.isLiability })),
+  };
 }
 
-const inr = (paisa: number) => '₹' + Math.round(paisa / 100).toLocaleString('en-IN');
-const pct = (p: number | null) => (p == null ? '' : ` (${p >= 0 ? '+' : ''}${p.toFixed(1)}%)`);
-const view = (title: string, lines: string[], totalPaisa?: number, empty?: string): ReadView => ({
-  kind: 'read-view',
-  title,
-  totalPaisa,
-  lines,
-  empty,
-});
+export async function readDuePayments(userId: string) {
+  const items = await getDuePayments(userId);
+  return {
+    title: 'Due / overdue payments',
+    due: items.map((i) => ({ category: i.category, label: i.label, amountRupees: r(i.amountPaisa), dueDate: i.dueDate, isOverdue: i.isOverdue })),
+  };
+}
 
-export async function readGold(userId: string): Promise<ReadView> {
+export async function readTaxDeductions(userId: string) {
+  const fy = isoTax();
+  const d = await deriveDeductions(userId, fy);
+  return {
+    title: `Chapter VI-A tax deductions, FY ${fy}`,
+    fy,
+    oldRegimeTotalRupees: r(d.oldRegimeTotalPaisa),
+    newRegimeEligibleRupees: r(d.newRegimeTotalPaisa),
+    sections: d.breakdown.filter((b) => b.amountPaisa > 0).map((b) => ({ section: b.label, amountRupees: r(b.amountPaisa) })),
+  };
+}
+
+// ── Assets ────────────────────────────────────────────────────────────
+export async function readGold(userId: string) {
   const rows = await db.select().from(goldHoldings).where(eq(goldHoldings.userId, userId));
-  const total = await assetClassCurrentValuePaisa('gold', userId);
-  return view(
-    'Gold',
-    rows.map((r) => `• ${r.type} — ${r.grams}g ${r.purity}: ${inr(r.currentValue ?? 0)}`),
-    total,
-    'No gold holdings.',
-  );
+  return {
+    title: 'Gold',
+    totalRupees: r(await assetClassCurrentValuePaisa('gold', userId)),
+    holdings: rows.map((g) => ({ type: g.type, grams: g.grams, purity: g.purity, valueRupees: r(g.currentValue) })),
+  };
 }
 
-export async function readMutualFunds(userId: string): Promise<ReadView> {
+export async function readMutualFunds(userId: string) {
   const rows = await db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)).orderBy(desc(mutualFunds.currentValue));
-  const total = await assetClassCurrentValuePaisa('mutualFunds', userId);
-  return view(
-    'Mutual Funds',
-    rows.slice(0, 40).map((r) => `• ${r.schemeName}: ${inr(r.currentValue ?? 0)}${pct(r.gainLossPercent)}`),
-    total,
-    'No mutual funds.',
-  );
+  return {
+    title: 'Mutual funds',
+    totalRupees: r(await assetClassCurrentValuePaisa('mutualFunds', userId)),
+    funds: rows.map((m) => ({ scheme: m.schemeName, valueRupees: r(m.currentValue), gainPct: m.gainLossPercent, category: m.category })),
+  };
 }
 
-export async function readStocks(userId: string): Promise<ReadView> {
+export async function readStocks(userId: string) {
   const rows = await db.select().from(holdings).where(eq(holdings.userId, userId)).orderBy(desc(holdings.currentValue));
-  const total = await assetClassCurrentValuePaisa('stocks', userId);
-  return view(
-    'Stocks',
-    rows.slice(0, 40).map((r) => `• ${r.symbol} ×${r.quantity}: ${inr(r.currentValue ?? 0)}${pct(r.gainLossPercent)}`),
-    total,
-    'No stock holdings.',
-  );
+  return {
+    title: 'Stocks',
+    totalRupees: r(await assetClassCurrentValuePaisa('stocks', userId)),
+    holdings: rows.map((h) => ({ symbol: h.symbol, qty: h.quantity, valueRupees: r(h.currentValue), gainPct: h.gainLossPercent })),
+  };
 }
 
-export async function readSips(userId: string): Promise<ReadView> {
+export async function readSips(userId: string) {
   const rows = await db
-    .select({ scheme: mutualFunds.schemeName, amount: sips.monthlyAmount, next: sips.nextExecutionDate, status: sips.status })
+    .select({ scheme: mutualFunds.schemeName, amount: sips.monthlyAmount, next: sips.nextExecutionDate })
     .from(sips)
     .innerJoin(mutualFunds, eq(sips.mutualFundId, mutualFunds.id))
     .where(and(eq(sips.userId, userId), eq(sips.status, 'ACTIVE')));
-  const monthly = rows.reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  return view(
-    'Active SIPs',
-    rows.map((r) => `• ${r.scheme}: ${inr(Number(r.amount ?? 0))}/mo — next ${r.next ?? '—'}`),
-    monthly,
-    'No active SIPs.',
-  );
+  return {
+    title: 'Active SIPs',
+    totalMonthlyRupees: rows.reduce((s, x) => s + r(x.amount), 0),
+    sips: rows.map((x) => ({ scheme: x.scheme, monthlyRupees: r(x.amount), nextDate: x.next })),
+  };
 }
 
-export async function readInsurance(userId: string): Promise<ReadView> {
-  const rows = await db
-    .select()
-    .from(insurancePolicies)
-    .where(and(eq(insurancePolicies.userId, userId), eq(insurancePolicies.status, 'ACTIVE')));
-  const cover = rows.reduce((s, r) => s + Number(r.sumAssured ?? 0), 0);
-  const title = rows.length ? `Insurance policies (cover ${inr(cover)})` : 'Insurance policies';
-  return view(
-    title,
-    rows.map(
-      (r) =>
-        `• ${r.insurer} ${r.policyNumber ?? ''} (${r.policyType}) — premium ${inr(Number(r.premiumAmount ?? 0))}` +
-        (r.nextPremiumDueDate ? `, next ${r.nextPremiumDueDate}` : ''),
-    ),
-    undefined,
-    'No active policies.',
-  );
+export async function readInsurance(userId: string) {
+  const rows = await db.select().from(insurancePolicies).where(and(eq(insurancePolicies.userId, userId), eq(insurancePolicies.status, 'ACTIVE')));
+  return {
+    title: 'Insurance policies',
+    totalCoverRupees: rows.reduce((s, p) => s + r(p.sumAssured), 0),
+    policies: rows.map((p) => ({
+      insurer: p.insurer,
+      policyNumber: p.policyNumber,
+      type: p.policyType,
+      premiumRupees: r(p.premiumAmount),
+      premiumFrequency: p.premiumFrequency,
+      nextDueDate: p.nextPremiumDueDate,
+      sumAssuredRupees: r(p.sumAssured),
+    })),
+  };
 }
 
-export async function readChitFunds(userId: string): Promise<ReadView> {
-  const rows = await db
-    .select()
-    .from(chitFunds)
-    .where(and(eq(chitFunds.userId, userId), eq(chitFunds.status, 'ACTIVE')));
-  return view(
-    'Chit funds',
-    rows.map(
-      (r) =>
-        `• ${r.schemeName}${r.foremanName ? ` (${r.foremanName})` : ''}: ${inr(Number(r.monthlyInstallment ?? 0))}/mo` +
-        `${r.nextDueDate ? `, next ${r.nextDueDate}` : ''}${r.xirr != null ? ` · XIRR ${r.xirr.toFixed(1)}%` : ''}`,
-    ),
-    undefined,
-    'No active chit funds.',
-  );
+export async function readChitFunds(userId: string) {
+  const rows = await db.select().from(chitFunds).where(and(eq(chitFunds.userId, userId), eq(chitFunds.status, 'ACTIVE')));
+  return {
+    title: 'Chit funds',
+    chits: rows.map((c) => ({
+      scheme: c.schemeName,
+      foreman: c.foremanName,
+      monthlyRupees: r(c.monthlyInstallment),
+      nextDueDate: c.nextDueDate,
+      netContributionRupees: r(c.netContribution),
+      xirrPct: c.xirr,
+    })),
+  };
 }
 
-export async function readLiabilities(userId: string): Promise<ReadView> {
-  const rows = await db
-    .select()
-    .from(liabilities)
-    .where(and(eq(liabilities.userId, userId), eq(liabilities.status, 'ACTIVE')))
-    .orderBy(desc(liabilities.currentBalance));
-  const total = rows.reduce((s, r) => s + Number(r.currentBalance ?? 0), 0);
-  return view(
-    'Loans & cards (outstanding)',
-    rows.map(
-      (r) =>
-        `• ${r.name} (${r.type}): ${inr(Number(r.currentBalance ?? 0))}` +
-        (Number(r.monthlyEmi ?? 0) > 0 ? ` — EMI ${inr(Number(r.monthlyEmi))}` : '') +
-        (r.nextPaymentDate ? `, due ${r.nextPaymentDate}` : ''),
-    ),
-    total,
-    'No active liabilities.',
-  );
+export async function readLiabilities(userId: string) {
+  const rows = await db.select().from(liabilities).where(and(eq(liabilities.userId, userId), eq(liabilities.status, 'ACTIVE'))).orderBy(desc(liabilities.currentBalance));
+  return {
+    title: 'Loans & credit cards',
+    totalOutstandingRupees: rows.reduce((s, l) => s + r(l.currentBalance), 0),
+    liabilities: rows.map((l) => ({ name: l.name, type: l.type, outstandingRupees: r(l.currentBalance), emiRupees: r(l.monthlyEmi), nextPaymentDate: l.nextPaymentDate })),
+  };
 }
 
-export async function readNps(userId: string): Promise<ReadView> {
+export async function readNps(userId: string) {
   const rows = await db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId));
-  const total = await assetClassCurrentValuePaisa('nps', userId);
-  return view(
-    'NPS',
-    rows.map((r) => `• ${r.tier ?? 'NPS'}: ${inr(Number(r.totalValue ?? 0))}`),
-    total,
-    'No NPS account.',
-  );
+  return {
+    title: 'NPS',
+    totalRupees: r(await assetClassCurrentValuePaisa('nps', userId)),
+    accounts: rows.map((n) => ({ tier: n.tier, valueRupees: r(n.totalValue) })),
+  };
 }
 
-export async function readProvidentFund(userId: string): Promise<ReadView> {
+export async function readProvidentFund(userId: string) {
   const rows = await db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId));
-  const total = await assetClassCurrentValuePaisa('pf', userId);
-  return view(
-    'Provident Fund',
-    rows.map((r) => `• ${r.accountType}: ${inr(Number(r.totalBalance ?? 0))}`),
-    total,
-    'No PF/PPF account.',
-  );
+  return {
+    title: 'Provident fund (EPF/PPF/VPF)',
+    totalRupees: r(await assetClassCurrentValuePaisa('pf', userId)),
+    accounts: rows.map((e) => ({ type: e.accountType, balanceRupees: r(e.totalBalance) })),
+  };
 }
 
-export async function readRealEstate(userId: string): Promise<ReadView> {
+export async function readRealEstate(userId: string) {
   const rows = await db.select().from(realEstate).where(eq(realEstate.userId, userId));
-  const total = await assetClassCurrentValuePaisa('realEstate', userId);
-  return view(
-    'Real estate',
-    rows.map(
-      (r) =>
-        `• ${r.propertyName} (${r.type}): ${inr(Number(r.currentValuation ?? 0))}` +
-        (Number(r.monthlyRent ?? 0) > 0 ? ` — rent ${inr(Number(r.monthlyRent))}/mo` : ''),
-    ),
-    total,
-    'No properties.',
-  );
+  return {
+    title: 'Real estate',
+    totalRupees: r(await assetClassCurrentValuePaisa('realEstate', userId)),
+    properties: rows.map((p) => ({ name: p.propertyName, type: p.type, valuationRupees: r(p.currentValuation), monthlyRentRupees: r(p.monthlyRent) })),
+  };
 }
 
-export async function readForex(userId: string): Promise<ReadView> {
+export async function readForex(userId: string) {
   const rows = await db.select().from(forexDeposits).where(and(eq(forexDeposits.userId, userId), eq(forexDeposits.status, 'ACTIVE')));
-  if (rows.length === 0) return view('Forex deposits', [], 0, 'No forex deposits.');
-  const codes = [...new Set(rows.map((r) => r.currencyCode))];
-  const rates = await getFxRatesToInr(codes);
-  let totalPaisa = 0;
-  const lines = rows.map((r) => {
-    const amt = parseFloat(r.amountInCurrency);
-    const rate = rates[r.currencyCode];
-    const inrPaisa = rate ? Math.round(amt * rate * 100) : 0;
-    totalPaisa += inrPaisa;
-    return `• ${r.bankName ?? r.currencyCode}: ${amt.toLocaleString('en-IN')} ${r.currencyCode}` + (rate ? ` ≈ ${inr(inrPaisa)}` : ' (rate n/a)');
-  });
-  return view('Forex deposits', lines, totalPaisa);
+  if (rows.length === 0) return { title: 'Forex deposits', deposits: [] as unknown[] };
+  const rates = await getFxRatesToInr([...new Set(rows.map((x) => x.currencyCode))]);
+  return {
+    title: 'Forex deposits',
+    deposits: rows.map((x) => {
+      const amt = parseFloat(x.amountInCurrency);
+      const rate = rates[x.currencyCode];
+      return { bank: x.bankName, currency: x.currencyCode, amount: amt, inrRupees: rate ? Math.round(amt * rate) : null, maturityDate: x.maturityDate };
+    }),
+  };
 }
 
-export async function readCapitalGains(userId: string): Promise<ReadView> {
-  const fy = getCurrentFinancialYear();
-  const r = await fetchCapitalGains({ userId, fy } as Parameters<typeof fetchCapitalGains>[0]);
-  const lines = [
-    `• LTCG: ${inr(r.totals.ltcgGainPaisa)}`,
-    `• STCG: ${inr(r.totals.stcgGainPaisa)}`,
-    `• Exemptions: ${inr(r.totals.totalExemptionPaisa)}`,
-    `• Taxable: ${inr(r.totals.totalTaxablePaisa)}`,
-    `• Est. tax: ${inr(r.totals.totalTaxPaisa)}`,
-  ];
-  const n = r.ltcg.length + r.stcg.length;
-  return view(`Capital gains — FY ${fy} (${n} sales)`, lines, undefined, `No capital gains recorded for FY ${fy}.`);
+// ── Tax / gains / spending ──────────────────────────────────────────────
+export async function readCapitalGains(userId: string) {
+  const fy = isoTax();
+  const c = await fetchCapitalGains({ userId, fy } as Parameters<typeof fetchCapitalGains>[0]);
+  return {
+    title: `Capital gains, FY ${fy}`,
+    fy,
+    ltcgRupees: r(c.totals.ltcgGainPaisa),
+    stcgRupees: r(c.totals.stcgGainPaisa),
+    exemptionsRupees: r(c.totals.totalExemptionPaisa),
+    taxableRupees: r(c.totals.totalTaxablePaisa),
+    estTaxRupees: r(c.totals.totalTaxPaisa),
+    salesCount: c.ltcg.length + c.stcg.length,
+  };
 }
 
-export async function readSpending(userId: string): Promise<ReadView> {
+export async function readSpending(userId: string) {
   const period = dateToPeriod(new Date().toISOString());
   const rows = await db
     .select({ name: budgetCategories.name, planned: budgetEntries.plannedAmount, actual: budgetEntries.actualAmount, type: budgetCategories.type })
     .from(budgetEntries)
     .innerJoin(budgetCategories, eq(budgetEntries.categoryId, budgetCategories.id))
     .where(and(eq(budgetEntries.userId, userId), eq(budgetEntries.period, period)));
-  const expense = rows.filter((r) => r.type === 'EXPENSE');
-  const spent = expense.reduce((s, r) => s + Number(r.actual ?? 0), 0);
-  const planned = expense.reduce((s, r) => s + Number(r.planned ?? 0), 0);
-  const lines = expense
-    .filter((r) => Number(r.actual ?? 0) > 0 || Number(r.planned ?? 0) > 0)
-    .sort((a, b) => Number(b.actual ?? 0) - Number(a.actual ?? 0))
-    .slice(0, 40)
-    .map((r) => `• ${r.name}: ${inr(Number(r.actual ?? 0))} / ${inr(Number(r.planned ?? 0))}`);
-  return view(
-    `Spending this month (${inr(spent)} of ${inr(planned)} planned)`,
-    lines,
-    undefined,
-    'No budget entries for this month.',
-  );
+  const expense = rows.filter((x) => x.type === 'EXPENSE');
+  return {
+    title: 'Spending vs budget this month',
+    period,
+    spentRupees: expense.reduce((s, x) => s + r(x.actual), 0),
+    plannedRupees: expense.reduce((s, x) => s + r(x.planned), 0),
+    categories: expense
+      .filter((x) => Number(x.actual ?? 0) > 0 || Number(x.planned ?? 0) > 0)
+      .sort((a, b) => Number(b.actual ?? 0) - Number(a.actual ?? 0))
+      .map((x) => ({ category: x.name, spentRupees: r(x.actual), plannedRupees: r(x.planned) })),
+  };
 }
 
-export async function readGoals(userId: string): Promise<ReadView> {
-  const goals = await db
-    .select()
-    .from(financialGoals)
-    .where(and(eq(financialGoals.userId, userId), eq(financialGoals.isActive, true)));
-  if (goals.length === 0) return view('Financial goals', [], undefined, 'No active goals.');
+export async function readTax(userId: string) {
+  const fy = isoTax();
+  const c = await computeFyTaxComparison(userId, fy);
+  if (isComputeError(c)) return { title: `Income tax, FY ${fy}`, fy, error: c.error };
+  return {
+    title: `Income tax, FY ${fy}`,
+    fy,
+    grossIncomeRupees: r(c.income.gross),
+    deductionsOldRupees: r(c.deductions.oldRegime),
+    deductionsNewRupees: r(c.deductions.newRegime),
+    taxOldRegimeRupees: r((c.comparison.old as { totalTaxPaisa?: number }).totalTaxPaisa ?? 0),
+    taxNewRegimeRupees: r((c.comparison.new as { totalTaxPaisa?: number }).totalTaxPaisa ?? 0),
+    recommendedRegime: c.comparison.recommendation,
+    savingsRupees: r(c.comparison.savingsPaisa),
+  };
+}
 
-  const [ctx, allEvents] = await Promise.all([
-    loadCorpusContext(userId),
-    db.select().from(cashflowEvents).where(eq(cashflowEvents.userId, userId)),
-  ]);
-  const contribEvents = allEvents.map((e) => ({
-    amountPaisa: e.amountPaisa,
-    frequency: e.frequency,
-    goalId: e.goalId ?? null,
-    sourceKind: e.sourceKind ?? null,
-    autoDerived: e.autoDerived ?? false,
-  }));
+// ── Planning ────────────────────────────────────────────────────────────
+export async function readGoals(userId: string) {
+  const goals = await db.select().from(financialGoals).where(and(eq(financialGoals.userId, userId), eq(financialGoals.isActive, true)));
+  if (goals.length === 0) return { title: 'Financial goals', goals: [] as unknown[] };
+  const [ctx, allEvents] = await Promise.all([loadCorpusContext(userId), db.select().from(cashflowEvents).where(eq(cashflowEvents.userId, userId))]);
+  const contribEvents = allEvents.map((e) => ({ amountPaisa: e.amountPaisa, frequency: e.frequency, goalId: e.goalId ?? null, sourceKind: e.sourceKind ?? null, autoDerived: e.autoDerived ?? false }));
   const today = new Date().toISOString().slice(0, 10);
-
-  const lines = goals.map((goal) => {
-    try {
-      const initialCorpusPaisa = corpusForGoal(ctx, goal.id);
-      const yearlyContributionPaisa = yearlyContributionForGoal(ctx, goal.id, contribEvents);
-      const rb = weightedReturnForGoal(ctx, goal.id);
-      const projGoal = rb.bands.length > 0 ? { ...goal, expectedReturnPct: rb.weightedReturnPct } : goal;
-      const p = projectGoal({
-        goal: projGoal,
-        initialCorpusPaisa,
-        yearlyContributionPaisa,
-        earmarkedEvents: allEvents.filter((e) => e.goalId === goal.id && e.frequency === 'ONE_TIME'),
-        today,
-        marginalRatePct: 0,
-      });
-      const status = p.fundedAtTargetDate
-        ? 'on track ✅'
-        : p.monthlyContributionRequiredPaisa != null
-          ? `shortfall — needs ${inr(p.monthlyContributionRequiredPaisa)}/mo from today`
-          : 'behind';
-      return (
-        `• ${goal.name}: target ${inr(Number(goal.targetAmount ?? 0))}${goal.targetDate ? ` by ${goal.targetDate}` : ''}` +
-        ` · saved ${inr(initialCorpusPaisa)} · contributing ${inr(yearlyContributionPaisa)}/yr · ${status}`
-      );
-    } catch {
-      return `• ${goal.name}: target ${inr(Number(goal.targetAmount ?? 0))}${goal.targetDate ? ` by ${goal.targetDate}` : ''} (projection unavailable)`;
-    }
-  });
-  return view('Financial goals', lines);
+  return {
+    title: 'Financial goals',
+    goals: goals.map((goal) => {
+      try {
+        const initialCorpusPaisa = corpusForGoal(ctx, goal.id);
+        const yearlyContributionPaisa = yearlyContributionForGoal(ctx, goal.id, contribEvents);
+        const rb = weightedReturnForGoal(ctx, goal.id);
+        const projGoal = rb.bands.length > 0 ? { ...goal, expectedReturnPct: rb.weightedReturnPct } : goal;
+        const p = projectGoal({
+          goal: projGoal,
+          initialCorpusPaisa,
+          yearlyContributionPaisa,
+          earmarkedEvents: allEvents.filter((e) => e.goalId === goal.id && e.frequency === 'ONE_TIME'),
+          today,
+          marginalRatePct: 0,
+        });
+        return {
+          name: goal.name,
+          targetRupees: r(goal.targetAmount),
+          targetDate: goal.targetDate,
+          savedRupees: r(initialCorpusPaisa),
+          yearlyContributionRupees: r(yearlyContributionPaisa),
+          onTrack: p.fundedAtTargetDate,
+          monthlyNeededRupees: p.monthlyContributionRequiredPaisa != null ? r(p.monthlyContributionRequiredPaisa) : null,
+        };
+      } catch {
+        return { name: goal.name, targetRupees: r(goal.targetAmount), targetDate: goal.targetDate, projectionError: true };
+      }
+    }),
+  };
 }
 
-export async function readRetirement(userId: string): Promise<ReadView> {
-  const r = await fetchRetirementProjection({ userId } as Parameters<typeof fetchRetirementProjection>[0]);
-  if (!r.projection.length) return view('Retirement', [], undefined, 'No retirement plan set up.');
-  const a = r.assumptions;
-  const rupees = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
-  const assumptions =
-    `Plan: retire at ${a.targetAge} (now ${a.currentAge}), ${a.retirementDurationYears}-yr retirement · ` +
-    `monthly expense ${rupees(a.monthlyExpenseRupees)} · return ${a.expectedReturnPct}% (pre) / ${a.postRetirementReturnPct}% (post) · ` +
-    `inflation ${a.inflationPct}% · starting corpus ${inr(r.startingCorpusPaisa)}`;
-  const years = r.projection
-    .slice(0, 45)
-    .map(
-      (y) =>
-        `• ${y.year} (age ${y.age}): start ${inr(y.corpusStartPaisa)}, +contrib ${inr(y.contributionsPaisa)}, +returns ${inr(y.returnsPaisa)}, −withdraw ${inr(y.withdrawalsPaisa)} → end ${inr(y.corpusEndPaisa)}`,
-    );
-  return view('Retirement projection (year by year)', [assumptions, ...years]);
+export async function readRetirement(userId: string) {
+  const ret = await fetchRetirementProjection({ userId } as Parameters<typeof fetchRetirementProjection>[0]);
+  if (!ret.projection.length) return { title: 'Retirement', plan: null };
+  const a = ret.assumptions;
+  return {
+    title: 'Retirement plan & year-by-year projection',
+    assumptions: {
+      currentAge: a.currentAge,
+      retireAge: a.targetAge,
+      retirementYears: a.retirementDurationYears,
+      monthlyExpenseRupees: a.monthlyExpenseRupees, // already rupees
+      preRetirementReturnPct: a.expectedReturnPct,
+      postRetirementReturnPct: a.postRetirementReturnPct,
+      inflationPct: a.inflationPct,
+    },
+    startingCorpusRupees: r(ret.startingCorpusPaisa),
+    yearByYear: ret.projection.map((y) => ({
+      year: y.year,
+      age: y.age,
+      corpusStartRupees: r(y.corpusStartPaisa),
+      contributionsRupees: r(y.contributionsPaisa),
+      returnsRupees: r(y.returnsPaisa),
+      withdrawalsRupees: r(y.withdrawalsPaisa),
+      corpusEndRupees: r(y.corpusEndPaisa),
+    })),
+  };
+}
+
+// ── History / alerts / GST ──────────────────────────────────────────────
+export async function readNetWorthHistory(userId: string) {
+  const rows = await db
+    .select({ date: priceSnapshots.priceDate, price: priceSnapshots.price })
+    .from(priceSnapshots)
+    .where(and(eq(priceSnapshots.userId, userId), eq(priceSnapshots.source, 'NETWORTH_SNAPSHOT'), eq(priceSnapshots.assetSymbol, 'NET_WORTH')))
+    .orderBy(priceSnapshots.priceDate);
+  const nonZero = rows.filter((x) => Number(x.price) > 0); // drop empty leading snapshots
+  const series = nonZero.length ? nonZero : rows;
+  return { title: 'Net worth history', snapshots: series.map((x) => ({ date: x.date, netWorthRupees: r(x.price) })) };
+}
+
+export async function readAlerts(userId: string) {
+  const [rules, history] = await Promise.all([
+    db.select().from(alertRules).where(eq(alertRules.userId, userId)).orderBy(desc(alertRules.createdAt)),
+    db
+      .select({ ruleName: alertRules.name, message: alertHistory.message, sentAt: alertHistory.sentAt })
+      .from(alertHistory)
+      .leftJoin(alertRules, eq(alertHistory.ruleId, alertRules.id))
+      .where(eq(alertHistory.userId, userId))
+      .orderBy(desc(alertHistory.sentAt))
+      .limit(10),
+  ]);
+  return {
+    title: 'Alerts',
+    rules: rules.map((x) => ({ name: x.name, category: x.category, enabled: x.isEnabled })),
+    recentlyTriggered: history.map((h) => ({ date: h.sentAt ? new Date(h.sentAt).toISOString().slice(0, 10) : null, message: h.message })),
+  };
+}
+
+export async function readGst(userId: string) {
+  const period = dateToPeriod(new Date().toISOString());
+  const [profile, sales, purch] = await Promise.all([
+    db.select().from(businessProfile).where(eq(businessProfile.userId, userId)).limit(1),
+    db.select().from(invoices).where(and(eq(invoices.userId, userId), eq(invoices.returnPeriod, period), eq(invoices.status, 'FINAL'))),
+    db.select().from(purchaseInvoices).where(and(eq(purchaseInvoices.userId, userId), eq(purchaseInvoices.returnPeriod, period), eq(purchaseInvoices.itcEligible, true))),
+  ]);
+  if (profile.length === 0) return { title: 'GST', configured: false };
+  const taxP = (i: { cgstAmount: number | null; sgstAmount: number | null; igstAmount: number | null; cessAmount: number | null }) =>
+    Number(i.cgstAmount ?? 0) + Number(i.sgstAmount ?? 0) + Number(i.igstAmount ?? 0) + Number(i.cessAmount ?? 0);
+  const outTax = sales.reduce((s, i) => s + taxP(i), 0);
+  const itc = purch.reduce((s, p) => s + taxP(p), 0);
+  return {
+    title: `GST, return period ${period}`,
+    period,
+    salesCount: sales.length,
+    purchaseCount: purch.length,
+    taxableSalesRupees: r(sales.reduce((s, i) => s + Number(i.taxableAmount ?? 0), 0)),
+    outputGstRupees: r(outTax),
+    itcRupees: r(itc),
+    netPayableRupees: r(Math.max(0, outTax - itc)),
+  };
 }
