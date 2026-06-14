@@ -3144,3 +3144,99 @@ export type NewProjectionEntry = typeof projectionEntries.$inferInsert;
 
 export type CarryforwardBalance = typeof carryforwardBalances.$inferSelect;
 export type NewCarryforwardBalance = typeof carryforwardBalances.$inferInsert;
+
+// ============================================================================
+// Telegram assistant (two-way) — see docs/PLAN-telegram-assistant.md
+// ============================================================================
+
+/** Durable inbound queue. Each Telegram update is persisted here BEFORE the
+ *  getUpdates offset is acked, so nothing fetched is ever lost. Bot/instance-
+ *  level (the sender's user is resolved during processing), not user-scoped. */
+export const telegramInbox = pgTable('telegram_inbox', {
+  id: serial('id').primaryKey(),
+  updateId: bigint('update_id', { mode: 'number' }).notNull(),
+  chatId: text('chat_id').notNull(),
+  messageId: bigint('message_id', { mode: 'number' }),
+  fromUsername: text('from_username'),
+  text: text('text'),
+  receivedAt: timestamp('received_at', { mode: 'date' }).defaultNow(),
+  status: text('status').notNull().default('pending'), // pending|processing|done|error
+  processedAt: timestamp('processed_at', { mode: 'date' }),
+  error: text('error'),
+}, (t) => [
+  uniqueIndex('telegram_inbox_update_id_unique').on(t.updateId),
+  index('telegram_inbox_status_idx').on(t.status),
+]);
+
+/** Durable outbound queue — replies/confirms survive a crash between deciding
+ *  and sending. A sender loop drains it with retry. */
+export const telegramOutbox = pgTable('telegram_outbox', {
+  id: serial('id').primaryKey(),
+  chatId: text('chat_id').notNull(),
+  kind: text('kind').notNull().default('reply'), // reply|confirm|notice
+  text: text('text').notNull(),
+  replyMarkup: jsonb('reply_markup'),            // inline keyboard for confirms
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  status: text('status').notNull().default('pending'), // pending|sent|error
+  sentAt: timestamp('sent_at', { mode: 'date' }),
+  error: text('error'),
+}, (t) => [
+  index('telegram_outbox_status_idx').on(t.status),
+]);
+
+/** Pending slot-fill / confirmation per chat (one active at a time). */
+export const telegramConversations = pgTable('telegram_conversations', {
+  chatId: text('chat_id').primaryKey(),
+  pendingCapability: text('pending_capability'),
+  collectedArgs: jsonb('collected_args'),
+  awaiting: text('awaiting'),       // a param name, or 'confirm'
+  pendingId: text('pending_id'),    // opaque id echoed back in the confirm callback
+  sourceMessageId: bigint('source_message_id', { mode: 'number' }), // for dedupe on confirm
+  expiresAt: timestamp('expires_at', { mode: 'date' }),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+});
+
+/** Audit log of every command + action. Also the dedupe source for
+ *  dataIntegrity=true writes (skip if (message_id, capability) already executed). */
+export const telegramCommandLog = pgTable('telegram_command_log', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  chatId: text('chat_id').notNull(),
+  messageId: bigint('message_id', { mode: 'number' }),
+  rawText: text('raw_text'),
+  route: text('route'),             // slash|llm
+  capabilityId: text('capability_id'),
+  args: jsonb('args'),
+  confirmed: boolean('confirmed').default(false),
+  executed: boolean('executed').default(false),
+  resultStatus: text('result_status'),  // ok|error|skipped-duplicate|rejected
+  resultSummary: text('result_summary'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (t) => [
+  index('telegram_command_log_user_idx').on(t.userId),
+  index('telegram_command_log_dedupe_idx').on(t.messageId, t.capabilityId),
+]);
+
+/** Per-user curation of which capabilities the assistant exposes + their
+ *  integrity flag. Overrides the code-registry defaults; absent row = default. */
+export const assistantApiSettings = pgTable('assistant_api_settings', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  capabilityId: text('capability_id').notNull(),
+  included: boolean('included').notNull().default(true),
+  dataIntegrity: boolean('data_integrity').notNull().default(false),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (t) => [
+  uniqueIndex('assistant_api_settings_user_cap_unique').on(t.userId, t.capabilityId),
+]);
+
+export type TelegramInbox = typeof telegramInbox.$inferSelect;
+export type NewTelegramInbox = typeof telegramInbox.$inferInsert;
+export type TelegramOutbox = typeof telegramOutbox.$inferSelect;
+export type NewTelegramOutbox = typeof telegramOutbox.$inferInsert;
+export type TelegramConversation = typeof telegramConversations.$inferSelect;
+export type NewTelegramConversation = typeof telegramConversations.$inferInsert;
+export type TelegramCommandLog = typeof telegramCommandLog.$inferSelect;
+export type NewTelegramCommandLog = typeof telegramCommandLog.$inferInsert;
+export type AssistantApiSetting = typeof assistantApiSettings.$inferSelect;
+export type NewAssistantApiSetting = typeof assistantApiSettings.$inferInsert;
