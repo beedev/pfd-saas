@@ -101,7 +101,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Tracked follow-ups (NOT part of this feature)
 
-- [ ] **Settings IA redesign** — group the ~12 Settings cards into sections/tabs; house the Assistant-APIs screen there.
+- [x] **Settings IA redesign** — done: tabbed Settings (Profile & Tax / Assistant / Projections / Data) via `SettingsTabs`; Assistant tab houses Telegram + Assistant APIs + Activity + OpenAI key.
 - [ ] **Always-on hosting** — same image on a DigitalOcean droplet; optional `getUpdates → webhook`.
 - [ ] **Two-stage routing** — domain-narrowing before the LLM when the registry grows large.
 
