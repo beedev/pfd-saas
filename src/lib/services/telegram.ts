@@ -130,6 +130,7 @@ export async function sendTelegramToUser(
 export async function sendTelegramToChatId(
   chatId: string | number,
   text: string,
+  replyMarkup?: unknown,
 ): Promise<TelegramSendResult> {
   const BOT_TOKEN = botToken();
   if (!BOT_TOKEN) {
@@ -146,6 +147,7 @@ export async function sendTelegramToChatId(
         text,
         parse_mode: 'Markdown',
         disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     });
     const result = (await res.json()) as { ok: boolean; description?: string };
@@ -198,6 +200,8 @@ export async function deleteTelegramWebhook(): Promise<void> {
 export interface TelegramInboundUpdate {
   update_id: number;
   message?: {
+    message_id?: number;
+    date?: number;
     chat?: { id?: number | string };
     from?: { username?: string | null };
     text?: string;

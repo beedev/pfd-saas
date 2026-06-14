@@ -41,6 +41,7 @@ const PUBLIC_PREFIXES = [
   '/help/', // static user-guide HTML — no user data, readable without login
   '/api/auth/',
   '/api/cron/', // cron endpoints gate on Authorization: Bearer <CRON_SECRET>
+  '/api/telegram/tick', // assistant heartbeat — Bearer <CRON_SECRET>, not session
   // Telegram bot posts here on /start; auth happens via the
   // X-Telegram-Bot-Api-Secret-Token header inside the route, not via
   // session cookie.
