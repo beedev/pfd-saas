@@ -28,6 +28,7 @@ import {
   readCapitalGains,
   readSpending,
   readGoals,
+  readRetirement,
 } from './reads';
 
 export interface CapParam {
@@ -183,7 +184,8 @@ export const CAPABILITIES: Capability[] = [
   { id: 'get_forex_deposits', summary: 'Foreign-currency deposits and their INR value', kind: 'read', dataIntegrity: false, slashCommand: '/forex', params: [], invoke: (u) => readForex(u) },
   { id: 'get_capital_gains', summary: 'Capital gains this financial year (LTCG/STCG and tax)', kind: 'read', dataIntegrity: false, slashCommand: '/gains', params: [], invoke: (u) => readCapitalGains(u) },
   { id: 'get_spending', summary: "This month's spending vs budget by category", kind: 'read', dataIntegrity: false, slashCommand: '/spend', params: [], invoke: (u) => readSpending(u) },
-  { id: 'get_goals', summary: 'Financial goals and funding status — target, amount saved, on-track, and monthly contribution needed (e.g. retirement, child education/pilot training, marriage, emergency fund)', kind: 'read', dataIntegrity: false, slashCommand: '/goals', params: [], invoke: (u) => readGoals(u) },
+  { id: 'get_goals', summary: 'Named savings goals and their funding status — target, amount saved, on-track, monthly contribution needed (e.g. child education/pilot training, marriage, emergency fund). NOT retirement.', kind: 'read', dataIntegrity: false, slashCommand: '/goals', params: [], invoke: (u) => readGoals(u) },
+  { id: 'get_retirement', summary: 'Retirement plan and year-by-year corpus projection — retirement age, monthly expense, corpus growth/withdrawals/returns each year, whether the corpus lasts. Use for any retirement question.', kind: 'read', dataIntegrity: false, slashCommand: '/retirement', params: [], invoke: (u) => readRetirement(u) },
 ];
 
 export const findCapability = (id: string) => CAPABILITIES.find((c) => c.id === id);

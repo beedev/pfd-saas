@@ -28,6 +28,7 @@ import {
 import { assetClassCurrentValuePaisa } from '@/lib/assets/registry';
 import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 import { fetchCapitalGains } from '@/lib/reports/data/fetchCapitalGains';
+import { fetchRetirementProjection } from '@/lib/reports/data/fetchRetirementProjection';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { dateToPeriod } from '@/lib/finance/budget-sync';
 import { loadCorpusContext, corpusForGoal, yearlyContributionForGoal, weightedReturnForGoal } from '@/lib/finance/goal-corpus';
@@ -294,4 +295,22 @@ export async function readGoals(userId: string): Promise<ReadView> {
     }
   });
   return view('Financial goals', lines);
+}
+
+export async function readRetirement(userId: string): Promise<ReadView> {
+  const r = await fetchRetirementProjection({ userId } as Parameters<typeof fetchRetirementProjection>[0]);
+  if (!r.projection.length) return view('Retirement', [], undefined, 'No retirement plan set up.');
+  const a = r.assumptions;
+  const rupees = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+  const assumptions =
+    `Plan: retire at ${a.targetAge} (now ${a.currentAge}), ${a.retirementDurationYears}-yr retirement · ` +
+    `monthly expense ${rupees(a.monthlyExpenseRupees)} · return ${a.expectedReturnPct}% (pre) / ${a.postRetirementReturnPct}% (post) · ` +
+    `inflation ${a.inflationPct}% · starting corpus ${inr(r.startingCorpusPaisa)}`;
+  const years = r.projection
+    .slice(0, 45)
+    .map(
+      (y) =>
+        `• ${y.year} (age ${y.age}): start ${inr(y.corpusStartPaisa)}, +contrib ${inr(y.contributionsPaisa)}, +returns ${inr(y.returnsPaisa)}, −withdraw ${inr(y.withdrawalsPaisa)} → end ${inr(y.corpusEndPaisa)}`,
+    );
+  return view('Retirement projection (year by year)', [assumptions, ...years]);
 }
