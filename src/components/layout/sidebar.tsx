@@ -414,10 +414,13 @@ export function Sidebar({
               type="button"
               onClick={() => toggleSection(section.section)}
               aria-expanded={isOpen}
-              className="group flex w-full items-center rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 transition-colors hover:bg-gray-800/60 hover:text-gray-300"
+              className={cn(
+                'group flex w-full items-center rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors hover:bg-gray-800/60',
+                isOpen ? 'text-white' : 'text-gray-400 hover:text-gray-200',
+              )}
             >
               {isOpen ? (
-                <ChevronDown className="mr-1.5 h-3.5 w-3.5 flex-shrink-0 text-gray-500 group-hover:text-gray-300" />
+                <ChevronDown className="mr-1.5 h-3.5 w-3.5 flex-shrink-0 text-gray-200" />
               ) : (
                 <ChevronRight className="mr-1.5 h-3.5 w-3.5 flex-shrink-0 text-gray-500 group-hover:text-gray-300" />
               )}
