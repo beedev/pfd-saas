@@ -18,8 +18,34 @@ import { enqueueOutbox } from './send';
 import { parseSlash } from './slash';
 import { CAPABILITIES, findCapability } from './registry';
 import { formatResult } from './format';
+import { routeWithLLM } from './llm';
 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
+
+/** Enqueue a write confirmation + persist pending state (shared by the slash
+ *  and LLM paths). */
+async function enqueueConfirm(
+  chatId: string,
+  capabilityId: string,
+  args: Record<string, unknown>,
+  sourceMessageId: number | null,
+): Promise<void> {
+  const cap = findCapability(capabilityId);
+  const summary = cap?.summary ?? capabilityId;
+  const preview =
+    `*Confirm:* ${summary}\n` +
+    Object.entries(args).map(([k, v]) => `• ${k}: ${v}`).join('\n') +
+    `\n\nReply *yes* to confirm, anything else cancels.`;
+  const expiresAt = new Date(Date.now() + CONFIRM_TTL_MS);
+  await db
+    .insert(telegramConversations)
+    .values({ chatId, pendingCapability: capabilityId, collectedArgs: args as never, awaiting: 'confirm', sourceMessageId, expiresAt })
+    .onConflictDoUpdate({
+      target: telegramConversations.chatId,
+      set: { pendingCapability: capabilityId, collectedArgs: args as never, awaiting: 'confirm', sourceMessageId, expiresAt, updatedAt: new Date() },
+    });
+  await enqueueOutbox(chatId, preview, { kind: 'confirm' });
+}
 
 interface LogInput {
   userId?: string | null;
@@ -157,9 +183,35 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
     return;
   }
 
-  // 4. slash route (Phase 0 = slash only)
+  // 4. free text → LLM route (Phase 2). Only dataIntegrity=false capabilities
+  //    are LLM-reachable; integrity writes always require a slash command.
   if (!text.startsWith('/')) {
-    await enqueueOutbox(chatId, 'Send a command — try `/networth` or `/paid <card>`. (Free-text chat arrives in a later phase.)', { kind: 'notice' });
+    const route = await routeWithLLM(text);
+    if (!route.capabilityId) {
+      await enqueueOutbox(chatId, route.clarify || ('I didn’t catch a request.\n' + helpText()), { kind: 'notice' });
+      await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', resultStatus: 'no-match' });
+      return;
+    }
+    const cap = findCapability(route.capabilityId);
+    if (!cap || cap.dataIntegrity) {
+      await enqueueOutbox(chatId, 'That action needs a slash command for safety. Try /help.', { kind: 'notice' });
+      await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: route.capabilityId, resultStatus: 'blocked-integrity' });
+      return;
+    }
+    const miss = cap.params.filter((p) => p.required && route.args[p.name] == null);
+    if (miss.length) {
+      await enqueueOutbox(chatId, `I need: ${miss.map((p) => p.name).join(', ')}. For now, try ${cap.slashCommand ?? 'a slash command'}.`, { kind: 'notice' });
+      await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: cap.id, resultStatus: 'missing-params' });
+      return;
+    }
+    if (cap.kind === 'write') {
+      await enqueueConfirm(chatId, cap.id, route.args, row.messageId ?? null);
+      await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: cap.id, args: route.args, resultStatus: 'awaiting-confirm' });
+      return;
+    }
+    const result = await cap.invoke(userId, route.args);
+    await enqueueOutbox(chatId, formatResult(cap.id, result));
+    await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: cap.id, args: route.args, executed: true, resultStatus: 'ok' });
     return;
   }
   const parsed = parseSlash(text);
@@ -179,19 +231,7 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
 
   // 6. write → confirm
   if (capability.kind === 'write') {
-    const preview =
-      `*Confirm:* ${capability.summary}\n` +
-      Object.entries(args).map(([k, v]) => `• ${k}: ${v}`).join('\n') +
-      `\n\nReply *yes* to confirm, anything else cancels.`;
-    const expiresAt = new Date(Date.now() + CONFIRM_TTL_MS);
-    await db
-      .insert(telegramConversations)
-      .values({ chatId, pendingCapability: capability.id, collectedArgs: args as never, awaiting: 'confirm', sourceMessageId: row.messageId ?? null, expiresAt })
-      .onConflictDoUpdate({
-        target: telegramConversations.chatId,
-        set: { pendingCapability: capability.id, collectedArgs: args as never, awaiting: 'confirm', sourceMessageId: row.messageId ?? null, expiresAt, updatedAt: new Date() },
-      });
-    await enqueueOutbox(chatId, preview, { kind: 'confirm' });
+    await enqueueConfirm(chatId, capability.id, args, row.messageId ?? null);
     await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'slash', capabilityId: capability.id, args, resultStatus: 'awaiting-confirm' });
     return;
   }
