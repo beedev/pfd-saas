@@ -22,12 +22,16 @@ import {
   forexDeposits,
   budgetEntries,
   budgetCategories,
+  financialGoals,
+  cashflowEvents,
 } from '@/db';
 import { assetClassCurrentValuePaisa } from '@/lib/assets/registry';
 import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 import { fetchCapitalGains } from '@/lib/reports/data/fetchCapitalGains';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 import { dateToPeriod } from '@/lib/finance/budget-sync';
+import { loadCorpusContext, corpusForGoal, yearlyContributionForGoal, weightedReturnForGoal } from '@/lib/finance/goal-corpus';
+import { projectGoal } from '@/lib/finance/goal-projection';
 
 export interface ReadView {
   /** marks the object as a generic read view for formatResult */
@@ -240,4 +244,54 @@ export async function readSpending(userId: string): Promise<ReadView> {
     undefined,
     'No budget entries for this month.',
   );
+}
+
+export async function readGoals(userId: string): Promise<ReadView> {
+  const goals = await db
+    .select()
+    .from(financialGoals)
+    .where(and(eq(financialGoals.userId, userId), eq(financialGoals.isActive, true)));
+  if (goals.length === 0) return view('Financial goals', [], undefined, 'No active goals.');
+
+  const [ctx, allEvents] = await Promise.all([
+    loadCorpusContext(userId),
+    db.select().from(cashflowEvents).where(eq(cashflowEvents.userId, userId)),
+  ]);
+  const contribEvents = allEvents.map((e) => ({
+    amountPaisa: e.amountPaisa,
+    frequency: e.frequency,
+    goalId: e.goalId ?? null,
+    sourceKind: e.sourceKind ?? null,
+    autoDerived: e.autoDerived ?? false,
+  }));
+  const today = new Date().toISOString().slice(0, 10);
+
+  const lines = goals.map((goal) => {
+    try {
+      const initialCorpusPaisa = corpusForGoal(ctx, goal.id);
+      const yearlyContributionPaisa = yearlyContributionForGoal(ctx, goal.id, contribEvents);
+      const rb = weightedReturnForGoal(ctx, goal.id);
+      const projGoal = rb.bands.length > 0 ? { ...goal, expectedReturnPct: rb.weightedReturnPct } : goal;
+      const p = projectGoal({
+        goal: projGoal,
+        initialCorpusPaisa,
+        yearlyContributionPaisa,
+        earmarkedEvents: allEvents.filter((e) => e.goalId === goal.id && e.frequency === 'ONE_TIME'),
+        today,
+        marginalRatePct: 0,
+      });
+      const status = p.fundedAtTargetDate
+        ? 'on track ✅'
+        : p.monthlyContributionRequiredPaisa != null
+          ? `shortfall — needs ${inr(p.monthlyContributionRequiredPaisa)}/mo from today`
+          : 'behind';
+      return (
+        `• ${goal.name}: target ${inr(Number(goal.targetAmount ?? 0))}${goal.targetDate ? ` by ${goal.targetDate}` : ''}` +
+        ` · saved ${inr(initialCorpusPaisa)} · contributing ${inr(yearlyContributionPaisa)}/yr · ${status}`
+      );
+    } catch {
+      return `• ${goal.name}: target ${inr(Number(goal.targetAmount ?? 0))}${goal.targetDate ? ` by ${goal.targetDate}` : ''} (projection unavailable)`;
+    }
+  });
+  return view('Financial goals', lines);
 }
