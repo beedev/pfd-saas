@@ -14,15 +14,15 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   - Output: `@pfdsaasbot` token configured on the always-on instance; digest/alerts also send via it.
   - Verify: `getMe` returns `pfdsaasbot`; a test digest arrives in your chat.
 
-- [ ] **0.2 DB tables**
+- [x] **0.2 DB tables**
   - Output: migration adding `telegram_inbox`, `telegram_outbox`, `telegram_conversations`, `telegram_command_log`, `assistant_api_settings` (schema per spec §6).
   - Verify: migration applies on a fresh container; columns present.
 
-- [ ] **0.3 Poller loop (scheduler)**
+- [x] **0.3 Poller loop (scheduler)**
   - Output: a loop that `getUpdates(offset)` → inserts each update into `telegram_inbox` → **acks offset only after insert**; runs only on the always-on instance.
   - Verify: send 3 messages while the worker is paused → 3 inbox rows, offset advanced, no dupes; restart mid-batch → no loss/dupe.
 
-- [ ] **0.4 Sender (outbox drainer)**
+- [x] **0.4 Sender (outbox drainer)**
   - Output: loop that sends `telegram_outbox` pending rows (retry on failure), marks sent.
   - Verify: enqueue a row → message arrives; kill Telegram reachability → row stays pending → retried on recovery.
 
