@@ -324,6 +324,33 @@ else
   echo "[entrypoint] In-container scheduler OFF (DISABLE_CRON=true) — drive /api/cron/tick externally"
 fi
 
+# ─── Telegram assistant ticker (Phase 0.1) ───────────────────────────
+# Separate, faster loop than the cron scheduler so the two-way assistant
+# feels responsive: POSTs /api/telegram/tick (poll inbound → process inbox
+# → drain outbox) every TELEGRAM_TICK_SECONDS (default 5). Independent of
+# DISABLE_CRON; opt out with DISABLE_TELEGRAM_TICK=true. Harmless with no
+# bot token (getUpdates no-ops). SINGLE-CONSUMER: this is the only
+# getUpdates consumer for the bot — don't also run an external poller.
+if [ "${DISABLE_TELEGRAM_TICK:-false}" != "true" ]; then
+  TELEGRAM_TICK_SECONDS=${TELEGRAM_TICK_SECONDS:-5}
+  echo "[entrypoint] Telegram assistant ticker ON (every ${TELEGRAM_TICK_SECONDS}s)"
+  (
+    until wget --quiet --tries=1 --spider http://127.0.0.1:3000/api/health 2>/dev/null; do
+      sleep 2
+    done
+    echo "[telegram] app is up — ticking /api/telegram/tick every ${TELEGRAM_TICK_SECONDS}s"
+    while true; do
+      wget --quiet --tries=1 --timeout=60 -O /dev/null \
+        --header="Authorization: Bearer ${CRON_SECRET}" \
+        --post-data='' \
+        http://127.0.0.1:3000/api/telegram/tick 2>/dev/null || true
+      sleep "${TELEGRAM_TICK_SECONDS}"
+    done
+  ) &
+else
+  echo "[entrypoint] Telegram assistant ticker OFF (DISABLE_TELEGRAM_TICK=true)"
+fi
+
 # ─── Start Next.js in foreground ─────────────────────────────────────
 echo "[entrypoint] Starting Next.js on http://0.0.0.0:3000..."
 exec node server.js

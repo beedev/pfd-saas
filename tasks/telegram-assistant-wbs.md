@@ -10,9 +10,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Phase 0 — Plumbing (no LLM). Goal: a provably reliable slash-command bot.
 
-- [ ] **0.1 Dedicated bot wiring**
-  - Output: `@pfdsaasbot` token configured on the always-on instance; digest/alerts also send via it.
-  - Verify: `getMe` returns `pfdsaasbot`; a test digest arrives in your chat.
+- [x] **0.1 Tick loop wired into the scheduler**
+  - Output: `docker-entrypoint.sh` now runs a dedicated **telegram ticker** — a backgrounded loop POSTing `/api/telegram/tick` every `TELEGRAM_TICK_SECONDS` (default 5), independent of `DISABLE_CRON`, opt-out via `DISABLE_TELEGRAM_TICK`. Single getUpdates consumer (don't also run an external poller). Bot is `@pfdsaasbot`.
+  - Verify: ✅ `getMe`→pfdsaasbot; ✅ container logs "Telegram assistant ticker ON (every 5s)"; ✅ a real "what is my networth" was polled+answered with no manual tick.
 
 - [x] **0.2 DB tables**
   - Output: migration adding `telegram_inbox`, `telegram_outbox`, `telegram_conversations`, `telegram_command_log`, `assistant_api_settings` (schema per spec §6).
