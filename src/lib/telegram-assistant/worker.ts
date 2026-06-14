@@ -16,7 +16,8 @@ import {
 } from '@/db';
 import { enqueueOutbox } from './send';
 import { parseSlash } from './slash';
-import { CAPABILITIES, findCapability } from './registry';
+import { findCapability } from './registry';
+import { getEffectiveCapabilities, findEffectiveById, type EffectiveCapability } from './effective';
 import { formatResult } from './format';
 import { routeWithLLM } from './llm';
 
@@ -76,12 +77,15 @@ async function logCmd(v: LogInput): Promise<void> {
   });
 }
 
-function helpText(): string {
-  const lines = CAPABILITIES.filter((c) => c.slashCommand).map((c) => {
-    const p = c.params.map((x) => `<${x.name}>`).join(' ');
-    return `${c.slashCommand} ${p} — ${c.summary}`;
-  });
-  return `*Artha assistant*\n${lines.join('\n')}`;
+function helpText(included: EffectiveCapability[]): string {
+  const lines = included
+    .filter((c) => c.slashCommand)
+    .map((c) => {
+      const p = c.params.map((x) => `<${x.name}>`).join(' ');
+      return `${c.slashCommand} ${p} — ${c.summary}`;
+    });
+  const body = lines.length ? lines.join('\n') : '(no commands enabled — turn some on in Settings → Assistant APIs)';
+  return `*Artha assistant*\n${body}`;
 }
 
 export async function processInbox(limit = 10): Promise<{ processed: number }> {
@@ -139,6 +143,11 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
     return;
   }
 
+  // Per-user effective registry (Settings → Assistant APIs governs include +
+  // integrity). `included` = what the assistant may reach at all.
+  const caps = await getEffectiveCapabilities(userId);
+  const included = caps.filter((c) => c.included);
+
   // 2. resolve a pending confirm
   const pend = await db
     .select()
@@ -148,13 +157,13 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
   const pending = pend[0];
   if (pending?.awaiting === 'confirm' && pending.expiresAt && pending.expiresAt > new Date()) {
     await db.delete(telegramConversations).where(eq(telegramConversations.chatId, chatId));
-    const cap = pending.pendingCapability ? findCapability(pending.pendingCapability) : undefined;
+    const cap = pending.pendingCapability ? findEffectiveById(caps, pending.pendingCapability) : undefined;
     if (!/^(yes|y|confirm|ok)$/i.test(text) || !cap) {
       await enqueueOutbox(chatId, 'Cancelled.');
       await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, capabilityId: pending.pendingCapability, confirmed: false, resultStatus: 'cancelled' });
       return;
     }
-    if (cap.dataIntegrity && pending.sourceMessageId) {
+    if (cap.integrity && pending.sourceMessageId) {
       const dup = await db
         .select({ id: telegramCommandLog.id })
         .from(telegramCommandLog)
@@ -171,29 +180,30 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
         return;
       }
     }
-    const result = await cap.invoke(userId, (pending.collectedArgs ?? {}) as Record<string, unknown>);
-    await enqueueOutbox(chatId, formatResult(cap.id, result));
-    await logCmd({ userId, chatId, messageId: pending.sourceMessageId, rawText: text, route: 'slash', capabilityId: cap.id, args: pending.collectedArgs, confirmed: true, executed: true, resultStatus: 'ok' });
+    await runAndReply(userId, chatId, cap, (pending.collectedArgs ?? {}) as Record<string, unknown>, {
+      messageId: pending.sourceMessageId, rawText: text, route: 'slash', confirmed: true,
+    });
     return;
   }
 
   // 3. help / start
   if (text === '/start' || text === '/help') {
-    await enqueueOutbox(chatId, helpText(), { kind: 'notice' });
+    await enqueueOutbox(chatId, helpText(included), { kind: 'notice' });
     return;
   }
 
-  // 4. free text → LLM route (Phase 2). Only dataIntegrity=false capabilities
-  //    are LLM-reachable; integrity writes always require a slash command.
+  // 4. free text → LLM route (Phase 2). Only included + dataIntegrity=false
+  //    capabilities are LLM-reachable; integrity writes always need a slash.
   if (!text.startsWith('/')) {
-    const route = await routeWithLLM(text);
+    const eligible = included.filter((c) => !c.integrity);
+    const route = await routeWithLLM(text, eligible);
     if (!route.capabilityId) {
-      await enqueueOutbox(chatId, route.clarify || ('I didn’t catch a request.\n' + helpText()), { kind: 'notice' });
+      await enqueueOutbox(chatId, route.clarify || ('I didn’t catch a request.\n' + helpText(included)), { kind: 'notice' });
       await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', resultStatus: 'no-match' });
       return;
     }
-    const cap = findCapability(route.capabilityId);
-    if (!cap || cap.dataIntegrity) {
+    const cap = findEffectiveById(caps, route.capabilityId);
+    if (!cap || !cap.included || cap.integrity) {
       await enqueueOutbox(chatId, 'That action needs a slash command for safety. Try /help.', { kind: 'notice' });
       await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: route.capabilityId, resultStatus: 'blocked-integrity' });
       return;
@@ -209,14 +219,12 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
       await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: cap.id, args: route.args, resultStatus: 'awaiting-confirm' });
       return;
     }
-    const result = await cap.invoke(userId, route.args);
-    await enqueueOutbox(chatId, formatResult(cap.id, result));
-    await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'llm', capabilityId: cap.id, args: route.args, executed: true, resultStatus: 'ok' });
+    await runAndReply(userId, chatId, cap, route.args, { messageId: row.messageId, rawText: text, route: 'llm' });
     return;
   }
-  const parsed = parseSlash(text);
+  const parsed = parseSlash(text, included);
   if (!parsed) {
-    await enqueueOutbox(chatId, 'Unknown command.\n' + helpText(), { kind: 'notice' });
+    await enqueueOutbox(chatId, 'Unknown command.\n' + helpText(included), { kind: 'notice' });
     return;
   }
   const { capability, args } = parsed;
@@ -237,7 +245,25 @@ async function handle(row: typeof telegramInbox.$inferSelect): Promise<void> {
   }
 
   // 7. read → invoke now
-  const result = await capability.invoke(userId, args);
-  await enqueueOutbox(chatId, formatResult(capability.id, result));
-  await logCmd({ userId, chatId, messageId: row.messageId, rawText: text, route: 'slash', capabilityId: capability.id, args, executed: true, resultStatus: 'ok' });
+  await runAndReply(userId, chatId, capability, args, { messageId: row.messageId, rawText: text, route: 'slash' });
+}
+
+/** Invoke a capability, reply with the formatted result, and audit-log success
+ *  OR failure (closes the failed-invoke logging gap). Re-throws so the inbox row
+ *  still records the error + the user gets the ⚠️ outer notice. */
+async function runAndReply(
+  userId: string,
+  chatId: string,
+  cap: EffectiveCapability,
+  args: Record<string, unknown>,
+  meta: { messageId: number | null; rawText: string; route: string; confirmed?: boolean },
+): Promise<void> {
+  try {
+    const result = await cap.invoke(userId, args);
+    await enqueueOutbox(chatId, formatResult(cap.id, result));
+    await logCmd({ userId, chatId, messageId: meta.messageId, rawText: meta.rawText, route: meta.route, capabilityId: cap.id, args, confirmed: meta.confirmed ?? false, executed: true, resultStatus: 'ok' });
+  } catch (err) {
+    await logCmd({ userId, chatId, messageId: meta.messageId, rawText: meta.rawText, route: meta.route, capabilityId: cap.id, args, confirmed: meta.confirmed ?? false, executed: false, resultStatus: 'error', resultSummary: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
 }

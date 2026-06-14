@@ -56,9 +56,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   - Output: `/tax /due /today /meal /inspaid /chitpay` driven by the registry (not hard-coded).
   - Verify: each command runs end-to-end; integrity-true ones confirm + dedupe.
 
-- [ ] **1.4 Settings — "Assistant APIs" screen**
-  - Output: a Settings card/page listing capabilities with toggles **Include in assistant** + **Data integrity**, persisted to `assistant_api_settings`.
-  - Verify: toggling *exclude* removes a capability from the assistant; toggling integrity true↔false changes slash-only↔LLM-eligible.
+- [x] **1.4 Settings — "Assistant APIs" screen**
+  - Output: `getEffectiveCapabilities(userId)` merge (`effective.ts`) the worker + LLM router now route through; `GET/PATCH /api/settings/assistant-apis`; `AssistantApisForm` card (Include-in-assistant + AI-eligible/Slash-only toggles) wired into Settings.
+  - Verify: ✅ exclude `get_net_worth` → free-text `no-match` + `/networth` "Unknown command"; ✅ flip `mark_card_paid` integrity true→false → free-text routed via LLM to `awaiting-confirm` (was `blocked-integrity`), no double-pay. Also closed the failed-invoke audit-log gap (`runAndReply` logs error rows).
 
 **Phase 1 exit:** the surface is registry-driven and user-curated; drift-guarded.
 

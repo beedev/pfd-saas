@@ -1,10 +1,12 @@
 /**
- * LLM router (Phase 2.1). Maps a free-text message to one LLM-eligible
- * capability (dataIntegrity=false ONLY) via OpenAI function-calling. The model
- * never touches data — it only chooses a tool + args; the worker executes and
- * re-validates. Raw fetch (no SDK), gpt-4o-mini, temperature 0.
+ * LLM router (Phase 2.1 + 1.4). Maps a free-text message to one LLM-eligible
+ * capability via OpenAI function-calling. The model never touches data — it only
+ * chooses a tool + args; the worker executes and re-validates. The caller passes
+ * the *already-filtered* eligible set (user-included AND dataIntegrity=false), so
+ * Settings → Assistant APIs governs exactly what the LLM can reach. Raw fetch (no
+ * SDK), gpt-4o-mini, temperature 0.
  */
-import { CAPABILITIES } from './registry';
+import type { Capability } from './registry';
 
 export interface LLMRoute {
   capabilityId: string | null;
@@ -19,14 +21,18 @@ const SYSTEM_PROMPT =
   'one available tool when it clearly matches, extracting its arguments. If no ' +
   'tool clearly fits, do NOT call a tool — instead briefly say what you can help with.';
 
-export async function routeWithLLM(message: string): Promise<LLMRoute> {
+export async function routeWithLLM(message: string, eligible: Capability[]): Promise<LLMRoute> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
     return { capabilityId: null, args: {}, clarify: 'AI chat isn’t configured here. Use a slash command — try /help.' };
   }
+  if (eligible.length === 0) {
+    return { capabilityId: null, args: {}, clarify: 'No AI-enabled actions are turned on. Use a slash command — try /help.' };
+  }
 
-  // Only LLM-eligible (dataIntegrity=false) capabilities are exposed as tools.
-  const tools = CAPABILITIES.filter((c) => !c.dataIntegrity).map((c) => ({
+  // The caller has already restricted `eligible` to user-included,
+  // dataIntegrity=false capabilities.
+  const tools = eligible.map((c) => ({
     type: 'function' as const,
     function: {
       name: c.id,
