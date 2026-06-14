@@ -9,6 +9,8 @@ import { and, desc, eq, ilike, isNull } from 'drizzle-orm';
 import { db, liabilities, creditCardExpenses } from '@/db';
 import { computeNetWorth } from '@/lib/assets/registry';
 import { recomputeCreditCardBudgetForPeriod } from '@/lib/finance/budget-sync';
+import { getDuePayments } from '@/lib/finance/due-payments';
+import { getTodayStatus, setTodayWeight, tickHabit } from '@/lib/health/transformation-actions';
 
 export interface CapParam {
   name: string;
@@ -91,6 +93,44 @@ export const CAPABILITIES: Capability[] = [
       await recomputeCreditCardBudgetForPeriod(userId, card.id, target.period);
       return { card: card.name, paidPaisa: target.amount, period: target.period, newBalancePaisa: newBalance };
     },
+  },
+  {
+    id: 'get_due_payments',
+    summary: 'List upcoming or overdue payments (SIPs, chits, insurance, loan EMIs, credit-card statements)',
+    kind: 'read',
+    dataIntegrity: false,
+    slashCommand: '/due',
+    params: [],
+    invoke: async (userId) => getDuePayments(userId),
+  },
+  {
+    id: 'get_today_status',
+    summary: "Today's transformation-tracker status — habits done, weight, day number",
+    kind: 'read',
+    dataIntegrity: false,
+    slashCommand: '/today',
+    params: [],
+    invoke: async (userId) => getTodayStatus(userId),
+  },
+  {
+    id: 'log_weight',
+    summary: "Log today's body weight in kg",
+    kind: 'write',
+    // Idempotent (upserts today's weight) → safe for free-text/LLM use.
+    dataIntegrity: false,
+    slashCommand: '/weight',
+    params: [{ name: 'kg', type: 'number', required: true, description: 'Body weight in kilograms, e.g. 78.5' }],
+    invoke: async (userId, args) => setTodayWeight(userId, Number(args.kg)),
+  },
+  {
+    id: 'tick_habit',
+    summary: 'Mark a habit done for today',
+    kind: 'write',
+    // Idempotent (sets the habit checked=true) → safe for free-text/LLM use.
+    dataIntegrity: false,
+    slashCommand: '/tick',
+    params: [{ name: 'habit', type: 'string', required: true, description: 'Habit name, e.g. workout' }],
+    invoke: async (userId, args) => tickHabit(userId, String(args.habit ?? '')),
   },
 ];
 

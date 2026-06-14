@@ -3,6 +3,8 @@
  * formatter arrives in Phase 2; this keeps the slash path AI-free.
  */
 import type { NetWorthResult } from '@/lib/assets/registry';
+import type { DueItem } from '@/lib/finance/due-payments';
+import type { TodayStatus } from '@/lib/health/transformation-actions';
 
 const inr = (paisa: number) => '₹' + Math.round(paisa / 100).toLocaleString('en-IN');
 
@@ -24,6 +26,28 @@ export function formatResult(capabilityId: string, result: unknown): string {
     case 'mark_card_paid': {
       const r = result as { card: string; paidPaisa: number; newBalancePaisa: number };
       return `✅ *${r.card}* — statement ${inr(r.paidPaisa)} marked paid today.\nOutstanding now ${inr(r.newBalancePaisa)}.`;
+    }
+    case 'get_due_payments': {
+      const items = result as DueItem[];
+      if (items.length === 0) return '✅ Nothing due in the next few weeks.';
+      const total = items.reduce((s, i) => s + i.amountPaisa, 0);
+      const lines = items
+        .map((i) => `${i.isOverdue ? '🔴' : '•'} ${i.label} — ${inr(i.amountPaisa)} (${i.category}, due ${i.dueDate})`)
+        .join('\n');
+      return `*Due payments* — ${inr(total)} across ${items.length}\n${lines}`;
+    }
+    case 'get_today_status': {
+      const s = result as TodayStatus;
+      const w = s.weightKg != null ? `${s.weightKg} kg` : 'not logged';
+      return `*Day ${s.dayNumber}* (${s.date})\nHabits: ${s.habitsDone}/${s.habitsTotal} done\nWeight: ${w}`;
+    }
+    case 'log_weight': {
+      const r = result as { date: string; weightKg: number };
+      return `✅ Weight logged: *${r.weightKg} kg* for today (${r.date}).`;
+    }
+    case 'tick_habit': {
+      const r = result as { habit: string; date: string };
+      return `✅ *${r.habit}* ticked for today (${r.date}).`;
     }
     default:
       return '✅ Done.';

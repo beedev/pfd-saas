@@ -78,9 +78,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   - Output: pass invocation result to the LLM → Telegram-friendly reply; "full"/"details" → expanded.
   - Verify: read replies are concise by default and detailed on request; an echo line shows what was understood.
 
-- [ ] **2.4 Ship read + non-integrity-write capabilities**
-  - Output: tax/net-worth/due/today reads + log_meal/tick_habit/log_weight via LLM.
-  - Verify: each works via free text; writes still confirm; nothing integrity-true is LLM-reachable.
+- [x] **2.4 Ship read + non-integrity-write capabilities**
+  - Output: `get_due_payments` (`/due`, lib `finance/due-payments.ts`), `get_today_status` (`/today`), `log_weight` (`/weight`), `tick_habit` (`/tick`) — last two idempotent writes in new lib `health/transformation-actions.ts`. Deterministic `formatResult` for each. (log_meal+nutrition deferred — append/duplicate-risk, see 3.4.)
+  - Verify: ✅ slash + free-text both route each; ✅ "log my weight as 80 kg" → log_weight kg=80 → confirm → DB=80; ✅ `/tick 3 ltr` twice → exactly 1 checked row (idempotent); ✅ ambiguous `/tick water` → "be more specific" (audit-logged error); ✅ writes still confirm; integrity-true `mark_card_paid` stays slash-only.
 
 **Phase 2 exit:** the conversational assistant is live for the safe surface.
 
