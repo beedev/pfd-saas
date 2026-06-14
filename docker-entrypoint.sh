@@ -235,6 +235,25 @@ if [ -f "$DATA_DIR/.maintenance" ]; then
   fi
 fi
 
+# ─── Auto-backup before migrations (safe updates) ────────────────────
+# Snapshot the DB right before drizzle migrate runs, so a destructive or
+# failed migration on an update always has a rollback point. Keeps the
+# last 7. Skipped on a fresh install (no app tables yet → nothing to save).
+# Restore a snapshot with scripts/pfd-restore.sh (or pg_restore the .dump).
+BACKUP_DIR="$DATA_DIR/backups"
+if su-exec postgres psql -h 127.0.0.1 -U "$PG_USER" -d "$PG_DB" -tAc \
+     "SELECT to_regclass('public.user') IS NOT NULL" 2>/dev/null | grep -qx t; then
+  mkdir -p "$BACKUP_DIR"
+  chown postgres:postgres "$BACKUP_DIR"
+  BK="$BACKUP_DIR/pre-migrate-$(date +%Y%m%d-%H%M%S).dump"
+  echo "[entrypoint] Backing up DB before migrations → $BK"
+  if su-exec postgres pg_dump -Fc -h 127.0.0.1 -U "$PG_USER" -d "$PG_DB" -f "$BK" 2>/dev/null; then
+    ls -1t "$BACKUP_DIR"/pre-migrate-*.dump 2>/dev/null | tail -n +8 | while read -r f; do rm -f "$f"; done
+  else
+    echo "[entrypoint] WARNING: pre-migration backup failed (continuing)"
+  fi
+fi
+
 # ─── Run migrations ──────────────────────────────────────────────────
 # drizzle-kit migrate is idempotent; the migrations journal in
 # drizzle/meta/_journal.json tracks which hashes have been applied.

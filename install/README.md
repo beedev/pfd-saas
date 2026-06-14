@@ -147,7 +147,16 @@ Artha also **auto-starts** when Docker starts (e.g. after a reboot).
 ./artha.sh update      # pulls the newest image, recreates the container
 ```
 
-Your data (in the `artha-data` volume) is preserved across updates.
+**Your data is safe across updates.** It lives in the `artha-data` volume, which
+the update keeps. The new version applies any schema changes (migrations) forward
+over your existing data. As a safety net, **every update auto-snapshots the
+database first** (kept in the volume under `/data/backups/`, last 7) — so a bad
+update can be rolled back:
+
+```bash
+./artha.sh backups                 # list snapshots
+./artha.sh restore <dump-file>     # roll back (type RESTORE to confirm)
+```
 
 ## Back up your data
 

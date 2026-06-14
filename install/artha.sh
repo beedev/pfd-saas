@@ -94,6 +94,30 @@ case "${1:-}" in
     echo "✅ Backup saved → $OUT"
     echo "   (Tip: also keep an in-app export — Settings → Data portability → Download JSON.)"
     ;;
+  backups)
+    need_docker
+    echo "In-volume snapshots (auto pre-update + any manual), newest first:"
+    docker exec "$NAME" sh -c 'ls -lht /data/backups/*.dump 2>/dev/null || echo "  (none yet)"'
+    echo "Local backups in $BACKUP_DIR:"
+    ls -lht "$BACKUP_DIR"/*.dump 2>/dev/null | head || echo "  (none yet)"
+    ;;
+  restore)
+    need_docker
+    FILE="${2:-}"
+    if [ -z "$FILE" ]; then
+      echo "Usage: ./artha.sh restore <dump-file>   (host path, or an in-volume /data/backups/... path)"
+      echo "In-volume snapshots (newest first):"
+      docker exec "$NAME" sh -c 'ls -1t /data/backups/*.dump 2>/dev/null' || true
+      exit 1
+    fi
+    echo "⚠  This REPLACES all current data with: $FILE"
+    printf "Type RESTORE to confirm: "
+    read -r ans
+    [ "$ans" = "RESTORE" ] || { echo "Aborted."; exit 0; }
+    if [ -f "$FILE" ]; then docker cp "$FILE" "$NAME:/tmp/restore.dump"; SRC=/tmp/restore.dump; else SRC="$FILE"; fi
+    docker exec "$NAME" sh -c "PGPASSWORD=\$(cat /data/.secrets/postgres_password) su-exec postgres pg_restore --clean --if-exists -h 127.0.0.1 -U pfd_saas -d pfd_saas '$SRC'" \
+      && { echo "✅ Restored. Restarting…"; docker restart "$NAME" >/dev/null; echo "Done → http://localhost:${PORT}"; }
+    ;;
   uninstall)
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     echo "Container removed. Your data volume '$VOLUME' is KEPT."
