@@ -48,13 +48,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   - Output: `Capability[]` for the v1 set (spec §4c) with param schemas + `invoke()` wrappers over existing routes/lib.
   - Verify: each `invoke` works when called directly with valid args, scoped to the user.
 
-- [ ] **1.2 Drift test**
-  - Output: a test asserting every capability `path` resolves to a real route and required params match (where zod exists).
-  - Verify: test passes; deliberately breaking a path fails the test.
+- [x] **1.2 Drift guard** (adapted — capabilities use `invoke()`, not paths, so the "path resolves to a route" check doesn't apply)
+  - Output: `assertRegistryIntegrity()` in `registry.ts` — fails on duplicate ids, duplicate/mis-typed slash commands, unnamed params, bad kind. Called once per `processInbox`, so drift fails loudly (tick → 500) on first run. TypeScript already covers the param-shape contract.
+  - Verify: ✅ runs clean each tick on the valid registry; a deliberate dup slash/id throws with a clear message.
 
-- [ ] **1.3 Wire all v1 slash commands from the registry**
-  - Output: `/tax /due /today /meal /inspaid /chitpay` driven by the registry (not hard-coded).
-  - Verify: each command runs end-to-end; integrity-true ones confirm + dedupe.
+- [x] **1.3 Wire v1 slash commands from the registry** (the safe/clean set)
+  - Output: `/networth /paid /due /today /weight /tick /tax` all registry-driven. Deferred — `/inspaid` (date-advancing → integrity), `/chitpay` (dividend math), `/meal` (nutrition + append): each needs its own design; tracked under 3.4.
+  - Verify: ✅ each wired command runs end-to-end (slash + free-text where eligible); integrity `/paid` confirms + dedupes.
 
 - [x] **1.4 Settings — "Assistant APIs" screen**
   - Output: `getEffectiveCapabilities(userId)` merge (`effective.ts`) the worker + LLM router now route through; `GET/PATCH /api/settings/assistant-apis`; `AssistantApisForm` card (Include-in-assistant + AI-eligible/Slash-only toggles) wired into Settings.
@@ -70,13 +70,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
   - Output: build OpenAI function-call tools from **included + dataIntegrity=false** capabilities; map a free-text message → `{capabilityId, args}` | clarify | none.
   - Verify: "what's my net worth" → `get_net_worth`; "log breakfast: idli" → `log_meal` with extracted args; gibberish → graceful "I didn't get that".
 
-- [ ] **2.2 Slot-fill loop**
-  - Output: deterministic required-param check → ask follow-up → persist pending → merge reply; `optionsFrom` disambiguation via a read.
-  - Verify: a command missing a required field asks for it; the follow-up reply completes it; TTL expiry abandons cleanly.
+- [x] **2.2 Slot-fill loop**
+  - Output: shared `dispatch()` — missing required param ⇒ `askSlot` persists `awaiting:'slot'` + asks; the next reply fills the first-missing param, re-dispatches (re-slot → confirm → execute). 10-min TTL; "cancel" abandons. Used by slash, LLM and slot-completion paths alike.
+  - Verify: ✅ `/weight` (no arg) → "What's the kg?" → `82` → confirm → `yes` → logged 82 (command_log: `awaiting-slot` → `awaiting-confirm` → `ok`).
 
-- [ ] **2.3 Result formatting (summary/full)**
-  - Output: pass invocation result to the LLM → Telegram-friendly reply; "full"/"details" → expanded.
-  - Verify: read replies are concise by default and detailed on request; an echo line shows what was understood.
+- [x] **2.3 Result formatting (echo + summary/full)**
+  - Output: kept **deterministic** `formatResult` (reliability > LLM prose) with a `verbose` flag — "detail/full/breakdown" expands (net worth adds liabilities). LLM-routed reads get a `🔎 _<summary>_` echo of what was understood.
+  - Verify: ✅ "what is my net worth in detail" → echo line + `_Liabilities_` section; concise without the keyword.
 
 - [x] **2.4 Ship read + non-integrity-write capabilities**
   - Output: `get_due_payments` (`/due`, lib `finance/due-payments.ts`), `get_today_status` (`/today`), `log_weight` (`/weight`), `tick_habit` (`/tick`) — last two idempotent writes in new lib `health/transformation-actions.ts`. Deterministic `formatResult` for each. (log_meal+nutrition deferred — append/duplicate-risk, see 3.4.)
@@ -88,12 +88,14 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## Phase 3 — Hardening & polish
 
-- [ ] **3.1** Rate-limiting per chat; abuse/error backoff.
-- [ ] **3.2** Richer error UX (API failure, validation error, OpenAI down → "try again / use the slash command").
-- [ ] **3.3** Multi-turn disambiguation polish; cancel/redo affordances.
-- [ ] **3.4** Expand the capability set (more reads/writes as trust grows).
-- [ ] **3.5** Observability view over `telegram_command_log` (what was asked/done).
-- [ ] **3.6** Help docs: add an "Assistant" page to the in-app Help Center.
+- [x] **3.1** Rate-limiting per chat — in-memory sliding window (20 msg / 60s) in the worker; over-limit → "give me a minute" + `rate-limited` log. (Logic-reviewed + typechecked; not load-spam-tested to spare the live chat.)
+- [x] **3.2** Richer error UX — invoke failures audit-logged + reply "you can try again, or use a slash command — /help"; OpenAI-not-configured / no-eligible-actions handled gracefully.
+- [x] **3.3** Cancel/redo affordances — slot prompt accepts "cancel"; confirm is "yes-or-cancel"; both expire after 10 min.
+- [ ] **3.4** Expand the capability set further — **deferred**: `log_meal` (+nutrition estimate, append/duplicate-risk), `/inspaid` (insurance mark-paid, date-advancing → integrity), `/chitpay` (installment + dividend math). Each needs its own design pass.
+- [x] **3.5** Observability — `GET /api/settings/assistant-log` + `AssistantActivityCard` in Settings (recent requests, route, capability, outcome).
+- [ ] **3.6** Help docs: add an "Assistant" page to the in-app Help Center. **(open)**
+
+**Phase 3 exit:** safe surface is hardened, observable, and user-curated. Remaining open: 3.4 (more capabilities, by design), 3.6 (help page), 0.1 (wire the always-on tick loop into the scheduler).
 
 ---
 

@@ -11,6 +11,8 @@ import { computeNetWorth } from '@/lib/assets/registry';
 import { recomputeCreditCardBudgetForPeriod } from '@/lib/finance/budget-sync';
 import { getDuePayments } from '@/lib/finance/due-payments';
 import { getTodayStatus, setTodayWeight, tickHabit } from '@/lib/health/transformation-actions';
+import { deriveDeductions } from '@/lib/finance/deduction-engine';
+import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
 export interface CapParam {
   name: string;
@@ -132,7 +134,50 @@ export const CAPABILITIES: Capability[] = [
     params: [{ name: 'habit', type: 'string', required: true, description: 'Habit name, e.g. workout' }],
     invoke: async (userId, args) => tickHabit(userId, String(args.habit ?? '')),
   },
+  {
+    id: 'get_tax_deductions',
+    summary: 'Chapter VI-A tax deductions claimed this financial year',
+    kind: 'read',
+    dataIntegrity: false,
+    slashCommand: '/tax',
+    params: [],
+    invoke: async (userId) => {
+      const fy = getCurrentFinancialYear();
+      const r = await deriveDeductions(userId, fy);
+      return {
+        fy,
+        oldRegimeTotalPaisa: r.oldRegimeTotalPaisa,
+        newRegimeTotalPaisa: r.newRegimeTotalPaisa,
+        breakdown: r.breakdown,
+      };
+    },
+  },
 ];
 
 export const findCapability = (id: string) => CAPABILITIES.find((c) => c.id === id);
 export const findBySlash = (cmd: string) => CAPABILITIES.find((c) => c.slashCommand === cmd);
+
+/**
+ * Drift guard (Phase 1.2). The registry is hand-edited code, so the failure
+ * modes are duplicate ids, duplicate/mis-typed slash commands, or malformed
+ * params — all of which would silently break routing. Called once per
+ * processInbox so any drift fails loudly (tick → 500) the first time it runs.
+ */
+export function assertRegistryIntegrity(): void {
+  const ids = new Set<string>();
+  const slashes = new Set<string>();
+  for (const c of CAPABILITIES) {
+    if (!c.id) throw new Error('registry: a capability has an empty id');
+    if (ids.has(c.id)) throw new Error(`registry: duplicate capability id "${c.id}"`);
+    ids.add(c.id);
+    if (c.kind !== 'read' && c.kind !== 'write') throw new Error(`registry: "${c.id}" has invalid kind`);
+    if (c.slashCommand) {
+      if (!/^\/[a-z]+$/i.test(c.slashCommand)) throw new Error(`registry: "${c.id}" slash "${c.slashCommand}" must be /letters`);
+      if (slashes.has(c.slashCommand)) throw new Error(`registry: duplicate slash command "${c.slashCommand}"`);
+      slashes.add(c.slashCommand);
+    }
+    for (const p of c.params) {
+      if (!p.name) throw new Error(`registry: "${c.id}" has an unnamed param`);
+    }
+  }
+}

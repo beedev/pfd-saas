@@ -3,6 +3,7 @@ import { BusinessProfileForm } from '@/components/forms/business-profile-form';
 import { PersonalModulesForm } from '@/components/forms/personal-modules-form';
 import { TelegramConnectionForm } from '@/components/forms/telegram-connection-form';
 import { AssistantApisForm } from '@/components/forms/assistant-apis-form';
+import { AssistantActivityCard } from '@/components/forms/assistant-activity-card';
 import { OpenAiKeyForm } from '@/components/forms/openai-key-form';
 import { AssetClassReturnsForm } from '@/components/forms/asset-class-returns-form';
 import { TaxSetupForm } from '@/components/forms/tax-setup-form';
@@ -26,6 +27,7 @@ export default function SettingsPage() {
       <PersonalModulesForm />
       <TelegramConnectionForm />
       <AssistantApisForm />
+      <AssistantActivityCard />
       <OpenAiKeyForm />
       <AssetClassReturnsForm />
       <RetirementTaxBracketsForm />

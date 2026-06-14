@@ -8,7 +8,12 @@ import type { TodayStatus } from '@/lib/health/transformation-actions';
 
 const inr = (paisa: number) => '₹' + Math.round(paisa / 100).toLocaleString('en-IN');
 
-export function formatResult(capabilityId: string, result: unknown): string {
+export interface FormatOpts {
+  /** Expand the reply (the user asked for "details"/"full"/"breakdown"). */
+  verbose?: boolean;
+}
+
+export function formatResult(capabilityId: string, result: unknown, opts: FormatOpts = {}): string {
   switch (capabilityId) {
     case 'get_net_worth': {
       const nw = result as NetWorthResult;
@@ -17,10 +22,19 @@ export function formatResult(capabilityId: string, result: unknown): string {
         .sort((a, b) => b.valuePaisa - a.valuePaisa)
         .map((b) => `• ${b.label}: ${inr(b.valuePaisa)}`)
         .join('\n');
+      const liabilities = opts.verbose
+        ? '\n\n_Liabilities_\n' +
+          nw.breakdown
+            .filter((b) => b.isLiability && b.valuePaisa > 0)
+            .sort((a, b) => b.valuePaisa - a.valuePaisa)
+            .map((b) => `• ${b.label}: ${inr(b.valuePaisa)}`)
+            .join('\n')
+        : '';
       return (
         `*Net worth: ${inr(nw.netWorthPaisa)}*\n` +
         `Assets ${inr(nw.totalAssetsPaisa)} − Liabilities ${inr(nw.liabilitiesPaisa)}\n\n` +
-        assets
+        assets +
+        liabilities
       );
     }
     case 'mark_card_paid': {
@@ -48,6 +62,20 @@ export function formatResult(capabilityId: string, result: unknown): string {
     case 'tick_habit': {
       const r = result as { habit: string; date: string };
       return `✅ *${r.habit}* ticked for today (${r.date}).`;
+    }
+    case 'get_tax_deductions': {
+      const r = result as { fy: string; oldRegimeTotalPaisa: number; newRegimeTotalPaisa: number; breakdown: Array<{ label: string; amountPaisa: number }> };
+      const lines = r.breakdown
+        .filter((b) => b.amountPaisa > 0)
+        .sort((a, b) => b.amountPaisa - a.amountPaisa)
+        .map((b) => `• ${b.label}: ${inr(b.amountPaisa)}`)
+        .join('\n');
+      return (
+        `*Tax deductions — FY ${r.fy}*\n` +
+        `Old regime (Chapter VI-A): ${inr(r.oldRegimeTotalPaisa)}\n` +
+        `New-regime eligible: ${inr(r.newRegimeTotalPaisa)}\n\n` +
+        (lines || '_No deductions recorded yet._')
+      );
     }
     default:
       return '✅ Done.';
