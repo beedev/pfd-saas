@@ -62,7 +62,7 @@ export async function routeWithLLM(message: string, eligible: Capability[]): Pro
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       temperature: 0,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },

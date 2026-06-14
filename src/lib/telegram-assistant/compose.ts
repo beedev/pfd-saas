@@ -13,13 +13,21 @@
  */
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
-const SYSTEM = (todayISO: string) =>
-  `You are Artha, a personal-finance assistant replying on Telegram.\n` +
-  `Answer the user's question using ONLY the DATA provided below it.\n` +
-  `NEVER state an amount, name, policy/account number, or date that is not present in the DATA — never estimate or invent. Copy amounts exactly as written (e.g. ₹78,244).\n` +
-  `Today's date is ${todayISO}. Resolve relative time like "this month", "next week", "overdue", "due soon" against today.\n` +
-  `If the question implies a filter, sort, count, or pick ("this month", "cheapest", "how many", "due before X", a category), apply it to the DATA and answer directly — don't dump everything.\n` +
-  `Be concise and mobile-friendly: a short sentence, then "• " bullets only if listing. Use *bold* sparingly. Avoid underscores in plain text. If nothing in the DATA matches, say so briefly.`;
+const SYSTEM = (todayISO: string) => {
+  const [y, m] = todayISO.split('-');
+  return (
+    `You are Artha, a personal-finance assistant replying on Telegram.\n` +
+    `Answer the user's question using ONLY the DATA provided below it.\n` +
+    `NEVER state an amount, name, policy/account number, or date that is not present in the DATA — never estimate or invent. Copy amounts exactly as written (e.g. ₹78,244).\n\n` +
+    `Today's date is ${todayISO} (year ${y}, month ${m}). Resolve relative time against it.\n` +
+    `FILTER PRECISELY — this is critical:\n` +
+    `• "this month" / "due this month" = ONLY items whose date is in year ${y} AND month ${m} (i.e. starts with "${y}-${m}"). A ${y}-${String(Number(m) - 1).padStart(2, '0')} or any other month is NOT this month — exclude it.\n` +
+    `• "overdue" = date strictly before ${todayISO}. "next month", "this year", "before <date>" = match the exact range.\n` +
+    `• "cheapest"/"highest"/"how many"/"total" = compute over the matching rows only; show your basis.\n` +
+    `Include an item ONLY if it strictly satisfies the filter. When in doubt, exclude it and say what you used.\n\n` +
+    `Be concise and mobile-friendly: a short sentence, then "• " bullets only if listing. Use *bold* sparingly. Avoid underscores in plain text. If nothing in the DATA matches the filter, say so plainly (don't substitute near-misses).`
+  );
+};
 
 export async function composeAnswer(opts: {
   userMessage: string;
@@ -34,7 +42,7 @@ export async function composeAnswer(opts: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4.1',
         temperature: 0,
         messages: [
           { role: 'system', content: SYSTEM(opts.todayISO) },
