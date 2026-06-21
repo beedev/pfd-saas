@@ -4,8 +4,9 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Trash2, ArrowLeft, FileText, Upload } from 'lucide-react';
+import { Trash2, FileText, Upload } from 'lucide-react';
 import { toast } from 'sonner';
+import { ItrHubBackLink } from '@/components/forms/itr-hub-back-link';
 
 interface SalaryRow {
   id: number;
@@ -76,9 +77,7 @@ function Inner() {
 
   return (
     <div className="max-w-5xl space-y-4">
-      <Link href={`/tax/itr3?fy=${fy}`} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline">
-        <ArrowLeft className="h-3 w-3" /> ITR-3 Hub
-      </Link>
+      <ItrHubBackLink fy={fy} />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Salary Income</h1>
