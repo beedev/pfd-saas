@@ -22,6 +22,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { db, fixedDeposits, otherSourcesIncome, type FixedDeposit, type FDCompoundingFreq } from '@/db';
+import { getMostRecentCompletedFinancialYear } from './tax-constants';
 
 const N_PER_YEAR: Record<FDCompoundingFreq, number> = {
   MONTHLY: 12,
@@ -170,17 +171,23 @@ export async function syncFdInterest(
     )
     .returning({ id: otherSourcesIncome.id });
 
+  // Only book interest for financial years that have CLOSED — never surface a
+  // year still in progress as earned income (owner's rule: don't show next year
+  // until the previous one is closed). FY strings sort lexically, so "≤" works.
+  const cutoffFy = getMostRecentCompletedFinancialYear();
   const rows = fds.flatMap((fd) =>
-    fdInterestByFy(fd).map((slice) => ({
-      userId,
-      financialYear: slice.fy,
-      source: 'FD_INTEREST' as const,
-      description: `FD interest — ${fd.bankName}${fd.accountNumber ? ` ${fd.accountNumber}` : ''}`,
-      amountPaisa: slice.interestPaisa,
-      isTaxExempt: false,
-      sourceKind: 'FD_AUTO' as const,
-      sourceRefId: fd.id,
-    })),
+    fdInterestByFy(fd)
+      .filter((slice) => slice.fy <= cutoffFy)
+      .map((slice) => ({
+        userId,
+        financialYear: slice.fy,
+        source: 'FD_INTEREST' as const,
+        description: `FD interest — ${fd.bankName}${fd.accountNumber ? ` ${fd.accountNumber}` : ''}`,
+        amountPaisa: slice.interestPaisa,
+        isTaxExempt: false,
+        sourceKind: 'FD_AUTO' as const,
+        sourceRefId: fd.id,
+      })),
   );
 
   if (rows.length) await db.insert(otherSourcesIncome).values(rows);

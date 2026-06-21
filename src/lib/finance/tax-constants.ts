@@ -129,6 +129,18 @@ export function getCurrentFinancialYear(now: Date = new Date()): string {
   return `${startYear}-${endShort}`;
 }
 
+/**
+ * The most recent CLOSED financial year — the one you actually file for. In
+ * June 2026 (the live FY is 2026-27) this is 2025-26. Tax surfaces use this as
+ * the working year so a year that hasn't ended yet never shows projected income
+ * (e.g. FD interest still accruing) as if it were earned. It advances on its own
+ * when the live year ends (1-Apr).
+ */
+export function getMostRecentCompletedFinancialYear(now: Date = new Date()): string {
+  const startYear = Number(getCurrentFinancialYear(now).slice(0, 4)) - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
+}
+
 export function financialYearBounds(fy: string): { start: Date; end: Date } {
   // "2026-27" → Apr 1 2026 → Mar 31 2027
   const [startYearStr] = fy.split('-');
