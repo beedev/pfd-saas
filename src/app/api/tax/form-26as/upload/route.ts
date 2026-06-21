@@ -21,7 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import { db, form26asUploads } from '@/db';
 import { auth } from '@/auth';
-import { extractPdfText } from '@/lib/services/statement-parsers/pdf-text';
+import { extractPdfRows } from '@/lib/services/statement-parsers/pdf-text';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -42,7 +42,7 @@ interface DeductorRow {
  * tables) and additionally pull per-deductor rows from PART-I so the
  * reconciliation can cross-match by TAN.
  */
-function parseTotals(text: string): {
+function parseTotals(rows: string[]): {
   totalTdsPaisa: number | null;
   totalIncomePaisa: number | null;
   deductors: DeductorRow[];
@@ -52,59 +52,105 @@ function parseTotals(text: string): {
   // Money values in 26AS always carry two decimals — TANs and section
   // codes never do. This single change eliminates the v0 false matches.
   const moneyRe = /([0-9][0-9,]*\.[0-9]{2})/g;
-  // TAN: 4 letters + 5 digits + 1 letter (e.g. CHEH02287F).
-  const tanRe = /[A-Z]{4}\d{5}[A-Z]/g;
-  // Section: 194 then 1-3 letters (194A, 194J, 194JB, 194IA, ...).
-  const sectionRe = /\b(19[24][A-Z]{0,3})\b/g;
+  // Money cell (whole-string): a single table cell that is a rupee value.
+  const moneyCellRe = /^[0-9][0-9,]*\.[0-9]{2}$/;
+  // TAN cell: 4 letters + 5 digits + 1 letter (e.g. CHEH02287F).
+  const tanCellRe = /^[A-Z]{4}\d{5}[A-Z]$/;
+  // Section cell: 192 / 194A / 194JB / 194IA … (TDS sections live in 19x).
+  const sectionCellRe = /^19[0-9][A-Z]{0,3}$/;
   // Date in 26AS is "DD-Mon-YYYY".
-  const dateRe = /\b(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4})\b/g;
+  const dateCellRe = /^\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4}$/;
 
   const toPaisa = (s: string) => Math.round(parseFloat(s.replace(/,/g, '')) * 100);
 
-  // ─── Per-deductor extraction ─────────────────────────────────────
-  // Find each TAN occurrence; the three .00 numbers that immediately
-  // follow are paid / TDS / deposited. The two tokens before the TAN
-  // are the deductor name run (any non-TAN word stream). Section + date
-  // for the line follow further along on the same row.
-  const deductors: DeductorRow[] = [];
-  for (const tanMatch of text.matchAll(tanRe)) {
-    const tan = tanMatch[0];
-    const idx = tanMatch.index!;
-    // Walk back up to 120 chars to collect deductor name tokens (skip
-    // the row-number digit and the header words).
-    const preWindow = text.slice(Math.max(0, idx - 150), idx).trim();
-    const namePieces = preWindow.split(/\s+/);
-    // Drop leading "<n>" row index and any header noise; deductor name
-    // is everything between the last "N" Sr.No. integer and the TAN.
-    let nameStart = namePieces.length - 1;
-    while (nameStart > 0 && !/^\d{1,3}$/.test(namePieces[nameStart - 1])) nameStart--;
-    const deductorName = namePieces.slice(nameStart).join(' ').replace(/^\d{1,3}\s+/, '').trim();
+  // ─── Per-section extraction from PART-I detail rows ──────────────
+  // A deductor whose payments span multiple sections (e.g. salary 192
+  // for Apr–Aug then professional 194JB for Sep–Mar under one employer)
+  // emits ONE header row (grand totals) followed by per-transaction
+  // detail rows, each carrying its own Section + amounts. The v1 parser
+  // read only the header and dumped the whole grand total onto the first
+  // section seen — destroying the split. v2 walks the detail rows and
+  // aggregates Tax-Deducted by (TAN, section), so 26AS reconciliation
+  // attributes salary vs business TDS correctly.
+  //
+  // Scope: PART-I only (regular TDS). PART-VI (TCS, 206C*) and the other
+  // parts are skipped so collected-at-source amounts never leak in.
+  interface SectionAgg {
+    deductorName: string;
+    tan: string;
+    section: string;
+    paidPaisa: number;
+    tdsPaisa: number;
+    depositedPaisa: number;
+    lastDate: string | null;
+  }
+  const bySection = new Map<string, SectionAgg>();
+  let inPartI = false;
+  let current: { name: string; tan: string } | null = null;
 
-    // The next 800 chars after the TAN carry the three money values.
-    const postWindow = text.slice(idx + tan.length, idx + tan.length + 800);
-    const moneyMatches = [...postWindow.matchAll(moneyRe)].map((m) => toPaisa(m[1]));
-    if (moneyMatches.length < 3) {
-      notes.push(`Skipped TAN ${tan} — couldn't read 3 money values after it.`);
+  for (const raw of rows) {
+    const flat = raw.replace(/\t/g, ' ').trim();
+    // PART boundary — toggle so only PART-I detail rows are aggregated.
+    const partMatch = flat.match(/^#?\s*PART-([IVX]+)\b/i);
+    if (partMatch) {
+      inPartI = partMatch[1].toUpperCase() === 'I';
+      current = null;
       continue;
     }
-    const [totalPaidPaisa, totalTdsPaisa, totalDepositedPaisa] = moneyMatches;
+    if (!inPartI) continue;
 
-    const sectionMatch = postWindow.match(sectionRe);
-    const dateMatch = postWindow.match(dateRe);
+    const cells = raw.split('\t').map((c) => c.trim()).filter(Boolean);
+    if (cells.length < 2) continue;
 
-    deductors.push({
-      deductorName,
-      tan,
-      section: sectionMatch?.[0] ?? null,
-      totalPaidPaisa,
-      totalTdsPaisa,
-      totalDepositedPaisa,
-      transactionDate: dateMatch?.[0] ?? null,
-    });
+    const moneyCells = cells.filter((c) => moneyCellRe.test(c));
+    const tanIdx = cells.findIndex((c) => tanCellRe.test(c));
+
+    // Deductor header row: carries a TAN + the 3 grand-total money cells.
+    // Capture the deductor identity; the section split comes from the
+    // detail rows that follow (the grand totals themselves are ignored).
+    if (tanIdx >= 0 && moneyCells.length >= 1) {
+      const name = cells.slice(0, tanIdx).filter((c) => !/^\d{1,3}$/.test(c)).join(' ').trim();
+      current = { name, tan: cells[tanIdx] };
+      continue;
+    }
+
+    // Detail row: a section cell + at least 3 money cells (paid / tax
+    // deducted / deposited). Aggregate Tax-Deducted by (TAN, section).
+    const sectionCell = cells.find((c) => sectionCellRe.test(c));
+    if (current && sectionCell && moneyCells.length >= 3) {
+      const [paidPaisa, tdsPaisa, depositedPaisa] = moneyCells.slice(-3).map(toPaisa);
+      const dateCell = cells.find((c) => dateCellRe.test(c)) ?? null;
+      const section = sectionCell.toUpperCase();
+      const key = `${current.tan}|${section}`;
+      const agg = bySection.get(key) ?? {
+        deductorName: current.name,
+        tan: current.tan,
+        section,
+        paidPaisa: 0,
+        tdsPaisa: 0,
+        depositedPaisa: 0,
+        lastDate: null,
+      };
+      agg.paidPaisa += paidPaisa;
+      agg.tdsPaisa += tdsPaisa;
+      agg.depositedPaisa += depositedPaisa;
+      agg.lastDate = dateCell ?? agg.lastDate;
+      bySection.set(key, agg);
+    }
   }
 
+  const deductors: DeductorRow[] = [...bySection.values()].map((a) => ({
+    deductorName: a.deductorName,
+    tan: a.tan,
+    section: a.section,
+    totalPaidPaisa: a.paidPaisa,
+    totalTdsPaisa: a.tdsPaisa,
+    totalDepositedPaisa: a.depositedPaisa,
+    transactionDate: a.lastDate,
+  }));
+
   // ─── Headline totals ─────────────────────────────────────────────
-  // When per-deductor rows are present, headline = sum of them — that's
+  // When per-section rows are present, headline = sum of them — that's
   // always correct and avoids the v0 marker-windowing pitfall.
   let totalTdsPaisa: number | null = null;
   let totalIncomePaisa: number | null = null;
@@ -112,6 +158,10 @@ function parseTotals(text: string): {
     totalTdsPaisa = deductors.reduce((s, d) => s + d.totalTdsPaisa, 0);
     totalIncomePaisa = deductors.reduce((s, d) => s + d.totalPaidPaisa, 0);
   } else {
+    // Fallback for scanned / non-tabular 26AS: flatten rows to a token
+    // stream and do the v0 marker search (strict moneyRe so TAN/section
+    // digits don't leak through).
+    const text = rows.join(' ');
     // Fallback marker search — same as v0 but with the strict moneyRe
     // so TAN/section digits no longer leak through.
     const findAfter = (markers: string[]): number | null => {
@@ -187,8 +237,8 @@ export async function POST(request: NextRequest) {
     let parsedDeductorsJson: string | null = null;
     let parseNotes = '';
     try {
-      const text = await extractPdfText(buffer);
-      const parsed = parseTotals(text);
+      const rows = await extractPdfRows(buffer);
+      const parsed = parseTotals(rows);
       parsedTotalTdsPaisa = parsed.totalTdsPaisa;
       parsedTotalIncomePaisa = parsed.totalIncomePaisa;
       parsedDeductorsJson = parsed.deductors.length > 0 ? JSON.stringify(parsed.deductors) : null;

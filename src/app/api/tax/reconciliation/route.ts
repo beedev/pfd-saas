@@ -31,6 +31,7 @@ import {
   salaryIncome,
   tdsCredits,
   form16Uploads,
+  form16aUploads,
   form26asUploads,
 } from '@/db';
 import { auth } from '@/auth';
@@ -161,7 +162,7 @@ export async function GET(request: NextRequest) {
     const fy = new URL(request.url).searchParams.get('fy') || getCurrentFinancialYear();
 
     // ── 1. Load everything we need for this FY (user-scoped) ──
-    const [salaryRows, tdsRows, form16Rows, form26asRows] = await Promise.all([
+    const [salaryRows, tdsRows, form16Rows, form16aRows, form26asRows] = await Promise.all([
       db
         .select()
         .from(salaryIncome)
@@ -176,9 +177,27 @@ export async function GET(request: NextRequest) {
         .where(and(eq(form16Uploads.userId, userId), eq(form16Uploads.fy, fy))),
       db
         .select()
+        .from(form16aUploads)
+        .where(and(eq(form16aUploads.userId, userId), eq(form16aUploads.fy, fy))),
+      db
+        .select()
         .from(form26asUploads)
         .where(and(eq(form26asUploads.userId, userId), eq(form26asUploads.fy, fy))),
     ]);
+
+    // Form 16A certificates → authoritative non-salary TDS by section.
+    // Sums 194J/194JB cert TDS for the business dimension (Books vs
+    // Form 16A vs 26AS), mirroring how Form 16 backs salary.
+    const form16aBusinessTdsPaisa = form16aRows
+      .filter((r) => {
+        const s = (r.section || '').toUpperCase();
+        return s === '194J' || s === '194JB';
+      })
+      .reduce((sum, r) => sum + (r.tdsPaisa ?? 0), 0);
+    const form16aBusinessCount = form16aRows.filter((r) => {
+      const s = (r.section || '').toUpperCase();
+      return s === '194J' || s === '194JB';
+    }).length;
 
     // ── 2. Aggregate books ──
     const booksSalary = salaryRows.reduce(
@@ -338,8 +357,11 @@ export async function GET(request: NextRequest) {
         source: `tds_credits where section IN ('194J','194JB') (${tdsRows.filter((r) => sectionOf(r) === '194J' || sectionOf(r) === '194JB').length} row${tdsRows.filter((r) => sectionOf(r) === '194J' || sectionOf(r) === '194JB').length === 1 ? '' : 's'})`,
       },
       form16: {
-        valuePaisa: null,
-        source: '— (not a Form 16 dimension)',
+        valuePaisa: form16aBusinessCount > 0 ? form16aBusinessTdsPaisa : null,
+        source:
+          form16aBusinessCount > 0
+            ? `form_16a_uploads (${form16aBusinessCount} Form 16A cert${form16aBusinessCount === 1 ? '' : 's'})`
+            : '— (no Form 16A uploaded)',
         uploadId: null,
       },
       form26as: {
@@ -348,10 +370,10 @@ export async function GET(request: NextRequest) {
         uploadId: form26as194J != null ? (latest26as?.id ?? null) : null,
       },
       delta: {
-        form16: null,
+        form16: form16aBusinessCount > 0 ? books194J - form16aBusinessTdsPaisa : null,
         form26as: form26as194J != null ? books194J - form26as194J : null,
       },
-      status: classify(books194J, null, form26as194J),
+      status: classify(books194J, form16aBusinessCount > 0 ? form16aBusinessTdsPaisa : null, form26as194J),
     });
 
     // BANK INTEREST TDS — 194A (books vs 26AS per-section if available)

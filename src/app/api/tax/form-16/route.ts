@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
-import { db, form16Uploads } from '@/db';
+import { db, form16Uploads, form16aUploads } from '@/db';
 import { auth } from '@/auth';
 
 export async function GET(request: NextRequest) {
@@ -40,7 +40,17 @@ export async function GET(request: NextRequest) {
       totalTdsPaisa: uploads.reduce((s, u) => s + (u.totalTdsPaisa ?? 0), 0),
     };
 
-    return NextResponse.json({ uploads, totals });
+    // Form 16A (non-salary TDS certificates) for the same scope.
+    const aScope = eq(form16aUploads.userId, session.user.id);
+    const form16a = fy
+      ? await db.select().from(form16aUploads)
+          .where(and(aScope, eq(form16aUploads.fy, fy)))
+          .orderBy(desc(form16aUploads.uploadedAt))
+      : await db.select().from(form16aUploads)
+          .where(aScope)
+          .orderBy(desc(form16aUploads.uploadedAt));
+
+    return NextResponse.json({ uploads, totals, form16a });
   } catch (err) {
     console.error('[tax/form-16 GET]', err);
     return NextResponse.json({ error: 'Failed' }, { status: 500 });

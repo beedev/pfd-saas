@@ -2275,6 +2275,55 @@ export const investmentTransactions = pgTable('investment_transactions', {
 export type InvestmentTransaction = typeof investmentTransactions.$inferSelect;
 export type NewInvestmentTransaction = typeof investmentTransactions.$inferInsert;
 
+// MF redemptions (withdrawals). Honours the SEBI cutoff NAV rule: a
+// request gets the applicable business-day NAV, which may not be
+// published yet → status PENDING until the settlement worker fills it.
+// On settle it writes a SELL investment_transaction + a capital_gains
+// row and reduces the holding (average-cost). See lib/finance/mf-redeem.
+export type MfRedemptionStatus = 'PENDING' | 'SETTLED';
+export type MfRedemptionMode = 'units' | 'amount';
+
+export const mfRedemptions = pgTable('mf_redemptions', {
+  id: serial('id').primaryKey(),
+  mutualFundId: integer('mutual_fund_id').notNull().references(() => mutualFunds.id, { onDelete: 'cascade' }),
+  // Request inputs.
+  requestDate: text('request_date').notNull(),       // IST calendar date raised
+  afterCutoff: boolean('after_cutoff').notNull().default(false),
+  applicableNavDate: text('applicable_nav_date').notNull(),
+  mode: text('mode').$type<MfRedemptionMode>().notNull(),
+  requestedValue: real('requested_value').notNull(), // units or rupees, per mode
+  status: text('status').$type<MfRedemptionStatus>().notNull().default('PENDING'),
+  // Settlement results (null until SETTLED).
+  navPaisa: bigint('nav_paisa', { mode: 'number' }),
+  unitsSold: real('units_sold'),
+  proceedsPaisa: bigint('proceeds_paisa', { mode: 'number' }),
+  costBasisPaisa: bigint('cost_basis_paisa', { mode: 'number' }),
+  realizedGainPaisa: bigint('realized_gain_paisa', { mode: 'number' }),
+  acquisitionDate: text('acquisition_date'),
+  holdingPeriod: text('holding_period').$type<HoldingPeriod>(),
+  financialYear: text('financial_year'),
+  settledAt: timestamp('settled_at', { mode: 'date' }),
+  // Links to the downstream records (so a delete can reverse cleanly).
+  transactionId: integer('transaction_id').references(() => investmentTransactions.id, { onDelete: 'set null' }),
+  capitalGainId: integer('capital_gain_id').references(() => capitalGains.id, { onDelete: 'set null' }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('mf_redemptions_mf_idx').on(table.userId, table.mutualFundId),
+  index('mf_redemptions_status_idx').on(table.status),
+  index('mf_redemptions_user_id_idx').on(table.userId),
+  // At most one open (PENDING) redemption per fund — DB-enforced backstop
+  // for the settle concurrency guard (prevents the simultaneous-POST race
+  // from creating two in-flight redemptions on the same holding).
+  uniqueIndex('mf_redemptions_one_pending_per_fund')
+    .on(table.mutualFundId)
+    .where(sql`${table.status} = 'PENDING'`),
+]);
+
+export type MfRedemption = typeof mfRedemptions.$inferSelect;
+export type NewMfRedemption = typeof mfRedemptions.$inferInsert;
+
 /**
  * Income-tax slab table — Sprint 4 Phase 1.
  *
@@ -2825,6 +2874,44 @@ export const form16Uploads = pgTable('form_16_uploads', {
 
 export type Form16Upload = typeof form16Uploads.$inferSelect;
 export type NewForm16Upload = typeof form16Uploads.$inferInsert;
+
+// Form 16A — non-salary TDS certificates (194J/194JB/194A/…). Distinct
+// from Form 16 (salary): one row per uploaded certificate, deduped by
+// (userId, certNumber). Feeds the Business/194J reconciliation dimension
+// as the authoritative cert source (Books vs Form 16A vs 26AS).
+export const form16aUploads = pgTable('form_16a_uploads', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  certNumber: text('cert_number').notNull(),
+  deductorName: text('deductor_name').notNull(),
+  deductorTan: text('deductor_tan').notNull(),
+  deducteePan: text('deductee_pan'),
+  // TDS section this certificate covers — e.g. '194JB', '194J', '194A'.
+  section: text('section').notNull().default('194JB'),
+  // Certificate period (ISO YYYY-MM-DD) + quarter label ('Q4').
+  periodFrom: text('period_from'),
+  periodTo: text('period_to'),
+  quarter: text('quarter'),
+  // Money in paisa.
+  amountPaidPaisa: bigint('amount_paid_paisa', { mode: 'number' }).notNull().default(0),
+  tdsPaisa: bigint('tds_paisa', { mode: 'number' }).notNull().default(0),
+  tdsDepositedPaisa: bigint('tds_deposited_paisa', { mode: 'number' }).notNull().default(0),
+  uploadedAt: timestamp('uploaded_at', { mode: 'date' }).defaultNow(),
+  sourceFilename: text('source_filename'),
+  sourceKind: text('source_kind').$type<Form16SourceKind>().notNull(),
+  rawText: text('raw_text'),
+  notes: text('notes'),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('form_16a_uploads_fy_idx').on(table.userId, table.fy),
+  index('form_16a_uploads_tan_idx').on(table.userId, table.deductorTan),
+  index('form_16a_uploads_user_id_idx').on(table.userId),
+  // A certificate number is unique per user — re-uploading updates in place.
+  uniqueIndex('form_16a_uploads_cert_uq').on(table.userId, table.certNumber),
+]);
+
+export type Form16aUpload = typeof form16aUploads.$inferSelect;
+export type NewForm16aUpload = typeof form16aUploads.$inferInsert;
 
 // TDS credits — non-salary (consulting/interest/property) — feeds CSV_TDS2 / CSV_TDS3
 export type TdsCategory = 'CONSULTING' | 'INTEREST' | 'RENT' | 'PROPERTY' | 'OTHER';

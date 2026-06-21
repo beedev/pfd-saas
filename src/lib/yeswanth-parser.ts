@@ -292,33 +292,74 @@ function annualSum(sheet: SheetLite, row: number): number {
   return sumRow(sheet, row, 'D', 'O');
 }
 
-/** Parse the Earnings section (rows 4..22). */
-function parseSalary(sheet: SheetLite): YeswanthSalaryComponents {
-  // Row map per the FY 2026-27 template (column B label):
-  //   R4 = Basic, R5 = DA, R6 = Convey, R7 = HRA, R8 = Ch. Educ
-  //   R9 = Medical, R10 = LTA, R11 = Uniform All., R12 = Car allow
-  //   R13..R21 = Misc (otherAllowances), R22 = Total
-  // Rent paid is in row 27 (B=Rent).
+// ─── Label-driven row lookup ─────────────────────────────────────────
+//
+// The Yeswanth template shifts rows between yearly versions (e.g. the
+// FY 2024-25 sheet places Basic at R3, the FY 2026-27 sheet at R4).
+// Hardcoding row numbers silently mis-reads older/newer files — Basic
+// reads as 0, Rent gets mistaken for salary TDS, etc. Instead we anchor
+// on the human label in column B (the second column) and read that row's
+// monthly values. This is version-robust: labels are stable, positions
+// are not.
+
+/** Normalise a label for matching: lowercase, drop periods, collapse
+ *  whitespace. "Ch. Educ" → "ch educ", "Life Insur." → "life insur". */
+function normaliseLabel(s: string): string {
+  return s.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** Index column B of the IT sheet: normalised label → row number(s).
+ *  Labels repeat (Misc, Oth Ded), so each maps to an array of rows. */
+function indexLabels(sheet: SheetLite, maxRow = 60): Map<string, number[]> {
+  const idx = new Map<string, number[]>();
+  for (let r = 1; r <= maxRow; r++) {
+    const label = normaliseLabel(readStr(sheet, 'B' + r));
+    if (!label) continue;
+    const arr = idx.get(label) ?? [];
+    arr.push(r);
+    idx.set(label, arr);
+  }
+  return idx;
+}
+
+/** Annual (D..O) sum across every row whose column-B label matches any
+ *  of the given aliases. Returns rupees (the raw cell unit). */
+function sumByLabel(
+  sheet: SheetLite,
+  idx: Map<string, number[]>,
+  ...labels: string[]
+): number {
+  const wanted = new Set(labels.map(normaliseLabel));
+  let total = 0;
+  for (const [label, rows] of idx) {
+    if (!wanted.has(label)) continue;
+    for (const r of rows) total += annualSum(sheet, r);
+  }
+  return total;
+}
+
+/** Parse the Earnings section by column-B label (version-robust). */
+function parseSalary(sheet: SheetLite, idx: Map<string, number[]>): YeswanthSalaryComponents {
+  // Column-B labels in the Yeswanth template:
+  //   Basic, DA, Convey, HRA, Ch. Educ, Medical, LTA, Uniform All.,
+  //   Car allow, Misc (×N) → otherAllowances. Rent → HRA rent paid.
+  //   "IT" → salary TDS the employer deducted (→ salary_income.tds_paisa).
+  const otherAllowances =
+    sumByLabel(sheet, idx, 'Uniform All', 'Uniform Allowance') +
+    sumByLabel(sheet, idx, 'Car allow', 'Car allowance') +
+    sumByLabel(sheet, idx, 'Misc');
   return {
-    basicPaisa: toPaisa(annualSum(sheet, 4)),
-    daPaisa: toPaisa(annualSum(sheet, 5)),
-    conveyancePaisa: toPaisa(annualSum(sheet, 6)),
-    hraReceivedPaisa: toPaisa(annualSum(sheet, 7)),
-    childrenEdAllowancePaisa: toPaisa(annualSum(sheet, 8)),
-    medicalPaisa: toPaisa(annualSum(sheet, 9)),
-    ltaPaisa: toPaisa(annualSum(sheet, 10)),
-    otherAllowancesPaisa: toPaisa(
-      annualSum(sheet, 11) + // Uniform
-      annualSum(sheet, 12) + // Car allow
-      annualSum(sheet, 13) + annualSum(sheet, 14) + annualSum(sheet, 15) +
-      annualSum(sheet, 16) + annualSum(sheet, 17) + annualSum(sheet, 18) +
-      annualSum(sheet, 19) + annualSum(sheet, 20) + annualSum(sheet, 21),
-    ),
+    basicPaisa: toPaisa(sumByLabel(sheet, idx, 'Basic')),
+    daPaisa: toPaisa(sumByLabel(sheet, idx, 'DA')),
+    conveyancePaisa: toPaisa(sumByLabel(sheet, idx, 'Convey', 'Conveyance')),
+    hraReceivedPaisa: toPaisa(sumByLabel(sheet, idx, 'HRA')),
+    childrenEdAllowancePaisa: toPaisa(sumByLabel(sheet, idx, 'Ch Educ', 'Ch. Educ', 'Children Education')),
+    medicalPaisa: toPaisa(sumByLabel(sheet, idx, 'Medical')),
+    ltaPaisa: toPaisa(sumByLabel(sheet, idx, 'LTA')),
+    otherAllowancesPaisa: toPaisa(otherAllowances),
     // Rent — divided by 12 to get monthly rate (schema stores monthly).
-    rentPaidMonthlyPaisa: toPaisa(annualSum(sheet, 27) / 12),
-    // R26 "IT" — income tax deducted by the employer from salary across
-    // the year. Maps to salary_income.tds_paisa, not to a deduction row.
-    salaryTdsPaisa: toPaisa(annualSum(sheet, 26)),
+    rentPaidMonthlyPaisa: toPaisa(sumByLabel(sheet, idx, 'Rent') / 12),
+    salaryTdsPaisa: toPaisa(sumByLabel(sheet, idx, 'IT')),
   };
 }
 
@@ -336,41 +377,32 @@ function parseHousingLoan(sheet: SheetLite): YeswanthHousingLoan {
 
 /** Parse the Deductions block (rows 23..37). Each row has label in B
  *  and monthly columns D..O. We map row labels to standard sections. */
-function parseDeductions(sheet: SheetLite, fy: string): YeswanthDeduction[] {
+function parseDeductions(sheet: SheetLite, idx: Map<string, number[]>, fy: string): YeswanthDeduction[] {
   void fy;
   const rows: YeswanthDeduction[] = [];
-  // Row labels per template:
-  //   R23=Prof tax → 80GG-ish?(no, employer's prof tax under sec 16)
-  //   R24=PF, R25=VPF → 80C
-  //   R26=IT (income tax paid — handled separately under tax-paid)
-  //   R27=Rent → drives HRA, not a deduction
-  //   R28=Life Insur → 80C
-  //   R29..R37 = Oth Ded — unlabelled user-defined rows
-  const PF = toPaisa(annualSum(sheet, 24));
-  const VPF = toPaisa(annualSum(sheet, 25));
-  const lifeInsur = toPaisa(annualSum(sheet, 28));
-
-  // The user splits Oth Ded into rows 29..37; the section is in
-  // column C (or A in some templates) — we read C29 etc.
-  // To stay deterministic and avoid mis-categorising user data, we
-  // emit them as generic '80C-like' rows with description from B/C.
-  // Caller can re-categorise on the preview page.
+  // Column-B labels: PF, VPF, Life Insur. → 80C. "Oth Ded" (×N) are
+  // user-defined rows (section in column C). "IT" is salary TDS and
+  // "Rent" drives HRA — both handled in parseSalary, not here.
+  const PF = sumByLabel(sheet, idx, 'PF');
+  const VPF = sumByLabel(sheet, idx, 'VPF');
+  const lifeInsur = sumByLabel(sheet, idx, 'Life Insur', 'Life Insurance');
 
   if (PF > 0) {
-    rows.push({ section: '80C', description: 'PF (provident fund)', amountRupees: PF / 100 });
+    rows.push({ section: '80C', description: 'PF (provident fund)', amountRupees: PF });
   }
   if (VPF > 0) {
-    rows.push({ section: '80C', description: 'VPF (voluntary PF)', amountRupees: VPF / 100 });
+    rows.push({ section: '80C', description: 'VPF (voluntary PF)', amountRupees: VPF });
   }
   if (lifeInsur > 0) {
-    rows.push({ section: '80C', description: 'Life Insurance premium', amountRupees: lifeInsur / 100 });
+    rows.push({ section: '80C', description: 'Life Insurance premium', amountRupees: lifeInsur });
   }
 
-  for (let r = 29; r <= 37; r++) {
+  // User-defined "Oth Ded" rows: section in column C, description in B.
+  // Default to 80C when the section cell is blank; the preview page lets
+  // the user re-categorise before confirm.
+  for (const r of idx.get(normaliseLabel('Oth Ded')) ?? []) {
     const amount = annualSum(sheet, r);
     if (amount === 0) continue;
-    // Section code lives in column C; description in column D's label
-    // (sometimes blank). We default to '80C' if unknown.
     const section = readStr(sheet, 'C' + r).trim() || '80C';
     const desc = readStr(sheet, 'B' + r).trim() || 'Other deduction';
     rows.push({ section, description: desc, amountRupees: amount });
@@ -503,13 +535,14 @@ export async function parseYeswanthTaxCalc(buffer: Buffer): Promise<YeswanthPrev
   }
   const sheet = wb.Sheets[itSheetName];
   const fy = detectFy(itSheetName);
+  const labelIdx = indexLabels(sheet);
 
   return {
     fy,
-    salaryAnnual: parseSalary(sheet),
+    salaryAnnual: parseSalary(sheet, labelIdx),
     setupParams: parseSetupParams(sheet),
     housingLoan: parseHousingLoan(sheet),
-    deductions: parseDeductions(sheet, fy),
+    deductions: parseDeductions(sheet, labelIdx, fy),
     dividends: parseDividends(wb),
     bankInterest: parseBankInterest(wb),
     taxesPaidOutsideSalary: parseTaxesPaidOutsideSalary(wb),

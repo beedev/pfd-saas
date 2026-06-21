@@ -24,6 +24,7 @@ import { db, scheduledJobs, type JobType } from '@/db';
 import { runSipAutoExecute } from '@/lib/cron/sip-auto-execute';
 import { runAlertsCheck } from '@/lib/cron/alerts-check';
 import { runDailyDigestJob } from '@/lib/cron/daily-digest';
+import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
 
@@ -102,9 +103,14 @@ export async function POST(request: NextRequest) {
         case 'alerts_check':
           report.result = await runAlertsCheck(job.userId);
           break;
-        case 'sip_auto_execute':
-          report.result = await runSipAutoExecute(job.userId);
+        case 'sip_auto_execute': {
+          // Same NAV-driven daily pass also settles any PENDING MF
+          // redemptions whose applicable NAV has now published.
+          const sip = await runSipAutoExecute(job.userId);
+          const redemptions = await settlePendingRedemptions(job.userId);
+          report.result = { sip, redemptions };
           break;
+        }
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);
       }

@@ -21,11 +21,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
-import { db, form16Uploads } from '@/db';
+import { db, form16Uploads, form16aUploads } from '@/db';
 import { auth } from '@/auth';
 import { extractPdfText, extractPdfRows } from '@/lib/services/statement-parsers/pdf-text';
 import {
   parseForm16,
+  parseForm16A,
+  isForm16A,
   rupeesNumberToPaisa,
   type Form16ParseResult,
 } from '@/lib/services/statement-parsers/form16';
@@ -129,16 +131,62 @@ export async function POST(request: NextRequest) {
     let parsed: Form16ParseResult | null = null;
     let rawText: string | null = null;
     let parseError: string | null = null;
+    let rows: string[] = [];
+    let flat = '';
     try {
-      const [rows, flat] = await Promise.all([
+      [rows, flat] = await Promise.all([
         extractPdfRows(buffer),
         extractPdfText(buffer),
       ]);
       rawText = flat;
-      parsed = parseForm16(rows, flat);
     } catch (err) {
       parseError = `Parse failed: ${err instanceof Error ? err.message : 'unknown'}`;
-      console.error('[tax/form-16/upload parse]', err);
+      console.error('[tax/form-16/upload extract]', err);
+    }
+
+    // ── Form 16A (non-salary TDS certificate) → separate table, early return ──
+    // Detect by the form-number token "16A"; a salary Form 16 (even its
+    // Part A) never matches. Upsert deduped by (userId, certNumber).
+    if (!parseError && isForm16A(flat)) {
+      const a = parseForm16A(rows, flat);
+      const certNumber = a.certNumber as string; // parser guarantees a stable key
+      const values = {
+        userId,
+        fy: a.fy || fy, // the cert's own period-derived FY wins over the form's FY
+        certNumber,
+        deductorName: a.deductorName || 'Unknown — please edit',
+        deductorTan: a.deductorTan || 'UNKNOWN',
+        deducteePan: a.deducteePan ?? null,
+        section: a.section || '194JB',
+        periodFrom: a.periodFrom ?? null,
+        periodTo: a.periodTo ?? null,
+        quarter: a.quarter ?? null,
+        amountPaidPaisa: a.amountPaidPaisa ?? 0,
+        tdsPaisa: a.tdsPaisa ?? 0,
+        tdsDepositedPaisa: a.tdsDepositedPaisa ?? 0,
+        sourceKind: 'PDF' as const,
+        sourceFilename: relPath,
+        rawText: flat,
+        notes: a.notes || null,
+      };
+      const [row] = await db
+        .insert(form16aUploads)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [form16aUploads.userId, form16aUploads.certNumber],
+          set: { ...values, uploadedAt: new Date() },
+        })
+        .returning();
+      return NextResponse.json({ upload: row, parsed: a, kind: 'FORM16A' }, { status: 201 });
+    }
+
+    if (!parseError) {
+      try {
+        parsed = parseForm16(rows, flat);
+      } catch (err) {
+        parseError = `Parse failed: ${err instanceof Error ? err.message : 'unknown'}`;
+        console.error('[tax/form-16/upload parse]', err);
+      }
     }
 
     // ── Merge model ──

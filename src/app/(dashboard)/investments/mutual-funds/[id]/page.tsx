@@ -15,7 +15,7 @@ import {
   Input,
   Select,
 } from '@dxp/ui';
-import { ArrowLeft, Loader2, PiggyBank, Trash2, Pencil, Save, X } from 'lucide-react';
+import { ArrowLeft, Loader2, PiggyBank, Trash2, Pencil, Save, X, Wallet, Clock } from 'lucide-react';
 
 type FundType = 'EQUITY' | 'DEBT' | 'HYBRID' | 'LIQUID' | 'GOLD';
 type Category = 'EQUITY' | 'DEBT' | 'HYBRID' | 'UNKNOWN';
@@ -341,7 +341,260 @@ export default function MutualFundDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <RedeemSection
+        mfId={String(params.id)}
+        units={holding.units}
+        fundType={holding.fundType}
+        liveNavRupees={liveNav}
+        onChanged={load}
+      />
     </div>
+  );
+}
+
+/* --- redemption ---------------------------------------------------------- */
+
+interface Redemption {
+  id: number;
+  requestDate: string;
+  applicableNavDate: string;
+  mode: 'units' | 'amount';
+  requestedValue: number;
+  status: 'PENDING' | 'SETTLED';
+  navPaisa: number | null;
+  unitsSold: number | null;
+  proceedsPaisa: number | null;
+  realizedGainPaisa: number | null;
+  holdingPeriod: 'LTCG' | 'STCG' | null;
+}
+
+function RedeemSection({
+  mfId,
+  units,
+  fundType,
+  liveNavRupees,
+  onChanged,
+}: {
+  mfId: string;
+  units: number;
+  fundType: FundType;
+  liveNavRupees: number | null;
+  onChanged: () => void;
+}) {
+  const [mode, setMode] = useState<'units' | 'amount'>('units');
+  const [value, setValue] = useState('');
+  const [redeemAll, setRedeemAll] = useState(false);
+  const [requestDate, setRequestDate] = useState(new Date().toISOString().slice(0, 10));
+  const [afterCutoff, setAfterCutoff] = useState(false);
+  const [navOverride, setNavOverride] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [list, setList] = useState<Redemption[]>([]);
+
+  const cutoff = fundType === 'LIQUID' ? '1:30 PM' : '3:00 PM';
+
+  const loadList = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/investments/mutual-funds/${mfId}/redeem`);
+      if (r.ok) setList((await r.json()).redemptions ?? []);
+    } catch {
+      /* non-fatal */
+    }
+  }, [mfId]);
+  useEffect(() => {
+    loadList();
+  }, [loadList]);
+
+  const submit = async () => {
+    const v = redeemAll ? units : Number(value);
+    if (!redeemAll && (!Number.isFinite(v) || v <= 0)) {
+      toast.error('Enter a positive value, or tick Redeem all.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const r = await fetch(`/api/investments/mutual-funds/${mfId}/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode,
+          value: v,
+          redeemAll,
+          requestDate,
+          afterCutoff,
+          navOverride: navOverride ? Number(navOverride) : undefined,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || 'Redemption failed');
+      if (j.status === 'SETTLED') {
+        const red = j.redemption;
+        toast.success(
+          `Redeemed ${red.unitsSold?.toFixed(3)} units @ ₹${(red.navPaisa / 100).toFixed(4)} → ` +
+            `${formatINR(red.proceedsPaisa)} (${red.holdingPeriod}).`,
+        );
+      } else {
+        toast.info(j.message || 'Redemption pending NAV publication.');
+      }
+      setValue('');
+      setRedeemAll(false);
+      setNavOverride('');
+      await loadList();
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const settlePending = async () => {
+    setSettling(true);
+    try {
+      const r = await fetch('/api/investments/mutual-funds/redemptions/settle', { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || 'Failed');
+      toast.success(`Settled ${j.settled} redemption(s); ${j.stillPending} still pending.`);
+      await loadList();
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setSettling(false);
+    }
+  };
+
+  const hasPending = list.some((r) => r.status === 'PENDING');
+  const estProceeds =
+    !redeemAll && mode === 'amount'
+      ? Number(value || 0)
+      : liveNavRupees != null
+        ? (redeemAll ? units : Number(value || 0)) * liveNavRupees
+        : null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <h3 className="flex items-center gap-2 text-base font-bold text-[var(--dxp-text)]">
+          <Wallet className="h-5 w-5 text-[var(--dxp-brand)]" />
+          Redeem (withdraw)
+        </h3>
+        <p className="text-xs text-[var(--dxp-text-muted)]">
+          Holding {units.toFixed(3)} units. The applicable NAV is the {cutoff} cutoff rule:
+          before {cutoff} on a business day → that day&apos;s NAV; after → next business day&apos;s
+          (published the following day, so it may settle shortly after).
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-xs font-bold uppercase text-[var(--dxp-text-secondary)] mb-1 block">By</label>
+            <div className="w-32">
+              <Select
+                options={[
+                  { value: 'units', label: 'Units' },
+                  { value: 'amount', label: 'Amount (₹)' },
+                ]}
+                value={mode}
+                onChange={(v) => setMode(v as 'units' | 'amount')}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase text-[var(--dxp-text-secondary)] mb-1 block">
+              {mode === 'units' ? 'Units to redeem' : 'Amount (₹)'}
+            </label>
+            <Input
+              type="number"
+              value={redeemAll ? '' : value}
+              disabled={redeemAll}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={mode === 'units' ? units.toFixed(3) : '50000'}
+              className="w-36"
+            />
+          </div>
+          <label className="flex items-center gap-1 text-sm pb-2">
+            <input type="checkbox" checked={redeemAll} onChange={(e) => setRedeemAll(e.target.checked)} />
+            Redeem all
+          </label>
+          <div>
+            <label className="text-xs font-bold uppercase text-[var(--dxp-text-secondary)] mb-1 block">Request date</label>
+            <Input type="date" value={requestDate} onChange={(e) => setRequestDate(e.target.value)} className="w-40" />
+          </div>
+          <label className="flex items-center gap-1 text-sm pb-2" title={`Cutoff ${cutoff} IST`}>
+            <input type="checkbox" checked={afterCutoff} onChange={(e) => setAfterCutoff(e.target.checked)} />
+            <Clock className="h-3 w-3" /> After {cutoff}
+          </label>
+          <div>
+            <label className="text-xs font-bold uppercase text-[var(--dxp-text-secondary)] mb-1 block">NAV override (₹)</label>
+            <Input
+              type="number"
+              value={navOverride}
+              onChange={(e) => setNavOverride(e.target.value)}
+              placeholder="optional"
+              className="w-32"
+            />
+          </div>
+          <Button variant="primary" onClick={submit} disabled={submitting} className="mb-0.5">
+            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Wallet className="h-3 w-3 mr-1" />}
+            Redeem
+          </Button>
+        </div>
+        {estProceeds != null && estProceeds > 0 && (
+          <p className="text-xs text-[var(--dxp-text-muted)]">
+            ≈ {formatINR(Math.round(estProceeds * 100))} at the latest known NAV (final value uses the
+            applicable-date NAV).
+          </p>
+        )}
+
+        {list.length > 0 && (
+          <div className="overflow-x-auto pt-2">
+            <div className="flex items-center justify-between mb-1">
+              <h4 className="text-sm font-bold">Redemption ledger</h4>
+              {hasPending && (
+                <Button variant="secondary" size="sm" onClick={settlePending} disabled={settling}>
+                  {settling && <Loader2 className="h-3 w-3 mr-1 animate-spin" />} Settle pending
+                </Button>
+              )}
+            </div>
+            <table className="w-full text-xs">
+              <thead className="text-[var(--dxp-text-muted)] uppercase tracking-wide">
+                <tr className="border-b border-[var(--dxp-border)]">
+                  <th className="text-left py-1 pr-2">Requested</th>
+                  <th className="text-left py-1 pr-2">NAV date</th>
+                  <th className="text-right py-1 pr-2">Units</th>
+                  <th className="text-right py-1 pr-2">Proceeds</th>
+                  <th className="text-right py-1 pr-2">Gain</th>
+                  <th className="text-left py-1 pr-2">Type</th>
+                  <th className="text-left py-1 pr-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r) => (
+                  <tr key={r.id} className="border-b border-[var(--dxp-border-light)]">
+                    <td className="py-1 pr-2">
+                      {r.mode === 'units' ? `${r.requestedValue} u` : formatINR(Math.round(r.requestedValue * 100))}
+                      <span className="text-[var(--dxp-text-muted)]"> · {r.requestDate}</span>
+                    </td>
+                    <td className="py-1 pr-2">{r.applicableNavDate}</td>
+                    <td className="py-1 pr-2 text-right font-mono">{r.unitsSold != null ? r.unitsSold.toFixed(3) : '—'}</td>
+                    <td className="py-1 pr-2 text-right font-mono">{r.proceedsPaisa != null ? formatINR(r.proceedsPaisa) : '—'}</td>
+                    <td className="py-1 pr-2 text-right font-mono">
+                      {r.realizedGainPaisa != null ? formatINR(r.realizedGainPaisa) : '—'}
+                    </td>
+                    <td className="py-1 pr-2">{r.holdingPeriod ?? '—'}</td>
+                    <td className="py-1 pr-2">
+                      <Badge variant={r.status === 'SETTLED' ? 'success' : 'warning'}>{r.status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

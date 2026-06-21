@@ -60,6 +60,21 @@ interface Form16Upload {
   notes: string | null;
 }
 
+interface Form16aUpload {
+  id: number;
+  fy: string;
+  certNumber: string;
+  deductorName: string;
+  deductorTan: string;
+  section: string;
+  periodFrom: string | null;
+  periodTo: string | null;
+  quarter: string | null;
+  amountPaidPaisa: number;
+  tdsPaisa: number;
+  notes: string | null;
+}
+
 interface Resp {
   uploads: Form16Upload[];
   totals: {
@@ -67,6 +82,7 @@ interface Resp {
     taxableSalaryPaisa: number;
     totalTdsPaisa: number;
   };
+  form16a: Form16aUpload[];
 }
 
 const fmtINR = (paisa: number) =>
@@ -125,7 +141,15 @@ export default function Form16ListPage() {
       const r = await fetch('/api/tax/form-16/upload', { method: 'POST', body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || 'Upload failed');
-      toast.success('Uploaded — review the parsed fields and correct any 0s.');
+      if (j?.kind === 'FORM16A') {
+        const p = j.parsed ?? {};
+        toast.success(
+          `Form 16A detected — ${p.deductorName ?? 'deductor'}, ${p.section ?? '194JB'}, ` +
+            `FY ${p.fy ?? fy} (TDS ₹${((p.tdsPaisa ?? 0) / 100).toLocaleString('en-IN')}).`,
+        );
+      } else {
+        toast.success('Uploaded — review the parsed fields and correct any 0s.');
+      }
       if (fileRef.current) fileRef.current.value = '';
       await load();
     } catch (e) {
@@ -174,6 +198,17 @@ export default function Form16ListPage() {
   const deleteUpload = async (id: number) => {
     if (!confirm('Delete this Form 16 record?')) return;
     const r = await fetch(`/api/tax/form-16/${id}`, { method: 'DELETE' });
+    if (!r.ok) {
+      toast.error((await r.json()).error || 'Failed');
+      return;
+    }
+    toast.success('Deleted');
+    await load();
+  };
+
+  const deleteForm16a = async (id: number) => {
+    if (!confirm('Delete this Form 16A certificate?')) return;
+    const r = await fetch(`/api/tax/form-16a/${id}`, { method: 'DELETE' });
     if (!r.ok) {
       toast.error((await r.json()).error || 'Failed');
       return;
@@ -362,6 +397,59 @@ export default function Form16ListPage() {
                 </table>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && data && data.form16a.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-bold">Form 16A — TDS certificates ({data.form16a.length})</h2>
+            <p className="text-xs text-[var(--dxp-text-muted)]">
+              Non-salary TDS certificates (194J/194JB etc.). These back the Business-TDS
+              reconciliation (Books vs Form 16A vs 26AS) for FY {fy}.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-[var(--dxp-text-muted)] border-b border-[var(--dxp-border)]">
+                    <th className="py-2 pr-2">Deductor</th>
+                    <th className="py-2 pr-2">TAN</th>
+                    <th className="py-2 pr-2">Section</th>
+                    <th className="py-2 pr-2">Quarter</th>
+                    <th className="py-2 pr-2 text-right">Amount paid</th>
+                    <th className="py-2 pr-2 text-right">TDS</th>
+                    <th className="py-2 pr-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.form16a.map((c) => (
+                    <tr key={c.id} className="border-b border-[var(--dxp-border)]">
+                      <td className="py-2 pr-2 font-medium">{c.deductorName}</td>
+                      <td className="py-2 pr-2 font-mono text-xs">{c.deductorTan}</td>
+                      <td className="py-2 pr-2"><Badge variant="default">{c.section}</Badge></td>
+                      <td className="py-2 pr-2 text-xs">{c.quarter ?? '—'}</td>
+                      <td className="py-2 pr-2 text-right font-mono">{fmtINR(c.amountPaidPaisa)}</td>
+                      <td className="py-2 pr-2 text-right font-mono">{fmtINR(c.tdsPaisa)}</td>
+                      <td className="py-2 pr-2">
+                        <Button variant="ghost" size="sm" title="Delete" onClick={() => deleteForm16a(c.id)}>
+                          <Trash2 className="h-3 w-3 text-rose-500" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="text-xs font-bold">
+                    <td className="py-2 pr-2" colSpan={5}>Total TDS</td>
+                    <td className="py-2 pr-2 text-right font-mono">
+                      {fmtINR(data.form16a.reduce((s, c) => s + (c.tdsPaisa ?? 0), 0))}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </CardContent>
         </Card>
       )}

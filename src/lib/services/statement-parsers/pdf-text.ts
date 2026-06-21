@@ -40,7 +40,7 @@ type PdfGetDocumentArg = Parameters<
   typeof import('pdfjs-dist/legacy/build/pdf.mjs').getDocument
 >[0];
 
-async function loadDoc(buffer: Buffer) {
+async function loadDoc(buffer: Buffer, password?: string) {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
   return pdfjs.getDocument({
@@ -48,11 +48,19 @@ async function loadDoc(buffer: Buffer) {
     isEvalSupported: false,
     useSystemFonts: true,
     disableWorker: true,
+    ...(password ? { password } : {}),
   } as PdfGetDocumentArg).promise;
 }
 
-export async function extractPdfText(buffer: Buffer): Promise<string> {
-  const doc = await loadDoc(buffer);
+/** True if the error is pdfjs signalling a missing/incorrect password. */
+export function isPdfPasswordError(err: unknown): boolean {
+  const name = (err as { name?: string })?.name;
+  const msg = (err as { message?: string })?.message ?? '';
+  return name === 'PasswordException' || /password/i.test(msg);
+}
+
+export async function extractPdfText(buffer: Buffer, password?: string): Promise<string> {
+  const doc = await loadDoc(buffer, password);
   const tokens: string[] = [];
   for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
     const page = await doc.getPage(pageNum);
@@ -74,8 +82,8 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
  * Each row is a tab-separated string of cell values — split on `\t` to get
  * positional columns.
  */
-export async function extractPdfRows(buffer: Buffer): Promise<string[]> {
-  const doc = await loadDoc(buffer);
+export async function extractPdfRows(buffer: Buffer, password?: string): Promise<string[]> {
+  const doc = await loadDoc(buffer, password);
   const allRows: string[] = [];
   for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
     const page = await doc.getPage(pageNum);

@@ -159,19 +159,24 @@ const historyCache = new Map<string, { data: MfApiDataPoint[]; timestamp: number
 const HISTORY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
- * Fetch historical NAV for a given scheme code on a specific date.
+ * Fetch the historical NAV for a scheme on a date, AND the date that NAV
+ * actually belongs to.
  *
- * Uses https://api.mfapi.in/mf/{schemeCode} which returns the full history.
- * Finds the NAV on or just before the target date.
+ * If the target date has no published NAV (weekend OR exchange holiday),
+ * the nearest published NAV on or after the target is returned together
+ * with ITS real date. Callers must settle a redemption at that real date
+ * — not the requested date — so the FY and LTCG/STCG classification are
+ * correct (a holiday redemption legally takes the next business day's
+ * NAV, and that day is the sale date for tax purposes).
  *
  * @param schemeCode - AMFI scheme code (e.g. "119551")
- * @param dateIso   - ISO date string "YYYY-MM-DD"
- * @returns NAV in rupees, or null if lookup fails
+ * @param dateIso    - ISO date string "YYYY-MM-DD"
+ * @returns { navRupees, navDateIso } or null if lookup fails / not yet published
  */
-export async function getHistoricalNav(
+export async function getHistoricalNavOn(
   schemeCode: string,
   dateIso: string,
-): Promise<number | null> {
+): Promise<{ navRupees: number; navDateIso: string } | null> {
   try {
     const code = schemeCode.trim();
     if (!code || !dateIso) return null;
@@ -237,11 +242,27 @@ export async function getHistoricalNav(
       }
     }
 
-    return exactNav ?? nearestAfterNav;
+    if (exactNav != null) return { navRupees: exactNav, navDateIso: dateIso };
+    if (nearestAfterNav != null && nearestAfterDate != null) {
+      return { navRupees: nearestAfterNav, navDateIso: nearestAfterDate.toISOString().slice(0, 10) };
+    }
+    return null;
   } catch (err) {
     console.error('Historical NAV lookup error:', err);
     return null;
   }
+}
+
+/**
+ * Back-compat wrapper: the NAV value only. Prefer {@link getHistoricalNavOn}
+ * in settlement paths so the real NAV date drives the sale date.
+ */
+export async function getHistoricalNav(
+  schemeCode: string,
+  dateIso: string,
+): Promise<number | null> {
+  const r = await getHistoricalNavOn(schemeCode, dateIso);
+  return r?.navRupees ?? null;
 }
 
 /**

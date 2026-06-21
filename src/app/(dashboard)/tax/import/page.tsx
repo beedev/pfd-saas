@@ -14,7 +14,7 @@
  * is displayed in-page only and never sent to telemetry.
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Card,
   CardHeader,
@@ -23,7 +23,7 @@ import {
   Badge,
   Select,
 } from '@dxp/ui';
-import { Upload, Loader2, FileCheck2, ArrowRight, AlertTriangle } from 'lucide-react';
+import { Upload, Loader2, FileCheck2, ArrowRight, AlertTriangle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
@@ -69,6 +69,14 @@ interface Preview {
   capitalGainsPropertyDebt: Array<{ scripName: string; saleDate: string; saleRupees: number; longTermFlag: boolean }>;
 }
 
+interface AppliedImport {
+  fy: string;
+  salary: number;
+  deductions: number;
+  tds: number;
+  capitalGains: number;
+}
+
 function fmtINR(rupees: number): string {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -93,6 +101,54 @@ export default function YeswanthImportPage() {
     capitalGains: false, // CG default off — high-risk for over-import
   });
   const fileRef = useRef<HTMLInputElement>(null);
+  const [applied, setApplied] = useState<AppliedImport[]>([]);
+  const [deletingFy, setDeletingFy] = useState<string | null>(null);
+
+  /** Load the list of already-applied imports (for the delete affordance). */
+  const loadApplied = useCallback(async () => {
+    try {
+      const r = await fetch('/api/imports/yeswanth-taxcalc');
+      if (!r.ok) return;
+      const data = await r.json();
+      setApplied(Array.isArray(data.imports) ? data.imports : []);
+    } catch {
+      /* non-fatal — the upload flow still works without this list */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadApplied();
+  }, [loadApplied]);
+
+  const handleDelete = async (fy: string) => {
+    if (
+      !window.confirm(
+        `Delete the imported data for FY ${fy}?\n\n` +
+          `This removes ONLY rows created by the TaxCalc import (salary, deductions, ` +
+          `TDS, capital gains) for that year. Manually-entered data is untouched. ` +
+          `Tax setup-parameter flags are not reverted.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingFy(fy);
+    try {
+      const r = await fetch(`/api/imports/yeswanth-taxcalc?fy=${encodeURIComponent(fy)}`, {
+        method: 'DELETE',
+      });
+      if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+      const { deleted: d } = await r.json();
+      toast.success(
+        `Removed FY ${fy} import — ${d.salary ? 'salary, ' : ''}${d.deductions} deduction(s), ` +
+          `${d.tds} TDS, ${d.capitalGains} capital-gain row(s).`,
+      );
+      loadApplied();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed');
+    } finally {
+      setDeletingFy(null);
+    }
+  };
 
   /** Client-side validation + reject early to keep the spinner honest. */
   const validateFile = (file: File): string | null => {
@@ -157,6 +213,8 @@ export default function YeswanthImportPage() {
       setImportId(null);
       setPreview(null);
       if (fileRef.current) fileRef.current.value = '';
+      loadApplied(); // refresh the applied-imports list
+
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Confirm failed');
     } finally {
@@ -242,6 +300,47 @@ export default function YeswanthImportPage() {
                 </>
               )}
             </label>
+          </CardContent>
+        </Card>
+      )}
+
+      {!preview && applied.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h3 className="text-base font-bold text-[var(--dxp-text)]">Applied imports</h3>
+            <p className="text-xs text-[var(--dxp-text-secondary)]">
+              Data already imported from TaxCalc, by financial year. Delete an import to remove
+              its rows for that year (then re-upload to redo it). Only import-stamped rows are
+              removed — manually-entered data stays. Tax setup-parameter flags aren&apos;t reverted.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {applied.map((imp) => (
+              <div
+                key={imp.fy}
+                className="flex items-center justify-between gap-3 rounded border border-[var(--dxp-border)] p-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[var(--dxp-text)]">FY {imp.fy}</p>
+                  <p className="text-xs text-[var(--dxp-text-muted)]">
+                    {imp.salary ? 'salary · ' : ''}
+                    {imp.deductions} deduction(s) · {imp.tds} TDS · {imp.capitalGains} capital-gain row(s)
+                  </p>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleDelete(imp.fy)}
+                  disabled={deletingFy === imp.fy}
+                >
+                  {deletingFy === imp.fy ? (
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-1 h-3 w-3" />
+                  )}
+                  Delete this import
+                </Button>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}

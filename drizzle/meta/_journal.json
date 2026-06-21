@@ -302,6 +302,13 @@
       "when": 1781400841890,
       "tag": "0042_pale_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1782017451899,
+      "tag": "0043_light_otto_octavius",
+      "breakpoints": true
     }
   ]
 }
