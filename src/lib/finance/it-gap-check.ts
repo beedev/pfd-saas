@@ -1,15 +1,22 @@
 /**
- * Income-Tax Gap Check — "what the IT department has on you" vs "what's
- * booked in the app", at the category-total level (not line items).
+ * Income-Tax Gap Check — reconcile the authoritative records against each other.
  *
- * Sources:
- *   - TIS income-category totals  → app booked income (salary, interest,
- *     dividend, business receipts) + capital-gains sale consideration.
- *   - AIS Part-B1 TDS per section → app booked TDS (salary 192, prof 194J).
+ * The user's mental model (three sources of truth):
+ *   1. My books (manual app entries) — TEMPORAL: only my own estimate, in flux.
+ *   2. Form 16 / 16A (payer certificates) — the ACTUAL, final from my side.
+ *   3. AIS / TIS / 26AS — what the Income-Tax department has.
  *
- * A category is flagged when the IT-dept figure materially exceeds what the
- * app has recorded (something to add before filing). Tolerance is ±₹100
- * (paisa-exact), matching the existing reconciliation convention.
+ * Therefore the reconciliation ANCHORS on Form 16/16A and flags where a
+ * department source (AIS/TIS or 26AS) disagrees with the certificate — because
+ * those are two authoritative records that must match. Books are shown only as
+ * a greyed, provisional reference; they never drive a flag.
+ *
+ * Scope of the Form-16 anchor: INCOME and TAX PAID (TDS) only. Capital gains,
+ * 80C and the like come from our own records — capital gains keeps one
+ * informational "did I record every sale?" completeness check against the AIS
+ * sale-consideration figure; everything else lives on the ITR/deductions pages.
+ *
+ * All money is paisa. Match tolerance is ±₹100.
  */
 
 import { and, eq } from 'drizzle-orm';
@@ -17,69 +24,99 @@ import {
   db,
   aisImports,
   salaryIncome,
-  otherSourcesIncome,
   capitalGains,
   tdsCredits,
+  form16Uploads,
   form16aUploads,
   form26asUploads,
 } from '@/db';
 
 const TOLERANCE_PAISA = 10_000; // ₹100
-const MARGINAL_RATE = 0.3; // indicative top-slab rate for income-gap tax estimate
 
 export type ItGapStatus =
-  | 'missing' // IT dept has it, books have ~nothing
-  | 'under_recorded' // books have less than IT dept
-  | 'matched' // within tolerance
-  | 'app_extra' // books have MORE than IT dept (often legitimate — timing/exempt)
-  | 'no_it_data'; // the relevant document wasn't uploaded
+  | 'matched' // department agrees with the certificate (within tolerance)
+  | 'mismatch' // a department source disagrees with the certificate — chase it
+  | 'no_cert' // department reports a value but there's no Form 16/16A to verify it
+  | 'awaiting_docs' // not enough uploaded to compare this row yet
+  | 'review'; // completeness rows: department sees more than our records
 
-export type ItGapCategory = 'income' | 'tax_paid' | 'consideration';
+export type ItGapGroup = 'income' | 'tax_paid' | 'completeness';
 
 export interface ItGapRow {
   key: string;
   label: string;
-  source: 'TIS' | 'AIS';
-  category: ItGapCategory;
-  itDeptPaisa: number | null; // null = source doc not uploaded
-  bookedPaisa: number;
-  gapPaisa: number; // itDept − booked (positive ⇒ app under-records)
-  estTaxImpactPaisa: number | null;
+  group: ItGapGroup;
+  certPaisa: number | null; // Form 16 / 16A — the actual anchor
+  aisPaisa: number | null; // AIS / TIS (department)
+  form26asPaisa: number | null; // 26AS (department)
+  booksPaisa: number; // our provisional estimate
   status: ItGapStatus;
   note?: string;
 }
 
 export interface ItGapResult {
   fy: string;
-  hasTis: boolean;
-  hasAis: boolean;
-  uploadedAt: { tis: string | null; ais: string | null };
+  has: { form16: boolean; form16a: boolean; tis: boolean; ais: boolean; form26as: boolean };
   rows: ItGapRow[];
-  // 26AS (TRACES) total TDS for the FY — the authoritative tax-credit figure
-  // to rely on at filing. null when no 26AS has been uploaded.
-  form26asTotalTdsPaisa: number | null;
-  summary: { flagged: number; totalGapPaisa: number; estTaxAtRiskPaisa: number };
+  summary: { mismatches: number };
 }
 
-function statusFor(itDept: number | null, booked: number): ItGapStatus {
-  if (itDept == null) return 'no_it_data';
-  const gap = itDept - booked;
-  if (Math.abs(gap) <= TOLERANCE_PAISA) return 'matched';
-  if (booked <= TOLERANCE_PAISA && itDept > TOLERANCE_PAISA) return 'missing';
-  return gap > 0 ? 'under_recorded' : 'app_extra';
+type Family = 'salary' | 'professional' | 'interest' | 'dividend' | 'other';
+
+/** Classify a TDS section code (e.g. "194JB") into an income family. */
+function sectionFamily(sec: string | null | undefined): Family {
+  const s = (sec ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  if (s.startsWith('192')) return 'salary';
+  if (s.startsWith('194J')) return 'professional';
+  if (s.startsWith('194A')) return 'interest';
+  if (s === '194' || s.startsWith('194K')) return 'dividend';
+  return 'other';
+}
+
+/** AIS Part-B1 TDS code (e.g. "TDS-194J") → income family. */
+function aisCodeFamily(code: string): Family {
+  return sectionFamily(code.replace(/^TDS-|^TCS-/i, ''));
+}
+
+interface DeductorRow {
+  section?: string;
+  totalTdsPaisa?: number;
+}
+
+/**
+ * For an anchored (income/tax) row: the certificate is the anchor; flag if any
+ * present department value diverges from it.
+ */
+function anchoredStatus(
+  certPaisa: number | null,
+  deptValues: Array<number | null>,
+): ItGapStatus {
+  const dept = deptValues.filter((v): v is number => v != null);
+  if (certPaisa == null) {
+    // No certificate. If a department source reports a real value, you have
+    // income/TDS the dept sees but you can't verify — surface it.
+    return dept.some((v) => v > TOLERANCE_PAISA) ? 'no_cert' : 'awaiting_docs';
+  }
+  if (dept.length === 0) return 'awaiting_docs'; // cert present, no dept doc yet
+  const allAgree = dept.every((v) => Math.abs(v - certPaisa) <= TOLERANCE_PAISA);
+  return allAgree ? 'matched' : 'mismatch';
 }
 
 export async function computeItGapCheck(userId: string, fy: string): Promise<ItGapResult> {
-  const [aisRows, salaryRows, otherRows, cgRows, tdsRows, f16aRows, f26asRows] = await Promise.all([
+  const [
+    aisRows,
+    salaryRows,
+    cgRows,
+    tdsRows,
+    f16Rows,
+    f16aRows,
+    f26asRows,
+  ] = await Promise.all([
     db.select().from(aisImports).where(and(eq(aisImports.userId, userId), eq(aisImports.fy, fy))),
     db
       .select()
       .from(salaryIncome)
       .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, fy))),
-    db
-      .select()
-      .from(otherSourcesIncome)
-      .where(and(eq(otherSourcesIncome.userId, userId), eq(otherSourcesIncome.financialYear, fy))),
     db
       .select()
       .from(capitalGains)
@@ -88,146 +125,130 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
       .select()
       .from(tdsCredits)
       .where(and(eq(tdsCredits.userId, userId), eq(tdsCredits.financialYear, fy))),
-    db
-      .select()
-      .from(form16aUploads)
-      .where(and(eq(form16aUploads.userId, userId), eq(form16aUploads.fy, fy))),
-    db
-      .select()
-      .from(form26asUploads)
-      .where(and(eq(form26asUploads.userId, userId), eq(form26asUploads.fy, fy))),
+    db.select().from(form16Uploads).where(and(eq(form16Uploads.userId, userId), eq(form16Uploads.fy, fy))),
+    db.select().from(form16aUploads).where(and(eq(form16aUploads.userId, userId), eq(form16aUploads.fy, fy))),
+    db.select().from(form26asUploads).where(and(eq(form26asUploads.userId, userId), eq(form26asUploads.fy, fy))),
   ]);
-
-  const form26asTotalTdsPaisa = f26asRows.length
-    ? f26asRows.reduce((s, r) => s + (r.parsedTotalTdsPaisa || 0), 0)
-    : null;
 
   const tis = aisRows.find((r) => r.kind === 'TIS');
   const ais = aisRows.find((r) => r.kind === 'AIS');
 
-  // TIS category total in paisa: null if TIS not uploaded; 0 if uploaded but
-  // the category is absent (⇒ IT dept has nothing → no gap).
-  const tisCat = (key: string): number | null => {
-    if (!tis) return null;
-    return tis.categoriesJson?.find((c) => c.key === key)?.amountPaisa ?? 0;
-  };
-  const aisTds = (code: string): number | null => {
+  // ── Department: AIS/TIS ──────────────────────────────────────────────
+  const tisCat = (key: string): number | null =>
+    !tis ? null : tis.categoriesJson?.find((c) => c.key === key)?.amountPaisa ?? 0;
+  const aisTdsFamily = (fam: Family): number | null => {
     if (!ais) return null;
-    return ais.tdsJson?.find((t) => t.code === code)?.tdsPaisa ?? 0;
+    return (ais.tdsJson ?? [])
+      .filter((t) => aisCodeFamily(t.code) === fam)
+      .reduce((s, t) => s + (t.tdsPaisa || 0), 0);
   };
 
-  // ── Booked totals ─────────────────────────────────────────────────
-  const bookedSalary = salaryRows.reduce((s, r) => s + (r.grossSalaryPaisa || 0), 0);
-  const bookedSalaryTds = salaryRows.reduce((s, r) => s + (r.tdsPaisa || 0), 0);
-  const INTEREST = new Set(['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST']);
-  const bookedInterest = otherRows
-    .filter((r) => INTEREST.has(r.source))
-    .reduce((s, r) => s + (r.amountPaisa || 0), 0);
-  const bookedDividend = otherRows
-    .filter((r) => r.source === 'DIVIDEND')
-    .reduce((s, r) => s + (r.amountPaisa || 0), 0);
-  const bookedBusiness = otherRows
-    .filter((r) => r.source === 'BUSINESS' || r.source === 'FREELANCE')
-    .reduce((s, r) => s + (r.amountPaisa || 0), 0);
-  const bookedSaleConsideration = cgRows.reduce((s, r) => s + (r.salePrice || 0), 0);
-  const is194J = (sec?: string | null) => !!sec && /194J/i.test(sec);
-  const booked194JTds =
-    tdsRows.filter((r) => is194J(r.section)).reduce((s, r) => s + (r.tdsPaisa || 0), 0) +
-    f16aRows.filter((r) => is194J(r.section)).reduce((s, r) => s + (r.tdsPaisa || 0), 0);
+  // ── Department: 26AS per-section TDS ─────────────────────────────────
+  const f26asDeductors: DeductorRow[] = f26asRows.flatMap((r) => {
+    try {
+      const parsed = JSON.parse(r.parsedDeductorsJson ?? '[]');
+      return Array.isArray(parsed) ? (parsed as DeductorRow[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const has26as = f26asRows.length > 0;
+  const f26asTds = (fam: Family): number | null => {
+    if (!has26as) return null;
+    return f26asDeductors
+      .filter((d) => sectionFamily(d.section) === fam)
+      .reduce((s, d) => s + (d.totalTdsPaisa || 0), 0);
+  };
 
-  // TIS reports interest split into savings + deposit; compare the combined
-  // figure against the app's combined interest (more robust than per-bucket).
-  const tisInterest =
-    tis == null ? null : (tisCat('interest_savings') ?? 0) + (tisCat('interest_deposit') ?? 0);
+  // ── Anchor: Form 16 (salary) + Form 16A (non-salary TDS) ─────────────
+  const hasF16 = f16Rows.length > 0;
+  const f16GrossSalary = hasF16 ? f16Rows.reduce((s, r) => s + (r.grossSalaryPaisa || 0), 0) : null;
+  const f16SalaryTds = hasF16 ? f16Rows.reduce((s, r) => s + (r.totalTdsPaisa || 0), 0) : null;
+  const hasF16a = f16aRows.length > 0;
+  const f16aTds = (fam: Family): number | null =>
+    !hasF16a
+      ? null
+      : f16aRows.filter((r) => sectionFamily(r.section) === fam).reduce((s, r) => s + (r.tdsPaisa || 0), 0);
+
+  // ── Books (provisional reference only) ───────────────────────────────
+  const booksSalary = salaryRows.reduce((s, r) => s + (r.grossSalaryPaisa || 0), 0);
+  const booksSalaryTds = salaryRows.reduce((s, r) => s + (r.tdsPaisa || 0), 0);
+  const booksTdsFamily = (fam: Family): number =>
+    tdsRows.filter((r) => sectionFamily(r.section) === fam).reduce((s, r) => s + (r.tdsPaisa || 0), 0);
+  const booksSaleConsideration = cgRows.reduce((s, r) => s + (r.salePrice || 0), 0);
 
   const rows: ItGapRow[] = [];
 
-  const pushIncome = (key: string, label: string, itDept: number | null, booked: number, note?: string) => {
-    const gap = itDept == null ? 0 : itDept - booked;
-    rows.push({
-      key,
-      label,
-      source: 'TIS',
-      category: 'income',
-      itDeptPaisa: itDept,
-      bookedPaisa: booked,
-      gapPaisa: gap,
-      estTaxImpactPaisa: itDept == null ? null : Math.round(Math.max(0, gap) * MARGINAL_RATE),
-      status: statusFor(itDept, booked),
-      note,
-    });
-  };
+  // 1. Salary income — Form 16 gross vs AIS/TIS salary.
+  rows.push({
+    key: 'salary_income',
+    label: 'Salary income',
+    group: 'income',
+    certPaisa: f16GrossSalary,
+    aisPaisa: tisCat('salary'),
+    form26asPaisa: null,
+    booksPaisa: booksSalary,
+    status: anchoredStatus(f16GrossSalary, [tisCat('salary')]),
+    note: 'Anchor: Form 16 gross salary.',
+  });
 
-  pushIncome('salary', 'Salary', tisCat('salary'), bookedSalary);
-  pushIncome('interest', 'Interest income (savings + deposit)', tisInterest, bookedInterest);
-  pushIncome('dividend', 'Dividend', tisCat('dividend'), bookedDividend);
-  pushIncome(
-    'business_receipts',
-    'Business / professional receipts',
-    tisCat('business_receipts'),
-    bookedBusiness,
-    'Books may also capture this via GST invoices.',
-  );
+  // 2. Salary TDS (Sec 192) — Form 16 TDS vs AIS-192 + 26AS-192.
+  rows.push({
+    key: 'salary_tds',
+    label: 'Salary TDS (Sec 192)',
+    group: 'tax_paid',
+    certPaisa: f16SalaryTds,
+    aisPaisa: aisTdsFamily('salary'),
+    form26asPaisa: f26asTds('salary'),
+    booksPaisa: booksSalaryTds,
+    status: anchoredStatus(f16SalaryTds, [aisTdsFamily('salary'), f26asTds('salary')]),
+    note: 'Anchor: Form 16 Part A TDS.',
+  });
 
-  // Sale consideration — gross sale value, not gain. Confirms every sale /
-  // redemption is captured (the gain is computed from these). No tax estimate.
-  {
-    const itDept = tisCat('sale_securities_mf');
-    const gap = itDept == null ? 0 : itDept - bookedSaleConsideration;
+  // 3-5. Non-salary TDS — Form 16A vs AIS + 26AS, by section family.
+  const tdsRowsDef: Array<{ key: string; label: string; fam: Family }> = [
+    { key: 'tds_194j', label: 'Professional TDS (Sec 194J)', fam: 'professional' },
+    { key: 'tds_194a', label: 'Interest TDS (Sec 194A)', fam: 'interest' },
+    { key: 'tds_194', label: 'Dividend TDS (Sec 194)', fam: 'dividend' },
+  ];
+  for (const d of tdsRowsDef) {
     rows.push({
-      key: 'sale_securities_mf',
-      label: 'Sale of securities & MF (consideration)',
-      source: 'TIS',
-      category: 'consideration',
-      itDeptPaisa: itDept,
-      bookedPaisa: bookedSaleConsideration,
-      gapPaisa: gap,
-      estTaxImpactPaisa: null,
-      status: statusFor(itDept, bookedSaleConsideration),
-      note: 'Gross sale value — confirms all sales/redemptions are recorded.',
+      key: d.key,
+      label: d.label,
+      group: 'tax_paid',
+      certPaisa: f16aTds(d.fam),
+      aisPaisa: aisTdsFamily(d.fam),
+      form26asPaisa: f26asTds(d.fam),
+      booksPaisa: booksTdsFamily(d.fam),
+      status: anchoredStatus(f16aTds(d.fam), [aisTdsFamily(d.fam), f26asTds(d.fam)]),
+      note: 'Anchor: Form 16A certificate.',
     });
   }
 
-  const pushTax = (key: string, label: string, itDept: number | null, booked: number) => {
-    const gap = itDept == null ? 0 : itDept - booked;
+  // 6. Capital gains — completeness only (our records vs AIS sale value).
+  {
+    const aisSale = tisCat('sale_securities_mf');
+    let status: ItGapStatus = 'awaiting_docs';
+    if (aisSale != null) {
+      status = aisSale - booksSaleConsideration > TOLERANCE_PAISA ? 'review' : 'matched';
+    }
     rows.push({
-      key,
-      label,
-      source: 'AIS',
-      category: 'tax_paid',
-      itDeptPaisa: itDept,
-      bookedPaisa: booked,
-      gapPaisa: gap,
-      // For TDS, the gap IS the tax credit at stake (rupee-for-rupee).
-      estTaxImpactPaisa: itDept == null ? null : Math.max(0, gap),
-      status: statusFor(itDept, booked),
+      key: 'capital_gains',
+      label: 'Capital gains — sales captured',
+      group: 'completeness',
+      certPaisa: null,
+      aisPaisa: aisSale,
+      form26asPaisa: null,
+      booksPaisa: booksSaleConsideration,
+      status,
+      note: 'From our records. AIS sale value is a completeness check — confirm every sale is recorded.',
     });
-  };
-
-  pushTax('tds_salary', 'Salary TDS (Sec 192)', aisTds('TDS-192'), bookedSalaryTds);
-  pushTax('tds_194j', 'Professional TDS (Sec 194J)', aisTds('TDS-194J'), booked194JTds);
-
-  const flagged = rows.filter(
-    (r) => r.status === 'missing' || r.status === 'under_recorded',
-  ).length;
-  const totalGapPaisa = rows
-    .filter((r) => r.category !== 'consideration')
-    .reduce((s, r) => s + Math.max(0, r.gapPaisa), 0);
-  const estTaxAtRiskPaisa = rows.reduce(
-    (s, r) => s + (r.gapPaisa > 0 && r.estTaxImpactPaisa ? r.estTaxImpactPaisa : 0),
-    0,
-  );
+  }
 
   return {
     fy,
-    hasTis: !!tis,
-    hasAis: !!ais,
-    uploadedAt: {
-      tis: tis?.uploadedAt?.toISOString() ?? null,
-      ais: ais?.uploadedAt?.toISOString() ?? null,
-    },
+    has: { form16: hasF16, form16a: hasF16a, tis: !!tis, ais: !!ais, form26as: has26as },
     rows,
-    form26asTotalTdsPaisa,
-    summary: { flagged, totalGapPaisa, estTaxAtRiskPaisa },
+    summary: { mismatches: rows.filter((r) => r.status === 'mismatch' || r.status === 'no_cert').length },
   };
 }

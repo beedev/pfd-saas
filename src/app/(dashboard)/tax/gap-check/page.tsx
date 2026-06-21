@@ -24,40 +24,36 @@ import {
 import { toast } from 'sonner';
 import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
-type GapStatus = 'missing' | 'under_recorded' | 'matched' | 'app_extra' | 'no_it_data';
+type GapStatus = 'matched' | 'mismatch' | 'no_cert' | 'awaiting_docs' | 'review';
 
 interface GapRow {
   key: string;
   label: string;
-  source: 'TIS' | 'AIS';
-  category: 'income' | 'tax_paid' | 'consideration';
-  itDeptPaisa: number | null;
-  bookedPaisa: number;
-  gapPaisa: number;
-  estTaxImpactPaisa: number | null;
+  group: 'income' | 'tax_paid' | 'completeness';
+  certPaisa: number | null; // Form 16 / 16A — the actual anchor
+  aisPaisa: number | null; // AIS / TIS (department)
+  form26asPaisa: number | null; // 26AS (department)
+  booksPaisa: number; // provisional estimate
   status: GapStatus;
   note?: string;
 }
 
 interface GapResult {
   fy: string;
-  hasTis: boolean;
-  hasAis: boolean;
-  uploadedAt: { tis: string | null; ais: string | null };
+  has: { form16: boolean; form16a: boolean; tis: boolean; ais: boolean; form26as: boolean };
   rows: GapRow[];
-  form26asTotalTdsPaisa: number | null;
-  summary: { flagged: number; totalGapPaisa: number; estTaxAtRiskPaisa: number };
+  summary: { mismatches: number };
 }
 
 const inr = (p: number | null) =>
   p == null ? '—' : '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
 const STATUS: Record<GapStatus, { label: string; cls: string }> = {
-  missing: { label: 'Missing', cls: 'bg-red-100 text-red-700' },
-  under_recorded: { label: 'Under-recorded', cls: 'bg-amber-100 text-amber-800' },
-  matched: { label: 'Matched', cls: 'bg-emerald-100 text-emerald-700' },
-  app_extra: { label: 'App has more', cls: 'bg-slate-100 text-slate-600' },
-  no_it_data: { label: 'No AIS/TIS', cls: 'bg-slate-100 text-slate-500' },
+  matched: { label: 'Matches', cls: 'bg-emerald-100 text-emerald-700' },
+  mismatch: { label: 'Dept ≠ Form 16', cls: 'bg-red-100 text-red-700' },
+  no_cert: { label: 'No certificate', cls: 'bg-amber-100 text-amber-800' },
+  awaiting_docs: { label: 'Awaiting docs', cls: 'bg-slate-100 text-slate-500' },
+  review: { label: 'Review — maybe unrecorded', cls: 'bg-amber-100 text-amber-800' },
 };
 
 export default function GapCheckPage() {
@@ -149,7 +145,9 @@ export default function GapCheckPage() {
     if (f) upload(f);
   };
 
-  const flagged = data?.rows.filter((r) => r.status === 'missing' || r.status === 'under_recorded');
+  const anyDocs =
+    !!data &&
+    (data.has.form16 || data.has.form16a || data.has.tis || data.has.ais || data.has.form26as);
 
   return (
     <div className="space-y-6 p-1">
@@ -157,7 +155,7 @@ export default function GapCheckPage() {
         <div>
           <h1 className="text-2xl font-semibold">Income-Tax Gap Check</h1>
           <p className="text-sm text-muted-foreground">
-            What the department has (AIS / TIS) vs what you&apos;ve recorded · FY {fy}
+            Form 16 / 16A (your actual) vs the IT department (AIS · TIS · 26AS) · FY {fy}
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={load} disabled={loading}>
@@ -167,30 +165,33 @@ export default function GapCheckPage() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Categories flagged</div>
-            <div className="mt-1 text-3xl font-semibold">{data?.summary.flagged ?? '—'}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Est. tax at risk</div>
-            <div className="mt-1 text-3xl font-semibold">{inr(data?.summary.estTaxAtRiskPaisa ?? null)}</div>
-            <div className="text-xs text-muted-foreground">indicative — income gaps × 30%</div>
+            <div className="text-sm text-muted-foreground">Mismatches vs Form 16</div>
+            <div className="mt-1 text-3xl font-semibold">{data?.summary.mismatches ?? '—'}</div>
+            <div className="text-xs text-muted-foreground">
+              department figures that disagree with your certificates
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="text-sm text-muted-foreground">Documents loaded</div>
-            <div className="mt-2 flex gap-3 text-sm">
-              <span className={data?.hasTis ? 'text-emerald-600' : 'text-slate-400'}>
-                {data?.hasTis ? '✓' : '○'} TIS
-              </span>
-              <span className={data?.hasAis ? 'text-emerald-600' : 'text-slate-400'}>
-                {data?.hasAis ? '✓' : '○'} AIS
-              </span>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm">
+              {(
+                [
+                  ['Form 16', data?.has.form16],
+                  ['Form 16A', data?.has.form16a],
+                  ['TIS', data?.has.tis],
+                  ['AIS', data?.has.ais],
+                  ['26AS', data?.has.form26as],
+                ] as const
+              ).map(([name, on]) => (
+                <span key={name} className={on ? 'text-emerald-600' : 'text-slate-400'}>
+                  {on ? '✓' : '○'} {name}
+                </span>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -248,34 +249,32 @@ export default function GapCheckPage() {
             />
             {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
           </div>
-          {data?.uploadedAt.tis && (
-            <p className="text-xs text-muted-foreground">
-              <FileText className="mr-1 inline h-3 w-3" />
-              TIS uploaded {new Date(data.uploadedAt.tis).toLocaleString('en-IN')}
-            </p>
-          )}
-          {data?.uploadedAt.ais && (
-            <p className="text-xs text-muted-foreground">
-              <FileText className="mr-1 inline h-3 w-3" />
-              AIS uploaded {new Date(data.uploadedAt.ais).toLocaleString('en-IN')}
-            </p>
-          )}
+          <p className="flex items-start gap-1 text-xs text-muted-foreground">
+            <FileText className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              Form 16, Form 16A and 26AS are uploaded on their own pages and feed this reconciliation
+              automatically —{' '}
+              <a href="/tax/form-16" className="text-primary hover:underline">Form 16 / 16A</a> ·{' '}
+              <a href="/tax/form-26as" className="text-primary hover:underline">26AS</a>.
+            </span>
+          </p>
         </CardContent>
       </Card>
 
-      {/* Gaps */}
-      {!data?.hasTis && !data?.hasAis ? (
+      {/* Reconciliation */}
+      {data && !anyDocs ? (
         <Card>
           <CardContent className="flex items-center gap-3 py-10 text-muted-foreground">
             <Info className="h-5 w-5" />
-            Upload your AIS and TIS to see what the department has that isn&apos;t in your books yet.
+            Upload your AIS / TIS above (and Form 16 / 16A / 26AS on their pages) to reconcile what
+            the department has against your certificates.
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2 font-medium">
-              <AlertTriangle className="h-4 w-4" /> Category gaps
+              <AlertTriangle className="h-4 w-4" /> Form 16 vs the department
             </div>
           </CardHeader>
           <CardContent>
@@ -283,11 +282,11 @@ export default function GapCheckPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase text-muted-foreground">
-                    <th className="py-2 pr-4">Category</th>
-                    <th className="px-4 py-2 text-right">Income-Tax dept</th>
-                    <th className="px-4 py-2 text-right">Your books</th>
-                    <th className="px-4 py-2 text-right">Gap</th>
-                    <th className="px-4 py-2 text-right">Tax impact</th>
+                    <th className="py-2 pr-4">Item</th>
+                    <th className="px-4 py-2 text-right">Form 16/16A (actual)</th>
+                    <th className="px-4 py-2 text-right">AIS / TIS</th>
+                    <th className="px-4 py-2 text-right">26AS</th>
+                    <th className="px-4 py-2 text-right">Your books (prov.)</th>
                     <th className="px-4 py-2">Status</th>
                   </tr>
                 </thead>
@@ -296,22 +295,13 @@ export default function GapCheckPage() {
                     <tr key={r.key} className="border-b last:border-0 align-top">
                       <td className="py-3 pr-4">
                         <div className="font-medium">{r.label}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {r.source}
-                          {r.note ? ` · ${r.note}` : ''}
-                        </div>
+                        {r.note && <div className="text-xs text-muted-foreground">{r.note}</div>}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{inr(r.itDeptPaisa)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{inr(r.bookedPaisa)}</td>
-                      <td
-                        className={`px-4 py-3 text-right font-medium tabular-nums ${
-                          r.gapPaisa > 1000 ? 'text-red-600' : 'text-muted-foreground'
-                        }`}
-                      >
-                        {r.itDeptPaisa == null ? '—' : inr(r.gapPaisa)}
-                      </td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums">{inr(r.certPaisa)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{inr(r.aisPaisa)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{inr(r.form26asPaisa)}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                        {inr(r.estTaxImpactPaisa)}
+                        {inr(r.booksPaisa)}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -326,23 +316,23 @@ export default function GapCheckPage() {
                 </tbody>
               </table>
             </div>
-            {flagged && flagged.length === 0 && (
+            {data && data.summary.mismatches === 0 && (
               <p className="mt-4 flex items-center gap-2 text-sm text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" /> No gaps — your books match the department&apos;s data.
+                <CheckCircle2 className="h-4 w-4" /> No mismatches — the department&apos;s figures agree
+                with your Form 16 / 16A.
               </p>
             )}
-            <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 text-sm">
-              {data?.form26asTotalTdsPaisa != null && (
-                <span className="text-muted-foreground">
-                  26AS (TRACES) total TDS:{' '}
-                  <span className="font-medium text-foreground">{inr(data.form26asTotalTdsPaisa)}</span>
-                </span>
-              )}
-              <a href="/tax/reconciliation" className="text-primary hover:underline">
-                Per-dimension reconciliation →
-              </a>
+            <p className="mt-4 text-xs text-muted-foreground">
+              Anchored on your Form 16 / 16A (the actual). A flag means a department source (AIS/TIS
+              or 26AS) disagrees with the certificate. &ldquo;Your books&rdquo; is your provisional
+              estimate and never drives a flag.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 text-sm">
               <a href="/tax/form-26as" className="text-primary hover:underline">
                 26AS per-TAN detail →
+              </a>
+              <a href="/tax/form-16" className="text-primary hover:underline">
+                Form 16 / 16A →
               </a>
             </div>
           </CardContent>
