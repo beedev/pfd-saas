@@ -15,30 +15,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, mutualFunds, mfRedemptions } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getSchemeCodeByIsin, getHistoricalNavOn } from '@/lib/services/amfi';
 import { resolveApplicableNavDate, isAfterCutoffNow, nowIST } from '@/lib/finance/mf-nav-date';
 import { settleRedemption } from '@/lib/finance/mf-redeem-settle';
 
 /** GET — list this fund's redemptions (newest first). */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const { id } = await params;
   const mfId = Number(id);
   if (!Number.isInteger(mfId)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
   const rows = await db
     .select()
     .from(mfRedemptions)
-    .where(and(eq(mfRedemptions.userId, session.user.id), eq(mfRedemptions.mutualFundId, mfId)))
+    .where(and(eq(mfRedemptions.userId, userId), eq(mfRedemptions.mutualFundId, mfId)))
     .orderBy(desc(mfRedemptions.createdAt));
   return NextResponse.json({ redemptions: rows });
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  const userId = session.user.id;
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { id } = await params;

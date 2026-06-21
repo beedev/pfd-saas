@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getQuotes } from '@/lib/services/yahoo-finance';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // GET /api/investments/quotes?symbols=RELIANCE.NS&symbols=INFY.NS
 // or     /api/investments/quotes?symbols=RELIANCE.NS,INFY.NS
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const raw = request.nextUrl.searchParams.getAll('symbols');
   const symbols = raw
     .flatMap((s) => s.split(','))

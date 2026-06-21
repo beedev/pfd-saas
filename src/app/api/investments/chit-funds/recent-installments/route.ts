@@ -8,13 +8,13 @@
 import { NextResponse } from 'next/server';
 import { and, eq, gte, desc } from 'drizzle-orm';
 import { db, chitFundInstallments, chitFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Current month only: 1st of this month
     const now = new Date();
@@ -23,13 +23,13 @@ export async function GET() {
     const installments = await db
       .select()
       .from(chitFundInstallments)
-      .where(and(eq(chitFundInstallments.userId, session.user.id), gte(chitFundInstallments.paidOn, cutoffIso)))
+      .where(and(eq(chitFundInstallments.userId, userId), gte(chitFundInstallments.paidOn, cutoffIso)))
       .orderBy(desc(chitFundInstallments.paidOn));
 
     const chits = await db
       .select({ id: chitFunds.id, schemeName: chitFunds.schemeName })
       .from(chitFunds)
-      .where(eq(chitFunds.userId, session.user.id));
+      .where(eq(chitFunds.userId, userId));
     const chitMap = new Map(chits.map((c) => [c.id, c.schemeName]));
 
     const result = installments.map((i) => ({

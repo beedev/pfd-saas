@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, and, asc } from 'drizzle-orm';
 import { db, sips, mutualFunds, investmentTransactions } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -20,7 +20,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const sipRows = await db
       .select()
       .from(sips)
-      .where(and(eq(sips.id, numericId), eq(sips.userId, session.user.id)))
+      .where(and(eq(sips.id, numericId), eq(sips.userId, userId)))
       .limit(1);
     if (!sipRows.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -30,7 +30,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const mfRows = await db
       .select()
       .from(mutualFunds)
-      .where(and(eq(mutualFunds.id, sip.mutualFundId), eq(mutualFunds.userId, session.user.id)))
+      .where(and(eq(mutualFunds.id, sip.mutualFundId), eq(mutualFunds.userId, userId)))
       .limit(1);
     const mf = mfRows[0] ?? null;
 
@@ -39,7 +39,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .from(investmentTransactions)
       .where(
         and(
-          eq(investmentTransactions.userId, session.user.id),
+          eq(investmentTransactions.userId, userId),
           eq(investmentTransactions.assetType, 'MUTUAL_FUND'),
           eq(investmentTransactions.assetId, sip.mutualFundId)
         )
@@ -54,8 +54,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -67,7 +67,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(sips)
-      .where(and(eq(sips.id, numericId), eq(sips.userId, session.user.id)))
+      .where(and(eq(sips.id, numericId), eq(sips.userId, userId)))
       .limit(1);
     if (!existing.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -98,7 +98,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(sips)
       .set(update)
-      .where(and(eq(sips.id, numericId), eq(sips.userId, session.user.id)))
+      .where(and(eq(sips.id, numericId), eq(sips.userId, userId)))
       .returning();
 
     return NextResponse.json({ sip: result[0] });
@@ -109,15 +109,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(sips).where(and(eq(sips.id, numericId), eq(sips.userId, session.user.id)));
+    await db.delete(sips).where(and(eq(sips.id, numericId), eq(sips.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting SIP:', error);

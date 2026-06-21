@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
 import { STATE_CODES } from '@/constants/state-codes';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface ImportRow {
   invoiceNumber: string;
@@ -28,8 +28,8 @@ interface ImportResult {
 
 // POST - Import invoices from CSV data
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { rows } = body;
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const profile = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
           const existingCustomer = await db
             .select()
             .from(customers)
-            .where(and(eq(customers.gstin, customerGstin), eq(customers.userId, session.user.id)))
+            .where(and(eq(customers.gstin, customerGstin), eq(customers.userId, userId)))
             .limit(1);
 
           if (existingCustomer.length > 0) {
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
           const isB2B = !!customerGstin;
 
           const newCustomer = await db.insert(customers).values({
-            userId: session.user.id,
+            userId: userId,
             name: firstItem.customerName,
             gstin: customerGstin,
             stateCode: customerStateCode,
@@ -247,7 +247,7 @@ export async function POST(request: NextRequest) {
         const existingInvoice = await db
           .select()
           .from(invoices)
-          .where(and(eq(invoices.invoiceNumber, invoiceNumber), eq(invoices.userId, session.user.id)))
+          .where(and(eq(invoices.invoiceNumber, invoiceNumber), eq(invoices.userId, userId)))
           .limit(1);
 
         if (existingInvoice.length > 0) {
@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
 
         // Create invoice
         const invoiceResult = await db.insert(invoices).values({
-          userId: session.user.id,
+          userId: userId,
           invoiceNumber,
           invoiceDate: parsedDate.toISOString(),
           customerName: firstItem.customerName,
@@ -285,7 +285,7 @@ export async function POST(request: NextRequest) {
         // Create invoice items
         for (const item of processedItems) {
           await db.insert(invoiceItems).values({
-            userId: session.user.id,
+            userId: userId,
             invoiceId,
             ...item,
           });

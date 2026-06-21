@@ -28,15 +28,13 @@ import {
   invoices,
   otherSourcesIncome,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
 import { isEquityBucket } from '@/lib/finance/capital-gains-tax';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const fy = new URL(request.url).searchParams.get('fy');
@@ -44,7 +42,6 @@ export async function GET(request: NextRequest) {
     const bounds = /^\d{4}-\d{2}$/.test(fy) ? financialYearBoundsIso(fy) : null;
     if (!bounds) return NextResponse.json({ error: 'fy must be YYYY-YY' }, { status: 400 });
 
-    const userId = session.user.id;
 
     const [salaries, properties, gains, gstInvoices, others] = await Promise.all([
       db

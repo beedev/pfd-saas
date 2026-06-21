@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, chitFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -9,8 +9,8 @@ interface Params {
 
 // POST — close out a chit fund (status = COMPLETED)
 export async function POST(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -20,14 +20,14 @@ export async function POST(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(chitFunds)
-      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, userId)))
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Chit fund not found' }, { status: 404 });
 
     const updated = await db
       .update(chitFunds)
       .set({ status: 'COMPLETED', updatedAt: new Date() })
-      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, userId)))
       .returning();
 
     return NextResponse.json({ chitFund: updated[0] });

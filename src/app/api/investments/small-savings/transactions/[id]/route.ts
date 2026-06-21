@@ -17,7 +17,7 @@ import {
   smallSavingsAccounts,
   smallSavingsTransactions,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -30,8 +30,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsTransactions.id, numericId),
-          eq(smallSavingsTransactions.userId, session.user.id),
+          eq(smallSavingsTransactions.userId, userId),
         ),
       )
       .limit(1);
@@ -63,7 +63,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsTransactions.id, numericId),
-          eq(smallSavingsTransactions.userId, session.user.id),
+          eq(smallSavingsTransactions.userId, userId),
         ),
       )
       .returning();
@@ -75,8 +75,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -90,7 +90,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsTransactions.id, numericId),
-          eq(smallSavingsTransactions.userId, session.user.id),
+          eq(smallSavingsTransactions.userId, userId),
         ),
       )
       .limit(1);
@@ -104,7 +104,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsAccounts.id, txn.accountId),
-          eq(smallSavingsAccounts.userId, session.user.id),
+          eq(smallSavingsAccounts.userId, userId),
         ),
       )
       .limit(1);
@@ -117,7 +117,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsTransactions.id, numericId),
-          eq(smallSavingsTransactions.userId, session.user.id),
+          eq(smallSavingsTransactions.userId, userId),
         ),
       );
 
@@ -159,7 +159,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
         .where(
           and(
             eq(smallSavingsAccounts.id, txn.accountId),
-            eq(smallSavingsAccounts.userId, session.user.id),
+            eq(smallSavingsAccounts.userId, userId),
           ),
         );
     }

@@ -13,17 +13,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { computeReconciliation } from '@/lib/finance/form-26as-recon';
 
 /** Strict FY pattern: 2024-25, 2025-26, etc. */
 const FY_RE = /^\d{4}-\d{2}$/;
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const fy = new URL(request.url).searchParams.get('fy');
@@ -34,7 +32,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'fy must look like YYYY-YY' }, { status: 400 });
     }
 
-    const result = await computeReconciliation(session.user.id, fy);
+    const result = await computeReconciliation(userId, fy);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[tax/reconciliation/per-tan GET]', err);

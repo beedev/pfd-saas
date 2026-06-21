@@ -16,7 +16,7 @@ import {
   transformationDays,
   transformationChecks,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // Parse a multi-item's stored day value (JSON: { selected, note }) into a
 // human-readable summary like "Walking, Gym — Row Pull, Push ups".
@@ -40,14 +40,14 @@ function summarizeMultiValue(raw: string | null): string {
 
 // GET /api/health/transformation/history
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const planRows = await db
       .select()
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (!planRows.length) {
       return NextResponse.json({ plan: null, days: [], summary: null });
@@ -62,7 +62,7 @@ export async function GET() {
       .from(transformationSections)
       .where(
         and(
-          eq(transformationSections.userId, session.user.id),
+          eq(transformationSections.userId, userId),
           eq(transformationSections.planId, plan.id),
           isNull(transformationSections.deletedAt),
         ),
@@ -75,7 +75,7 @@ export async function GET() {
       .from(transformationItems)
       .where(
         and(
-          eq(transformationItems.userId, session.user.id),
+          eq(transformationItems.userId, userId),
           isNull(transformationItems.deletedAt),
         ),
       )
@@ -91,7 +91,7 @@ export async function GET() {
       .from(transformationDays)
       .where(
         and(
-          eq(transformationDays.userId, session.user.id),
+          eq(transformationDays.userId, userId),
           eq(transformationDays.planId, plan.id),
         ),
       )
@@ -130,7 +130,7 @@ export async function GET() {
         .from(transformationChecks)
         .where(
           and(
-            eq(transformationChecks.userId, session.user.id),
+            eq(transformationChecks.userId, userId),
             eq(transformationChecks.dayId, d.id),
           ),
         );

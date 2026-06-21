@@ -17,7 +17,7 @@ import {
   type FDInterestType,
   type FDStatus,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { calculateFdMaturityPaisa, monthsBetween } from '@/lib/finance/fd';
 
 interface Params {
@@ -25,8 +25,8 @@ interface Params {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -36,7 +36,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(fixedDeposits)
-      .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)))
+      .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, userId)))
       .limit(1);
     if (!rows.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -49,8 +49,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -61,7 +61,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       await db
         .select()
         .from(fixedDeposits)
-        .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)))
+        .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, userId)))
         .limit(1)
     )[0];
     if (!existing) {
@@ -133,7 +133,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const [updated] = await db
       .update(fixedDeposits)
       .set(update)
-      .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)))
+      .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, userId)))
       .returning();
     return NextResponse.json({ fixedDeposit: updated });
   } catch (err) {
@@ -143,15 +143,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(fixedDeposits).where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, session.user.id)));
+    await db.delete(fixedDeposits).where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, userId)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('DELETE fd:', err);

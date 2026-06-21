@@ -1,7 +1,7 @@
 /**
  * Stream the card image for a single health-insurance card.
  *
- * Auth-gated: the caller MUST own the card (card.userId === session.user.id).
+ * Auth-gated: the caller MUST own the card (card.userId === userId).
  * Returns 404 if the card row doesn't exist or 410 (gone) if the row
  * exists but the underlying file disappeared from disk — that pair
  * tells the UI exactly what went wrong.
@@ -17,7 +17,7 @@ import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, healthInsuranceCards } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const MIME_BY_EXT: Record<string, string> = {
   '.jpg': 'image/jpeg',
@@ -32,8 +32,8 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -45,7 +45,7 @@ export async function GET(
       .select()
       .from(healthInsuranceCards)
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       )
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });

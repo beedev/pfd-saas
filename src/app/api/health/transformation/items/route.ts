@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, transformationItems } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // Normalise a kind value to one of the three supported kinds.
 function normalizeKind(k: unknown): 'check' | 'text' | 'multi' {
@@ -33,8 +33,8 @@ function serializeOptions(raw: unknown): string | null {
 // POST — create item
 // Body: { sectionId, label, sortOrder?, kind? ('check'|'text'|'multi'), options?: string[] }
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     const inserted = await db
       .insert(transformationItems)
       .values({
-        userId: session.user.id,
+        userId: userId,
         sectionId: body.sectionId,
         label: body.label.trim(),
         sortOrder: typeof body.sortOrder === 'number' ? body.sortOrder : 999,
@@ -67,8 +67,8 @@ export async function POST(request: NextRequest) {
 // PATCH — rename, reorder, move section, toggle kind, or edit options
 // Body: { id, label?, sortOrder?, sectionId?, kind?, options?: string[] }
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -91,7 +91,7 @@ export async function PATCH(request: NextRequest) {
       .set(update)
       .where(
         and(
-          eq(transformationItems.userId, session.user.id),
+          eq(transformationItems.userId, userId),
           eq(transformationItems.id, body.id),
         ),
       )
@@ -106,8 +106,8 @@ export async function PATCH(request: NextRequest) {
 // DELETE — soft delete
 // Body: { id }
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -119,7 +119,7 @@ export async function DELETE(request: NextRequest) {
       .set({ deletedAt: new Date() })
       .where(
         and(
-          eq(transformationItems.userId, session.user.id),
+          eq(transformationItems.userId, userId),
           eq(transformationItems.id, body.id),
         ),
       );

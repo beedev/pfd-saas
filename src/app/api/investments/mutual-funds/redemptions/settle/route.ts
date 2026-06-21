@@ -6,14 +6,14 @@
  */
 
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
 
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const result = await settlePendingRedemptions(session.user.id);
+    const result = await settlePendingRedemptions(userId);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[mutual-funds/redemptions/settle POST]', err);

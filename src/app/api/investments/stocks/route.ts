@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, holdings } from '@/db';
 import { desc, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getQuote } from '@/lib/services/yahoo-finance';
 
 // GET /api/investments/stocks — list all holdings
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const allHoldings = await db
       .select()
       .from(holdings)
-      .where(eq(holdings.userId, session.user.id))
+      .where(eq(holdings.userId, userId))
       .orderBy(desc(holdings.createdAt));
 
     return NextResponse.json({ holdings: allHoldings });
@@ -28,8 +28,8 @@ export async function GET() {
 // POST /api/investments/stocks — add a new holding
 // Body: { symbol, quantity, averagePrice (rupees), purchaseDate, notes? }
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { symbol, quantity, averagePrice, purchaseDate, notes } = body;
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(holdings)
       .values({
-        userId: session.user.id,
+        userId: userId,
         symbol: normalizedSymbol,
         quantity,
         averagePrice: averagePricePaisa,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, insurancePolicies } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -33,8 +33,8 @@ function advanceDueDate(currentDue: string, frequency: string | null): string {
 }
 
 export async function POST(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -45,7 +45,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(insurancePolicies)
-      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, userId)))
       .limit(1);
 
     if (!rows.length) {
@@ -64,7 +64,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
         nextPremiumDueDate: nextDue,
         updatedAt: new Date(),
       })
-      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, session.user.id)))
+      .where(and(eq(insurancePolicies.id, numericId), eq(insurancePolicies.userId, userId)))
       .returning();
 
     return NextResponse.json({

@@ -59,6 +59,17 @@ export async function PATCH(req: NextRequest) {
   if (cap.kind === 'read') {
     return NextResponse.json({ error: 'Reads are always available and not configurable.' }, { status: 400 });
   }
+  // Integrity-locked (financial/irreversible) writes can never be made
+  // LLM-eligible — refuse any attempt to flip dataIntegrity off.
+  if (cap.integrityLocked && body.dataIntegrity === false) {
+    return NextResponse.json(
+      {
+        error:
+          'This is a protected financial action — it can only run via its slash command, not free-text. It cannot be made LLM-eligible.',
+      },
+      { status: 400 },
+    );
+  }
 
   // Read the current effective values so a partial PATCH preserves the other flag.
   const existing = await db
@@ -68,7 +79,10 @@ export async function PATCH(req: NextRequest) {
     .limit(1);
   const current = existing[0];
   const included = body.included ?? current?.included ?? true;
-  const dataIntegrity = body.dataIntegrity ?? current?.dataIntegrity ?? cap.dataIntegrity;
+  // Locked caps are pinned to dataIntegrity:true no matter what's stored/sent.
+  const dataIntegrity = cap.integrityLocked
+    ? true
+    : body.dataIntegrity ?? current?.dataIntegrity ?? cap.dataIntegrity;
 
   await db
     .insert(assistantApiSettings)

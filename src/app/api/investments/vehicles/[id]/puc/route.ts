@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, vehicles, vehiclePuc } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -38,18 +38,18 @@ async function ensureVehicle(idRaw: string, userId: string) {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureVehicle(id, session.user.id);
+    const guard = await ensureVehicle(id, userId);
     if ('error' in guard) return guard.error;
 
     const rows = await db
       .select()
       .from(vehiclePuc)
       .where(
-        and(eq(vehiclePuc.vehicleId, guard.vehicleId), eq(vehiclePuc.userId, session.user.id)),
+        and(eq(vehiclePuc.vehicleId, guard.vehicleId), eq(vehiclePuc.userId, userId)),
       )
       .orderBy(desc(vehiclePuc.validUntil));
     return NextResponse.json({ puc: rows });
@@ -69,11 +69,11 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureVehicle(id, session.user.id);
+    const guard = await ensureVehicle(id, userId);
     if ('error' in guard) return guard.error;
 
     const body = (await request.json()) as CreateBody;
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const result = await db
       .insert(vehiclePuc)
       .values({
-        userId: session.user.id,
+        userId: userId,
         vehicleId: guard.vehicleId,
         certificateNumber: body.certificateNumber.trim(),
         issuedDate: body.issuedDate,

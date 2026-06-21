@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, healthInsuranceClaims, type ClaimStatus } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_STATUSES: ClaimStatus[] = [
   'INTIMATED',
@@ -39,8 +39,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .select()
       .from(healthInsuranceClaims)
       .where(
-        and(eq(healthInsuranceClaims.id, numericId), eq(healthInsuranceClaims.userId, session.user.id)),
+        and(eq(healthInsuranceClaims.id, numericId), eq(healthInsuranceClaims.userId, userId)),
       )
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -76,7 +76,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .update(healthInsuranceClaims)
       .set(update)
       .where(
-        and(eq(healthInsuranceClaims.id, numericId), eq(healthInsuranceClaims.userId, session.user.id)),
+        and(eq(healthInsuranceClaims.id, numericId), eq(healthInsuranceClaims.userId, userId)),
       )
       .returning();
     return NextResponse.json({ claim: result[0] });
@@ -87,8 +87,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -98,7 +98,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     await db
       .delete(healthInsuranceClaims)
       .where(
-        and(eq(healthInsuranceClaims.id, numericId), eq(healthInsuranceClaims.userId, session.user.id)),
+        and(eq(healthInsuranceClaims.id, numericId), eq(healthInsuranceClaims.userId, userId)),
       );
     return NextResponse.json({ success: true });
   } catch (err) {

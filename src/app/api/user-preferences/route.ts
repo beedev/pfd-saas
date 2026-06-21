@@ -12,11 +12,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Explicit projection — DO NOT leak telegram_connect_token to the
     // client. Anyone with that token could pair their own Telegram
@@ -48,7 +48,7 @@ export async function GET() {
         updatedAt: userPreferences.updatedAt,
       })
       .from(userPreferences)
-      .where(eq(userPreferences.userId, session.user.id))
+      .where(eq(userPreferences.userId, userId))
       .limit(1);
     return NextResponse.json({ preferences: rows[0] ?? null });
   } catch (err) {
@@ -74,8 +74,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = (await request.json()) as PatchBody;
@@ -155,7 +155,7 @@ export async function PATCH(request: NextRequest) {
     const result = await db
       .update(userPreferences)
       .set(update)
-      .where(eq(userPreferences.userId, session.user.id))
+      .where(eq(userPreferences.userId, userId))
       .returning();
 
     if (!result.length) {

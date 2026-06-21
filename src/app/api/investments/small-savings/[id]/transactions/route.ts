@@ -27,7 +27,7 @@ import {
   smallSavingsTransactions,
   type SmallSavingsTxnType,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_TXN_TYPES: SmallSavingsTxnType[] = [
   'DEPOSIT',
@@ -63,11 +63,11 @@ async function ensureAccount(idRaw: string, userId: string) {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureAccount(id, session.user.id);
+    const guard = await ensureAccount(id, userId);
     if ('error' in guard) return guard.error;
 
     const transactions = await db
@@ -76,7 +76,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsTransactions.accountId, guard.accountId),
-          eq(smallSavingsTransactions.userId, session.user.id),
+          eq(smallSavingsTransactions.userId, userId),
         ),
       )
       .orderBy(desc(smallSavingsTransactions.txnDate));
@@ -96,11 +96,11 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureAccount(id, session.user.id);
+    const guard = await ensureAccount(id, userId);
     if ('error' in guard) return guard.error;
 
     const body = (await request.json()) as CreateBody;
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const insertResult = await db
       .insert(smallSavingsTransactions)
       .values({
-        userId: session.user.id,
+        userId: userId,
         accountId: guard.accountId,
         txnDate: body.txnDate,
         txnType: body.txnType,
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsAccounts.id, guard.accountId),
-          eq(smallSavingsAccounts.userId, session.user.id),
+          eq(smallSavingsAccounts.userId, userId),
         ),
       );
 

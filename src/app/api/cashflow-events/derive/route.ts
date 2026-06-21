@@ -41,7 +41,7 @@ import {
   sips,
   smallSavingsAccounts,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   deriveCashflowEvents,
   type DerivationInput,
@@ -50,10 +50,9 @@ import { getGrowthRates } from '@/lib/finance/asset-growth-rates';
 import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const userId = session.user.id;
     const today = new Date().toISOString().slice(0, 10);
 
     // Fetch all source rows in parallel — scoped by user_id. EPF accounts

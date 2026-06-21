@@ -46,6 +46,12 @@ export interface Capability {
   summary: string;
   kind: 'read' | 'write';
   dataIntegrity: boolean;
+  /** Hard lock for financial / irreversible writes. An integrity-locked
+   *  capability can NEVER be made LLM-eligible: its effective integrity stays
+   *  true regardless of per-user overrides, and the settings PATCH refuses to
+   *  downgrade it. Enforced in assertRegistryIntegrity + effective.ts + the
+   *  assistant-apis route — so the boundary is an invariant, not discipline. */
+  integrityLocked?: boolean;
   slashCommand?: string;
   params: CapParam[];
   invoke: (userId: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -66,6 +72,7 @@ export const CAPABILITIES: Capability[] = [
     summary: 'Mark a credit-card statement paid in full, dated today',
     kind: 'write',
     dataIntegrity: true,
+    integrityLocked: true,
     slashCommand: '/paid',
     params: [{ name: 'card', type: 'string', required: true, description: 'Credit-card name, e.g. HDFC' }],
     invoke: async (userId, args) => {
@@ -203,6 +210,10 @@ export function assertRegistryIntegrity(): void {
     if (ids.has(c.id)) throw new Error(`registry: duplicate capability id "${c.id}"`);
     ids.add(c.id);
     if (c.kind !== 'read' && c.kind !== 'write') throw new Error(`registry: "${c.id}" has invalid kind`);
+    // An integrity-locked capability must be a write that is never LLM-eligible.
+    if (c.integrityLocked && !(c.kind === 'write' && c.dataIntegrity === true)) {
+      throw new Error(`registry: integrity-locked "${c.id}" must be a write with dataIntegrity:true`);
+    }
     if (c.slashCommand) {
       if (!/^\/[a-z]+$/i.test(c.slashCommand)) throw new Error(`registry: "${c.id}" slash "${c.slashCommand}" must be /letters`);
       if (slashes.has(c.slashCommand)) throw new Error(`registry: duplicate slash command "${c.slashCommand}"`);

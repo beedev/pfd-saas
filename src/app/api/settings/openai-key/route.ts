@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, mkdirSync, existsSync, rmSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { isSelfHost } from '@/lib/self-host';
 
 const KEY_FILE = process.env.OPENAI_KEY_FILE ?? '/data/.secrets/openai_api_key';
@@ -46,8 +46,8 @@ function persistKey(key: string): void {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   return NextResponse.json({
     configured: Boolean(process.env.OPENAI_API_KEY),
     selfHost: isSelfHost(),
@@ -55,8 +55,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   if (!isSelfHost()) {
     return NextResponse.json(
       { error: 'On this deployment the OpenAI key is managed via the OPENAI_API_KEY env var.' },
@@ -90,8 +90,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   if (!isSelfHost()) {
     return NextResponse.json({ error: 'Managed via env on this deployment.' }, { status: 403 });
   }

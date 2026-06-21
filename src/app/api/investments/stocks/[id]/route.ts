@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, holdings } from '@/db';
 import { and, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -9,8 +9,8 @@ interface Params {
 
 // GET /api/investments/stocks/:id
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -21,7 +21,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const result = await db
       .select()
       .from(holdings)
-      .where(and(eq(holdings.id, numericId), eq(holdings.userId, session.user.id)))
+      .where(and(eq(holdings.id, numericId), eq(holdings.userId, userId)))
       .limit(1);
 
     if (!result.length) {
@@ -40,8 +40,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
 // PATCH /api/investments/stocks/:id — partial update (quantity/averagePrice/notes/etc)
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -53,7 +53,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(holdings)
-      .where(and(eq(holdings.id, numericId), eq(holdings.userId, session.user.id)))
+      .where(and(eq(holdings.id, numericId), eq(holdings.userId, userId)))
       .limit(1);
 
     if (!existing.length) {
@@ -93,7 +93,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         notes: body.notes ?? current.notes,
         updatedAt: new Date(),
       })
-      .where(and(eq(holdings.id, numericId), eq(holdings.userId, session.user.id)))
+      .where(and(eq(holdings.id, numericId), eq(holdings.userId, userId)))
       .returning();
 
     return NextResponse.json({ holding: result[0] });
@@ -108,8 +108,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
 // DELETE /api/investments/stocks/:id
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -117,7 +117,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
 
-    await db.delete(holdings).where(and(eq(holdings.id, numericId), eq(holdings.userId, session.user.id)));
+    await db.delete(holdings).where(and(eq(holdings.id, numericId), eq(holdings.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting holding:', error);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { db, insurancePolicies, type PolicyType } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_TYPES: PolicyType[] = [
   'TERM_LIFE',
@@ -15,13 +15,13 @@ const VALID_TYPES: PolicyType[] = [
 ];
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const rows = await db
       .select()
       .from(insurancePolicies)
-      .where(eq(insurancePolicies.userId, session.user.id))
+      .where(eq(insurancePolicies.userId, userId))
       .orderBy(desc(insurancePolicies.createdAt));
     return NextResponse.json({ policies: rows });
   } catch (err) {
@@ -49,8 +49,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
     if (!body.policyNumber) {
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(insurancePolicies)
       .values({
-        userId: session.user.id,
+        userId: userId,
         policyNumber: body.policyNumber.trim(),
         policyType: body.policyType,
         status: 'ACTIVE',

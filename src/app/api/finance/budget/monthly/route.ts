@@ -10,7 +10,7 @@ import {
   investmentTransactions,
   chitFundInstallments,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 type RowStatus = 'paid' | 'unpaid' | 'partial';
 type RowSource = 'cc' | 'sip' | 'chit' | 'manual';
@@ -45,8 +45,8 @@ function deriveStatus(actual: number, planned: number): RowStatus | null {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period');
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     const categories = await db
       .select()
       .from(budgetCategories)
-      .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, session.user.id)))
+      .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, userId)))
       .orderBy(asc(budgetCategories.type), asc(budgetCategories.sortOrder));
 
     // Materialize recurring templates into budget_entries for this period
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
         endPeriod: recurringExpenses.endPeriod,
       })
       .from(recurringExpenses)
-      .where(and(eq(recurringExpenses.isActive, true), eq(recurringExpenses.userId, session.user.id)));
+      .where(and(eq(recurringExpenses.isActive, true), eq(recurringExpenses.userId, userId)));
 
     for (const rec of activeRecurring) {
       // Only materialize when the period falls within the template's window.
@@ -96,13 +96,13 @@ export async function GET(request: NextRequest) {
           and(
             eq(budgetEntries.categoryId, rec.categoryId),
             eq(budgetEntries.period, period),
-            eq(budgetEntries.userId, session.user.id),
+            eq(budgetEntries.userId, userId),
           ),
         )
         .limit(1);
       if (existing.length === 0) {
         await db.insert(budgetEntries).values({
-          userId: session.user.id,
+          userId: userId,
           categoryId: rec.categoryId,
           period,
           plannedAmount: rec.amount,
@@ -112,14 +112,14 @@ export async function GET(request: NextRequest) {
         await db
           .update(budgetEntries)
           .set({ plannedAmount: rec.amount, updatedAt: new Date() })
-          .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, session.user.id)));
+          .where(and(eq(budgetEntries.id, existing[0].id), eq(budgetEntries.userId, userId)));
       }
     }
 
     const entries = await db
       .select()
       .from(budgetEntries)
-      .where(and(eq(budgetEntries.period, period), eq(budgetEntries.userId, session.user.id)));
+      .where(and(eq(budgetEntries.period, period), eq(budgetEntries.userId, userId)));
 
     const recurring = await db
       .select({
@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
         recurrence: recurringExpenses.recurrence,
       })
       .from(recurringExpenses)
-      .where(and(eq(recurringExpenses.isActive, true), eq(recurringExpenses.userId, session.user.id)));
+      .where(and(eq(recurringExpenses.isActive, true), eq(recurringExpenses.userId, userId)));
 
     // Pre-compute per-category source overrides
     const ccByName: Record<string, { stmt: number; paid: number }> = {};
@@ -144,8 +144,8 @@ export async function GET(request: NextRequest) {
         and(
           eq(liabilities.type, 'CREDIT_CARD'),
           eq(creditCardExpenses.period, period),
-          eq(creditCardExpenses.userId, session.user.id),
-          eq(liabilities.userId, session.user.id),
+          eq(creditCardExpenses.userId, userId),
+          eq(liabilities.userId, userId),
         ),
       );
     for (const row of ccRows) {
@@ -163,7 +163,7 @@ export async function GET(request: NextRequest) {
           eq(investmentTransactions.type, 'SIP_EXECUTION'),
           gte(investmentTransactions.transactionDate, from),
           lt(investmentTransactions.transactionDate, to),
-          eq(investmentTransactions.userId, session.user.id),
+          eq(investmentTransactions.userId, userId),
         ),
       );
     // Postgres returns SUM(bigint) as a STRING; the sql<number> cast is
@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
         and(
           gte(chitFundInstallments.paidOn, from),
           lt(chitFundInstallments.paidOn, to),
-          eq(chitFundInstallments.userId, session.user.id),
+          eq(chitFundInstallments.userId, userId),
         ),
       );
     const chitActual = Number(chitActualRow[0]?.total ?? 0);

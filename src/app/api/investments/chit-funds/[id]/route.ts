@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, asc } from 'drizzle-orm';
 import { db, chitFunds, chitFundInstallments } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -19,13 +19,13 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(chitFunds)
-      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, userId)))
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const installments = await db
       .select()
       .from(chitFundInstallments)
-      .where(and(eq(chitFundInstallments.chitFundId, numericId), eq(chitFundInstallments.userId, session.user.id)))
+      .where(and(eq(chitFundInstallments.chitFundId, numericId), eq(chitFundInstallments.userId, userId)))
       .orderBy(asc(chitFundInstallments.monthNumber));
     return NextResponse.json({ chitFund: rows[0], installments });
   } catch (error) {
@@ -35,8 +35,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -47,7 +47,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(chitFunds)
-      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, userId)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const current = existing[0];
@@ -108,7 +108,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(chitFunds)
       .set(update)
-      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)))
+      .where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, userId)))
       .returning();
     return NextResponse.json({ chitFund: result[0] });
   } catch (error) {
@@ -118,15 +118,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(chitFunds).where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, session.user.id)));
+    await db.delete(chitFunds).where(and(eq(chitFunds.id, numericId), eq(chitFunds.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting chit fund:', error);

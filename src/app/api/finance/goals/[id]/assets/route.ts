@@ -33,7 +33,7 @@ import {
   insurancePolicies,
   fixedDeposits,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { MATURING_POLICY_TYPES } from '@/lib/finance/retirement-shared';
 
 type Liquidity = 'liquid' | 'semi-liquid' | 'locked';
@@ -135,8 +135,8 @@ function buildLookup(
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -151,7 +151,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       )
       .limit(1);
@@ -159,25 +159,25 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
     const [stocks, mfs, gold, nps, pf, ss, chits, ins, fds, allInclusions, allGoals] =
       await Promise.all([
-        db.select().from(holdings).where(eq(holdings.userId, session.user.id)),
-        db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
-        db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
-        db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
-        db.select().from(epfAccounts).where(eq(epfAccounts.userId, session.user.id)),
-        db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
-        db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
-        db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
-        db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
+        db.select().from(holdings).where(eq(holdings.userId, userId)),
+        db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
+        db.select().from(goldHoldings).where(eq(goldHoldings.userId, userId)),
+        db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
+        db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
+        db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, userId)),
+        db.select().from(chitFunds).where(eq(chitFunds.userId, userId)),
+        db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
+        db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, userId)),
         // ALL of the user's inclusion rows (not just this goal's). Needed
         // to compute otherAllocations[] and per-row defaults.
         db
           .select()
           .from(savingsAssetInclusion)
-          .where(eq(savingsAssetInclusion.userId, session.user.id)),
+          .where(eq(savingsAssetInclusion.userId, userId)),
         db
           .select({ id: financialGoals.id, name: financialGoals.name })
           .from(financialGoals)
-          .where(eq(financialGoals.userId, session.user.id)),
+          .where(eq(financialGoals.userId, userId)),
       ]);
 
     const goalNames = new Map<number, string>();
@@ -448,8 +448,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -464,7 +464,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       )
       .limit(1);
@@ -510,7 +510,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         .from(savingsAssetInclusion)
         .where(
           and(
-            eq(savingsAssetInclusion.userId, session.user.id),
+            eq(savingsAssetInclusion.userId, userId),
             eq(savingsAssetInclusion.assetClass, assetClass),
             sourceIdVal === null
               ? isNull(savingsAssetInclusion.sourceId)
@@ -550,7 +550,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           ? await tx
               .select({ id: financialGoals.id, name: financialGoals.name })
               .from(financialGoals)
-              .where(eq(financialGoals.userId, session.user.id))
+              .where(eq(financialGoals.userId, userId))
           : [];
         const nameMap = new Map(otherGoals.map((g) => [g.id, g.name]));
         const names = otherRows
@@ -575,7 +575,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
               ? isNull(savingsAssetInclusion.sourceId)
               : eq(savingsAssetInclusion.sourceId, sourceIdVal),
             eq(savingsAssetInclusion.goalId, numericId),
-            eq(savingsAssetInclusion.userId, session.user.id),
+            eq(savingsAssetInclusion.userId, userId),
           ),
         )
         .limit(1);
@@ -591,12 +591,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           .where(
             and(
               eq(savingsAssetInclusion.id, existing[0].id),
-              eq(savingsAssetInclusion.userId, session.user.id),
+              eq(savingsAssetInclusion.userId, userId),
             ),
           );
       } else {
         await tx.insert(savingsAssetInclusion).values({
-          userId: session.user.id,
+          userId: userId,
           assetClass,
           sourceId: sourceIdVal,
           goalId: numericId,

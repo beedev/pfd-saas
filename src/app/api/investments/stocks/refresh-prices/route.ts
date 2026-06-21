@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, holdings } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getQuote } from '@/lib/services/yahoo-finance';
 
 // POST /api/investments/stocks/refresh-prices — refresh live price for every
 // holding via Yahoo v8 chart endpoint. Idempotent.
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const rows = await db.select().from(holdings).where(eq(holdings.userId, session.user.id));
+    const rows = await db.select().from(holdings).where(eq(holdings.userId, userId));
     let updated = 0;
     let failed = 0;
 
@@ -36,7 +36,7 @@ export async function POST() {
             gainLossPercent,
             updatedAt: new Date(),
           })
-          .where(and(eq(holdings.id, h.id), eq(holdings.userId, session.user.id)));
+          .where(and(eq(holdings.id, h.id), eq(holdings.userId, userId)));
         updated += 1;
       } catch (e) {
         console.error(`refresh failed for stock ${h.symbol}:`, e);

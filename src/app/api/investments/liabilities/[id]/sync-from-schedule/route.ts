@@ -26,15 +26,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, asc, eq, lt, ne } from 'drizzle-orm';
 import { db, liabilities, loanAmortization } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function POST(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -45,7 +45,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     const liaRows = await db
       .select()
       .from(liabilities)
-      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, userId)))
       .limit(1);
     if (!liaRows.length) {
       return NextResponse.json({ error: 'Liability not found' }, { status: 404 });
@@ -60,7 +60,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(loanAmortization)
-      .where(and(eq(loanAmortization.userId, session.user.id), eq(loanAmortization.liabilityId, numericId)))
+      .where(and(eq(loanAmortization.userId, userId), eq(loanAmortization.liabilityId, numericId)))
       .orderBy(asc(loanAmortization.monthNumber));
 
     if (!rows.length) {
@@ -80,14 +80,14 @@ export async function POST(_request: NextRequest, { params }: Params) {
       await db
         .update(loanAmortization)
         .set({ status: 'PAID', paidOn: r.dueDate })
-        .where(and(eq(loanAmortization.id, r.id), eq(loanAmortization.userId, session.user.id)));
+        .where(and(eq(loanAmortization.id, r.id), eq(loanAmortization.userId, userId)));
     }
 
     // Reload after status update so currentBalance derivation reads fresh data.
     const reloaded = await db
       .select()
       .from(loanAmortization)
-      .where(and(eq(loanAmortization.userId, session.user.id), eq(loanAmortization.liabilityId, numericId)))
+      .where(and(eq(loanAmortization.userId, userId), eq(loanAmortization.liabilityId, numericId)))
       .orderBy(asc(loanAmortization.monthNumber));
 
     // 2. Header meta from row[0].
@@ -126,7 +126,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
         remainingTenor,
         updatedAt: new Date(),
       })
-      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, userId)))
       .returning();
 
     return NextResponse.json({

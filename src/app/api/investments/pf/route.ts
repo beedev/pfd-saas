@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { db, epfAccounts, type PFAccountType } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_TYPES: PFAccountType[] = ['EPF', 'PPF', 'VPF'];
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const rows = await db
       .select()
       .from(epfAccounts)
-      .where(eq(epfAccounts.userId, session.user.id))
+      .where(eq(epfAccounts.userId, userId))
       .orderBy(desc(epfAccounts.createdAt));
     return NextResponse.json({ accounts: rows });
   } catch (err) {
@@ -39,8 +39,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
     if (!body.accountType || !VALID_TYPES.includes(body.accountType)) {
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(epfAccounts)
       .values({
-        userId: session.user.id,
+        userId: userId,
         accountType: body.accountType,
         accountNumber: body.accountNumber || null,
         accountHolder: body.accountHolder.trim(),

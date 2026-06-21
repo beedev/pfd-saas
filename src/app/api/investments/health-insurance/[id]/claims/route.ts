@@ -18,7 +18,7 @@ import {
   healthInsuranceClaims,
   type ClaimStatus,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_STATUSES: ClaimStatus[] = [
   'INTIMATED',
@@ -55,11 +55,11 @@ async function ensurePolicy(idRaw: string, userId: string) {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensurePolicy(id, session.user.id);
+    const guard = await ensurePolicy(id, userId);
     if ('error' in guard) return guard.error;
 
     const rows = await db
@@ -68,7 +68,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsuranceClaims.policyId, guard.policyId),
-          eq(healthInsuranceClaims.userId, session.user.id),
+          eq(healthInsuranceClaims.userId, userId),
         ),
       )
       .orderBy(desc(healthInsuranceClaims.claimDate));
@@ -91,11 +91,11 @@ interface CreateClaimBody {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensurePolicy(id, session.user.id);
+    const guard = await ensurePolicy(id, userId);
     if ('error' in guard) return guard.error;
 
     const body = (await request.json()) as CreateClaimBody;
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const result = await db
       .insert(healthInsuranceClaims)
       .values({
-        userId: session.user.id,
+        userId: userId,
         policyId: guard.policyId,
         memberName: body.memberName.trim(),
         cardId: typeof body.cardId === 'number' ? body.cardId : null,

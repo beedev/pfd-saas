@@ -158,7 +158,15 @@ export const userPreferences = pgTable('user_preferences', {
     ]),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
-});
+}, (table) => [
+  // A Telegram chat binds to at most one user. The inbound webhook resolves
+  // chat_id → userId to authorize reads/writes, so without this a recycled or
+  // shared chat could map to two tenants. Partial (NOT NULL) — many unpaired
+  // rows are fine.
+  uniqueIndex('user_preferences_telegram_chat_unique')
+    .on(table.telegramChatId)
+    .where(sql`${table.telegramChatId} IS NOT NULL`),
+]);
 
 export type UserPreferences = typeof userPreferences.$inferSelect;
 export type NewUserPreferences = typeof userPreferences.$inferInsert;

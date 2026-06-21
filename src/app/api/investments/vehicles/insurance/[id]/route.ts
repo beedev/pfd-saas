@@ -18,7 +18,7 @@ import {
   type VehicleInsuranceStatus,
   type PremiumFrequency,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_TYPES: VehicleInsuranceType[] = [
   'COMPREHENSIVE',
@@ -69,8 +69,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -83,7 +83,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleInsurancePolicies.id, numericId),
-          eq(vehicleInsurancePolicies.userId, session.user.id),
+          eq(vehicleInsurancePolicies.userId, userId),
         ),
       )
       .limit(1);
@@ -150,7 +150,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleInsurancePolicies.id, numericId),
-          eq(vehicleInsurancePolicies.userId, session.user.id),
+          eq(vehicleInsurancePolicies.userId, userId),
         ),
       )
       .returning();
@@ -165,8 +165,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -178,7 +178,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleInsurancePolicies.id, numericId),
-          eq(vehicleInsurancePolicies.userId, session.user.id),
+          eq(vehicleInsurancePolicies.userId, userId),
         ),
       );
     return NextResponse.json({ success: true });

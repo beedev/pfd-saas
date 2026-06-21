@@ -6,15 +6,15 @@ import {
   parseAmortizationPdfRows,
 } from '@/lib/services/statement-parsers/amortization';
 import { extractPdfRows } from '@/lib/services/statement-parsers/pdf-text';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -25,7 +25,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(loanAmortization)
-      .where(and(eq(loanAmortization.userId, session.user.id), eq(loanAmortization.liabilityId, numericId)))
+      .where(and(eq(loanAmortization.userId, userId), eq(loanAmortization.liabilityId, numericId)))
       .orderBy(asc(loanAmortization.monthNumber));
 
     return NextResponse.json({ rows });
@@ -36,8 +36,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const liabilityRows = await db
       .select()
       .from(liabilities)
-      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)))
+      .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, userId)))
       .limit(1);
     if (!liabilityRows.length) {
       return NextResponse.json({ error: 'Liability not found' }, { status: 404 });
@@ -93,14 +93,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     // Delete existing schedule for this liability (replace entirely)
     await db
       .delete(loanAmortization)
-      .where(and(eq(loanAmortization.userId, session.user.id), eq(loanAmortization.liabilityId, numericId)));
+      .where(and(eq(loanAmortization.userId, userId), eq(loanAmortization.liabilityId, numericId)));
 
     // Insert all parsed rows
     const inserted = await db
       .insert(loanAmortization)
       .values(
         parseResult.rows.map((row) => ({
-          userId: session.user.id,
+          userId: userId,
           liabilityId: numericId,
           monthNumber: row.monthNumber,
           dueDate: row.dueDate,
@@ -130,8 +130,8 @@ export async function POST(request: NextRequest, { params }: Params) {
  * PATCH — mark a row as PAID and update loan's currentBalance
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -152,7 +152,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         status,
         paidOn: paidOn ?? (status === 'PAID' ? new Date().toISOString().substring(0, 10) : null),
       })
-      .where(and(eq(loanAmortization.id, rowId), eq(loanAmortization.userId, session.user.id)))
+      .where(and(eq(loanAmortization.id, rowId), eq(loanAmortization.userId, userId)))
       .returning();
 
     if (!updated.length) {
@@ -167,7 +167,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           currentBalance: updated[0].closingBalance,
           updatedAt: new Date(),
         })
-        .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, session.user.id)));
+        .where(and(eq(liabilities.id, numericId), eq(liabilities.userId, userId)));
     }
 
     return NextResponse.json({ row: updated[0] });

@@ -5,17 +5,17 @@ import fs from 'fs';
 import path from 'path';
 import { db, taxDeductions, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || searchParams.get('financialYear');
   const section = searchParams.get('section');
 
   try {
-    const conds = [eq(taxDeductions.userId, session.user.id)] as ReturnType<typeof eq>[];
+    const conds = [eq(taxDeductions.userId, userId)] as ReturnType<typeof eq>[];
     if (fy) conds.push(eq(taxDeductions.financialYear, fy));
     if (section) conds.push(eq(taxDeductions.section, section));
     const rows = await db
@@ -55,8 +55,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Sprint 5.2 commit 2 — support multipart/form-data so the wizard
     // can submit deduction + receipt/certificate atomically. Falls
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(taxDeductions)
       .values({
-        userId: session.user.id,
+        userId: userId,
         section: body.section,
         description: body.description || body.section,
         deductibleAmount: amountPaisa,
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
         const baseDir = path.join(
           process.cwd(),
           'uploads',
-          session.user.id,
+          userId,
           'tax-deductions',
         );
         await fs.promises.mkdir(baseDir, { recursive: true });
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
           uploadedPaths.push(fullPath);
 
           await db.insert(taxDocuments).values({
-            userId: session.user.id,
+            userId: userId,
             category,
             financialYear: fy,
             title: `${body.recipientName ?? body.section} — ${kind}`,

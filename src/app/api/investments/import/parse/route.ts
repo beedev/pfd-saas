@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, insurancePolicies, chitFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseStatement, parseZerodhaTaxPnl, type DocType } from '@/lib/services/statement-parsers';
 
 export const runtime = 'nodejs';
@@ -30,8 +30,8 @@ function isXlsxUpload(file: File): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const form = await request.formData();
     const file = form.get('file');
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
           id: insurancePolicies.id,
         })
         .from(insurancePolicies)
-        .where(and(inArray(insurancePolicies.policyNumber, numbers), eq(insurancePolicies.userId, session.user.id)));
+        .where(and(inArray(insurancePolicies.policyNumber, numbers), eq(insurancePolicies.userId, userId)));
       const map = new Map(existing.map((r) => [r.policyNumber, r.id]));
       annotated = {
         ...parsed,
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         .from(chitFunds)
         .where(
           and(
-            eq(chitFunds.userId, session.user.id),
+            eq(chitFunds.userId, userId),
             eq(chitFunds.foremanName, parsed.foremanName),
             eq(chitFunds.schemeName, parsed.schemeName),
             parsed.ticketNumber

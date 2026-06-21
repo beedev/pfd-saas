@@ -25,7 +25,7 @@ import {
   type CapitalGainsRules,
   type PresumptiveRules,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { DEFAULT_TAX_RULES } from '@/lib/finance/tax-rules';
 
 const FY_RE = /^\d{4}-\d{2}$/;
@@ -71,8 +71,8 @@ interface PatchBody {
 // GET ?fy=YYYY-YY → { fy, rules, rulesSeeded, regimeConfig, slabs }
 // ─────────────────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   const fy = request.nextUrl.searchParams.get('fy');
   if (!fy || !FY_RE.test(fy)) {
@@ -158,8 +158,8 @@ async function listAvailableFys(): Promise<string[]> {
 // Refuses if toFy already has slab data (use PATCH to edit instead).
 // ─────────────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   let body: { cloneFromFy?: string; toFy?: string };
   try {
@@ -244,8 +244,8 @@ export async function POST(request: NextRequest) {
 //   • slabs        → replace the FY's slab rows (delete + insert) atomically
 // ─────────────────────────────────────────────────────────────────────────
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   const fy = request.nextUrl.searchParams.get('fy');
   if (!fy || !FY_RE.test(fy)) {

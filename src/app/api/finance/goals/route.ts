@@ -33,7 +33,7 @@ import {
   type DisbursementType,
 } from '@/db';
 import { eq, and, lte, asc, sum } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   loadCorpusContext,
   corpusForGoal,
@@ -54,13 +54,13 @@ const VALID_DISBURSEMENT_TYPES: DisbursementType[] = [
 /* ──────────────────────────────────────────────────────────────────── */
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const goals = await db
       .select()
       .from(financialGoals)
-      .where(and(eq(financialGoals.isActive, true), eq(financialGoals.userId, session.user.id)))
+      .where(and(eq(financialGoals.isActive, true), eq(financialGoals.userId, userId)))
       .orderBy(asc(financialGoals.id));
 
     // Legacy projection-category linkage (kept for /projections backward-compat)
@@ -72,12 +72,12 @@ export async function GET() {
         isInflow: projectionCategories.isInflow,
       })
       .from(projectionCategories)
-      .where(and(eq(projectionCategories.isActive, true), eq(projectionCategories.userId, session.user.id)));
+      .where(and(eq(projectionCategories.isActive, true), eq(projectionCategories.userId, userId)));
 
     const carryforwards = await db
       .select()
       .from(carryforwardBalances)
-      .where(eq(carryforwardBalances.userId, session.user.id));
+      .where(eq(carryforwardBalances.userId, userId));
 
     const now = new Date();
     const currentPeriod = `${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getFullYear()}`;
@@ -88,15 +88,15 @@ export async function GET() {
         totalAmount: sum(projectionEntries.amount),
       })
       .from(projectionEntries)
-      .where(and(lte(projectionEntries.period, currentPeriod), eq(projectionEntries.userId, session.user.id)))
+      .where(and(lte(projectionEntries.period, currentPeriod), eq(projectionEntries.userId, userId)))
       .groupBy(projectionEntries.categoryId);
 
     // Phase 3 enrichment: load corpus context + recurring earmarked events
-    const ctx = await loadCorpusContext(session.user.id);
+    const ctx = await loadCorpusContext(userId);
     const events = await db
       .select()
       .from(cashflowEvents)
-      .where(eq(cashflowEvents.userId, session.user.id));
+      .where(eq(cashflowEvents.userId, userId));
 
     const goalDetails = goals.map(goal => {
       const goalCategories = linkedCategories.filter(c => c.goalId === goal.id);
@@ -188,8 +188,8 @@ interface GoalBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as GoalBody;
     const { name, targetAmount } = body;
@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
     }
 
     const [goal] = await db.insert(financialGoals).values({
-      userId: session.user.id,
+      userId: userId,
       name,
       targetAmount,
       targetDate: body.targetDate || null,
@@ -247,8 +247,8 @@ export async function POST(request: NextRequest) {
 /* ──────────────────────────────────────────────────────────────────── */
 
 export async function PUT(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as GoalBody & { id?: number };
     const { id } = body;
@@ -292,7 +292,7 @@ export async function PUT(request: NextRequest) {
     await db
       .update(financialGoals)
       .set(updateData)
-      .where(and(eq(financialGoals.id, id), eq(financialGoals.userId, session.user.id)));
+      .where(and(eq(financialGoals.id, id), eq(financialGoals.userId, userId)));
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -309,8 +309,8 @@ export async function PUT(request: NextRequest) {
 /* ──────────────────────────────────────────────────────────────────── */
 
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
@@ -325,7 +325,7 @@ export async function DELETE(request: NextRequest) {
     await db
       .update(financialGoals)
       .set({ isActive: false })
-      .where(and(eq(financialGoals.id, parseInt(id)), eq(financialGoals.userId, session.user.id)));
+      .where(and(eq(financialGoals.id, parseInt(id)), eq(financialGoals.userId, userId)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

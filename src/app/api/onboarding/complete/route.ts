@@ -26,7 +26,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   db,
   businessProfile,
@@ -78,10 +78,8 @@ interface OnboardingBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   let body: OnboardingBody;
   try {
@@ -102,7 +100,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const userId = session.user.id;
 
   // Reject re-submission if already onboarded — the wizard should be
   // gated by the layout, but a direct API hit could bypass that.

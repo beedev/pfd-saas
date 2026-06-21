@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { computeItr3Summary } from '@/lib/finance/itr3-summary';
 
 /**
@@ -11,14 +11,14 @@ import { computeItr3Summary } from '@/lib/finance/itr3-summary';
  */
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
 
-    const summary = await computeItr3Summary(session.user.id, fy);
+    const summary = await computeItr3Summary(userId, fy);
     return NextResponse.json(summary);
   } catch (err) {
     console.error('Failed to build ITR-3 summary:', err);

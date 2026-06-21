@@ -26,7 +26,7 @@ import {
   smallSavingsAccounts,
   mutualFunds,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getGrowthRates, getMfRate } from '@/lib/finance/asset-growth-rates';
 import {
   MATURING_POLICY_TYPES,
@@ -93,18 +93,18 @@ interface AssetClassRow {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const [nps, pf, ins, props, smallSavings, mfs, selections, rates] = await Promise.all([
-      db.select().from(npsAccounts).where(eq(npsAccounts.userId, session.user.id)),
-      db.select().from(epfAccounts).where(eq(epfAccounts.userId, session.user.id)),
-      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
-      db.select().from(realEstate).where(eq(realEstate.userId, session.user.id)),
-      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
-      db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id)),
-      db.select().from(retirementAssetSelection).where(eq(retirementAssetSelection.userId, session.user.id)),
-      getGrowthRates(session.user.id),
+      db.select().from(npsAccounts).where(eq(npsAccounts.userId, userId)),
+      db.select().from(epfAccounts).where(eq(epfAccounts.userId, userId)),
+      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
+      db.select().from(realEstate).where(eq(realEstate.userId, userId)),
+      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, userId)),
+      db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId)),
+      db.select().from(retirementAssetSelection).where(eq(retirementAssetSelection.userId, userId)),
+      getGrowthRates(userId),
     ]);
 
     // ─── NPS ────────────────────────────────────────────────────────────
@@ -346,8 +346,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { assetClass, sourceId, included, mode, salePriceOverride, npsLumpsumPct, npsAnnuityRatePct, expectedFutureRent } = body;
@@ -365,7 +365,7 @@ export async function PATCH(request: NextRequest) {
         and(
           eq(retirementAssetSelection.assetClass, assetClass),
           eq(retirementAssetSelection.sourceId, sourceId),
-          eq(retirementAssetSelection.userId, session.user.id),
+          eq(retirementAssetSelection.userId, userId),
         ),
       )
       .limit(1);
@@ -390,10 +390,10 @@ export async function PATCH(request: NextRequest) {
       await db
         .update(retirementAssetSelection)
         .set(update)
-        .where(and(eq(retirementAssetSelection.id, existing[0].id), eq(retirementAssetSelection.userId, session.user.id)));
+        .where(and(eq(retirementAssetSelection.id, existing[0].id), eq(retirementAssetSelection.userId, userId)));
     } else {
       await db.insert(retirementAssetSelection).values({
-        userId: session.user.id,
+        userId: userId,
         assetClass,
         sourceId,
         included: typeof included === 'boolean' ? included : true,

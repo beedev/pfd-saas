@@ -18,7 +18,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { and, eq, like, or, sql } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseYeswanthTaxCalc } from '@/lib/yeswanth-parser';
 import { db, salaryIncome, taxDeductions, tdsCredits, capitalGains } from '@/db';
 
@@ -44,10 +44,8 @@ const uploadDirFor = (userId: string) =>
   path.join(process.cwd(), 'uploads', userId, 'yeswanth-imports');
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const form = await request.formData();
@@ -74,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Persist file for confirm endpoint to read back.
-    const userDir = uploadDirFor(session.user.id);
+    const userDir = uploadDirFor(userId);
     await fs.mkdir(userDir, { recursive: true });
     const importId = crypto.randomBytes(16).toString('hex');
     const filePath = path.join(userDir, `${importId}.xlsx`);
@@ -96,11 +94,8 @@ export async function POST(request: NextRequest) {
  * section on /tax/import so the user can review + delete an import.
  */
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
-  const userId = session.user.id;
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const byFy = new Map<
       string,
@@ -150,11 +145,8 @@ export async function GET() {
  * values aren't recoverable). Surfaced as a caveat in the UI.
  */
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
-  const userId = session.user.id;
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const fy = new URL(request.url).searchParams.get('fy');
   if (!fy || !/^\d{4}-\d{2}$/.test(fy)) {
     return NextResponse.json({ error: 'fy query param required (YYYY-YY)' }, { status: 400 });

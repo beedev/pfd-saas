@@ -27,7 +27,7 @@ import {
   type VehicleInsuranceStatus,
   type PremiumFrequency,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_TYPES: VehicleInsuranceType[] = [
   'COMPREHENSIVE',
@@ -75,11 +75,11 @@ function parseAddons(raw: string | null): string[] {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureVehicle(id, session.user.id);
+    const guard = await ensureVehicle(id, userId);
     if ('error' in guard) return guard.error;
 
     const rows = await db
@@ -88,7 +88,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleInsurancePolicies.vehicleId, guard.vehicleId),
-          eq(vehicleInsurancePolicies.userId, session.user.id),
+          eq(vehicleInsurancePolicies.userId, userId),
         ),
       )
       .orderBy(desc(vehicleInsurancePolicies.startDate));
@@ -119,11 +119,11 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureVehicle(id, session.user.id);
+    const guard = await ensureVehicle(id, userId);
     if ('error' in guard) return guard.error;
 
     const body = (await request.json()) as CreateBody;
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const result = await db
       .insert(vehicleInsurancePolicies)
       .values({
-        userId: session.user.id,
+        userId: userId,
         vehicleId: guard.vehicleId,
         insurer: body.insurer.trim(),
         policyNumber: body.policyNumber.trim(),

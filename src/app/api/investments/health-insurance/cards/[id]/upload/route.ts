@@ -21,14 +21,14 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { db, healthInsuranceCards } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -42,7 +42,7 @@ export async function POST(
       .select()
       .from(healthInsuranceCards)
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       )
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -58,7 +58,7 @@ export async function POST(
 
     // userId-first directory so a security audit can scope blobs by owner
     // and so a future "delete account" operation can `rm -rf` cleanly.
-    const dir = path.join(process.cwd(), 'uploads', session.user.id, 'health-cards');
+    const dir = path.join(process.cwd(), 'uploads', userId, 'health-cards');
     await fs.promises.mkdir(dir, { recursive: true });
     const absPath = path.join(dir, `${hash}${ext}`);
     await fs.promises.writeFile(absPath, buffer);
@@ -68,7 +68,7 @@ export async function POST(
       .update(healthInsuranceCards)
       .set({ cardImagePath: relPath, updatedAt: new Date() })
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       );
 
     return NextResponse.json({ cardImagePath: relPath, sizeBytes: buffer.length });

@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, mkdirSync, existsSync, rmSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getBotUsername, resetBotUsernameCache } from '@/lib/services/telegram';
 
 const TOKEN_FILE = process.env.TELEGRAM_TOKEN_FILE ?? '/data/.secrets/telegram_bot_token';
@@ -51,16 +51,16 @@ function persistToken(token: string): void {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const configured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
   const botUsername = configured ? await getBotUsername() : null;
   return NextResponse.json({ configured, selfHost: isSelfHost(), botUsername });
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   if (!isSelfHost()) {
     return NextResponse.json(
       { error: 'On this deployment the bot token is managed via the TELEGRAM_BOT_TOKEN env var.' },
@@ -98,8 +98,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   if (!isSelfHost()) {
     return NextResponse.json({ error: 'Managed via env on this deployment.' }, { status: 403 });
   }

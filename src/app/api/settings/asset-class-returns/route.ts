@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, assetClassReturns } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { PF_ANNUAL_RATE_PCT } from '@/lib/finance/asset-growth-rates-constants';
 
 // Seed defaults — must match the constant in lib/finance/goal-corpus.ts
@@ -70,14 +70,14 @@ async function ensureSeeded(userId: string): Promise<void> {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    await ensureSeeded(session.user.id);
+    await ensureSeeded(userId);
     const rows = await db
       .select()
       .from(assetClassReturns)
-      .where(eq(assetClassReturns.userId, session.user.id));
+      .where(eq(assetClassReturns.userId, userId));
     return NextResponse.json({ rates: rows });
   } catch (err) {
     console.error('GET asset-class-returns:', err);
@@ -86,8 +86,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { assetClass, returnPct, useInstrumentRate } = body;
@@ -119,14 +119,14 @@ export async function PATCH(request: NextRequest) {
       }
       update.useInstrumentRate = useInstrumentRate;
     }
-    await ensureSeeded(session.user.id);
+    await ensureSeeded(userId);
     // Upsert: try update first, insert if no row exists for this class.
     const existing = await db
       .select()
       .from(assetClassReturns)
       .where(and(
         eq(assetClassReturns.assetClass, assetClass),
-        eq(assetClassReturns.userId, session.user.id),
+        eq(assetClassReturns.userId, userId),
       ))
       .limit(1);
     if (existing.length) {
@@ -135,14 +135,14 @@ export async function PATCH(request: NextRequest) {
         .set(update)
         .where(and(
           eq(assetClassReturns.assetClass, assetClass),
-          eq(assetClassReturns.userId, session.user.id),
+          eq(assetClassReturns.userId, userId),
         ));
     } else {
       await db.insert(assetClassReturns).values({
         assetClass,
         returnPct: update.returnPct ?? 8,
         useInstrumentRate: update.useInstrumentRate ?? false,
-        userId: session.user.id,
+        userId: userId,
       });
     }
     return NextResponse.json({ ok: true });

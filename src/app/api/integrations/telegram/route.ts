@@ -11,13 +11,11 @@
 import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const result = await db
@@ -29,7 +27,7 @@ export async function DELETE() {
         telegramConnectTokenExpiresAt: null,
         updatedAt: new Date(),
       })
-      .where(eq(userPreferences.userId, session.user.id))
+      .where(eq(userPreferences.userId, userId))
       .returning({ userId: userPreferences.userId });
 
     if (!result.length) {

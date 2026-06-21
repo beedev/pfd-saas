@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, epfAccounts } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -19,7 +19,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(epfAccounts)
-      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)))
+      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, userId)))
       .limit(1);
     if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ account: rows[0] });
@@ -30,8 +30,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -41,7 +41,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(epfAccounts)
-      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)))
+      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, userId)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const current = existing[0];
@@ -88,7 +88,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         notes: typeof body.notes === 'string' ? body.notes : current.notes,
         updatedAt: new Date(),
       })
-      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)))
+      .where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, userId)))
       .returning();
     return NextResponse.json({ account: result[0] });
   } catch (err) {
@@ -98,15 +98,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(epfAccounts).where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, session.user.id)));
+    await db.delete(epfAccounts).where(and(eq(epfAccounts.id, numericId), eq(epfAccounts.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete PF account:', err);

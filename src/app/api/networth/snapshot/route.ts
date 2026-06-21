@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, priceSnapshots } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { computeNetWorth } from '@/lib/assets/registry';
 
 const SOURCE = 'NETWORTH_SNAPSHOT';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   // Return today's snapshot if present
   const today = new Date().toISOString().slice(0, 10);
   const rows = await db
@@ -18,20 +18,20 @@ export async function GET() {
       and(
         eq(priceSnapshots.priceDate, today),
         eq(priceSnapshots.source, SOURCE),
-        eq(priceSnapshots.userId, session.user.id),
+        eq(priceSnapshots.userId, userId),
       ),
     );
   return NextResponse.json({ date: today, snapshots: rows, hasToday: rows.length > 0 });
 }
 
 export async function POST(_request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Asset fetch + valuation now lives in the asset registry — one entry
     // per class — instead of 11 hardcoded selects + reduces here.
     const { breakdown, totalAssetsPaisa, liabilitiesPaisa, netWorthPaisa } =
-      await computeNetWorth(session.user.id);
+      await computeNetWorth(userId);
 
     const totalAssets = totalAssetsPaisa;
     const liaPaisa = liabilitiesPaisa;
@@ -51,11 +51,11 @@ export async function POST(_request: NextRequest) {
           and(
             eq(priceSnapshots.assetSymbol, r.symbol),
             eq(priceSnapshots.priceDate, today),
-            eq(priceSnapshots.userId, session.user.id),
+            eq(priceSnapshots.userId, userId),
           )
         );
       await db.insert(priceSnapshots).values({
-        userId: session.user.id,
+        userId: userId,
         assetType: 'NETWORTH',
         assetSymbol: r.symbol,
         assetName: r.name,

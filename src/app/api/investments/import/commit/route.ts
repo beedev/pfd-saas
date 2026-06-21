@@ -23,7 +23,7 @@ import {
   type CapGainAssetType,
   type HoldingPeriod,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import type {
   LicPaymentMode,
   ChitParsed,
@@ -504,8 +504,8 @@ async function commitNpsSot(body: NpsSotCommitBody, userId: string) {
 /* ─── dispatcher ──────────────────────────────────────────────────────── */
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as
       | LicCommitBody
@@ -521,23 +521,23 @@ export async function POST(request: NextRequest) {
 
     switch (body.type) {
       case 'lic': {
-        const result = await commitLic(body, session.user.id);
+        const result = await commitLic(body, userId);
         return NextResponse.json({ type: 'lic', ...result });
       }
       case 'chit': {
-        const result = await commitChit(body, session.user.id);
+        const result = await commitChit(body, userId);
         return NextResponse.json({ type: 'chit', ...result });
       }
       case 'cg-statement': {
-        const result = await commitCgStatement(body, session.user.id);
+        const result = await commitCgStatement(body, userId);
         return NextResponse.json({ type: 'cg-statement', ...result });
       }
       case 'epf-passbook': {
-        const result = await commitEpfPassbook(body, session.user.id);
+        const result = await commitEpfPassbook(body, userId);
         return NextResponse.json(result);
       }
       case 'nps-sot': {
-        const result = await commitNpsSot(body, session.user.id);
+        const result = await commitNpsSot(body, userId);
         return NextResponse.json(result);
       }
       case 'mf-sip':

@@ -3,7 +3,7 @@ import { db, invoices, invoiceItems, customers, businessProfile } from '@/db';
 import { and, eq } from 'drizzle-orm';
 import { calculateTax, rupeesToPaisa } from '@/lib/calculations/tax';
 import { TaxRate, isValidTaxRate } from '@/constants/tax-rates';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   syncInvoiceTdsCredit,
   removeInvoiceTdsCredit,
@@ -14,8 +14,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const invoiceId = parseInt(id, 10);
@@ -27,7 +27,7 @@ export async function GET(
     const invoice = await db
       .select()
       .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)))
       .limit(1);
 
     if (invoice.length === 0) {
@@ -37,13 +37,13 @@ export async function GET(
     const items = await db
       .select()
       .from(invoiceItems)
-      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, userId)));
 
     const customer = invoice[0].customerId
       ? await db
           .select()
           .from(customers)
-          .where(and(eq(customers.id, invoice[0].customerId), eq(customers.userId, session.user.id)))
+          .where(and(eq(customers.id, invoice[0].customerId), eq(customers.userId, userId)))
           .limit(1)
       : [];
 
@@ -51,7 +51,7 @@ export async function GET(
     const business = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
 
     return NextResponse.json({
@@ -74,8 +74,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const invoiceId = parseInt(id, 10);
@@ -88,7 +88,7 @@ export async function DELETE(
     const invoice = await db
       .select()
       .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)))
       .limit(1);
 
     if (invoice.length === 0) {
@@ -96,15 +96,15 @@ export async function DELETE(
     }
 
     // Delete invoice items first (foreign key constraint)
-    await db.delete(invoiceItems).where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+    await db.delete(invoiceItems).where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, userId)));
 
     // Delete invoice
-    await db.delete(invoices).where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
+    await db.delete(invoices).where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)));
 
     // Sprint A.2 — retract any auto-derived tds_credits row for this
     // invoice. Non-fatal: log and continue if it fails.
     try {
-      await removeInvoiceTdsCredit(session.user.id, invoiceId);
+      await removeInvoiceTdsCredit(userId, invoiceId);
     } catch (err) {
       console.error('[invoices DELETE] tds derivation cleanup failed', err);
     }
@@ -124,8 +124,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const invoiceId = parseInt(id, 10);
@@ -138,7 +138,7 @@ export async function PUT(
     const existingInvoice = await db
       .select()
       .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)))
       .limit(1);
 
     if (existingInvoice.length === 0) {
@@ -174,11 +174,11 @@ export async function PUT(
       await db
         .update(invoices)
         .set(patch)
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)));
 
       // Sprint A.2 — invoice state changed, resync the derived row.
       try {
-        await syncInvoiceTdsCredit(session.user.id, invoiceId);
+        await syncInvoiceTdsCredit(userId, invoiceId);
       } catch (err) {
         console.error('[invoices PUT status] tds derivation failed', err);
       }
@@ -186,7 +186,7 @@ export async function PUT(
       const updated = await db
         .select()
         .from(invoices)
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)))
         .limit(1);
 
       return NextResponse.json({ invoice: updated[0] });
@@ -221,7 +221,7 @@ export async function PUT(
     const profile = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
@@ -235,7 +235,7 @@ export async function PUT(
     const customer = await db
       .select()
       .from(customers)
-      .where(and(eq(customers.id, customerId), eq(customers.userId, session.user.id)))
+      .where(and(eq(customers.id, customerId), eq(customers.userId, userId)))
       .limit(1);
 
     if (customer.length === 0) {
@@ -338,14 +338,14 @@ export async function PUT(
         returnPeriod,
         updatedAt: new Date(),
       })
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)));
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)));
 
     // Delete existing items and insert new ones
-    await db.delete(invoiceItems).where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+    await db.delete(invoiceItems).where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, userId)));
 
     for (const item of processedItems) {
       await db.insert(invoiceItems).values({
-        userId: session.user.id,
+        userId: userId,
         invoiceId,
         ...item,
       });
@@ -355,18 +355,18 @@ export async function PUT(
     const updated = await db
       .select()
       .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, session.user.id)))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.userId, userId)))
       .limit(1);
 
     const updatedItems = await db
       .select()
       .from(invoiceItems)
-      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, session.user.id)));
+      .where(and(eq(invoiceItems.invoiceId, invoiceId), eq(invoiceItems.userId, userId)));
 
     // Sprint A.2 — full edit changed the taxable amount; resync the
     // derived row. Skipped no-op for DRAFTs.
     try {
-      await syncInvoiceTdsCredit(session.user.id, invoiceId);
+      await syncInvoiceTdsCredit(userId, invoiceId);
     } catch (err) {
       console.error('[invoices PUT full] tds derivation failed', err);
     }

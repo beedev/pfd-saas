@@ -6,16 +6,14 @@
  * runAlertsCheck() function, different dispatch.
  */
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { runAlertsCheck } from '@/lib/cron/alerts-check';
 
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const result = await runAlertsCheck(session.user.id);
+    const result = await runAlertsCheck(userId);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[alerts/check]', err);

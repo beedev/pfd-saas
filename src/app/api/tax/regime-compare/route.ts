@@ -16,21 +16,19 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   computeFyTaxComparison,
   isComputeError,
 } from '@/lib/finance/tax-compute';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const fy = new URL(request.url).searchParams.get('fy') ?? defaultCurrentFY();
-    const result = await computeFyTaxComparison(session.user.id, fy);
+    const result = await computeFyTaxComparison(userId, fy);
     if (isComputeError(result)) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }

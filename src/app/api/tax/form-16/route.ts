@@ -5,22 +5,20 @@
  * Returns uploads ordered newest-first along with reconciliation
  * totals — total TDS across uploads for the FY (or all FYs).
  *
- * Multi-tenant: all queries scoped by session.user.id.
+ * Multi-tenant: all queries scoped by userId.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, form16Uploads, form16aUploads } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy');
-    const userScope = eq(form16Uploads.userId, session.user.id);
+    const userScope = eq(form16Uploads.userId, userId);
 
     const uploads = fy
       ? await db
@@ -41,7 +39,7 @@ export async function GET(request: NextRequest) {
     };
 
     // Form 16A (non-salary TDS certificates) for the same scope.
-    const aScope = eq(form16aUploads.userId, session.user.id);
+    const aScope = eq(form16aUploads.userId, userId);
     const form16a = fy
       ? await db.select().from(form16aUploads)
           .where(and(aScope, eq(form16aUploads.fy, fy)))

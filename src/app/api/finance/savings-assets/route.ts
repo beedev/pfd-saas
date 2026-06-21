@@ -29,7 +29,7 @@ import {
   insurancePolicies,
   fixedDeposits,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { MATURING_POLICY_TYPES } from '@/lib/finance/retirement-shared';
 import { assetClassCurrentValuePaisa } from '@/lib/assets/registry';
 
@@ -80,8 +80,8 @@ function lookupIncluded(
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Aggregate classes (Stocks / MFs / NPS / PF) source their current
     // value from the asset registry — the same fetch + valuePaisa rule
@@ -101,19 +101,19 @@ export async function GET() {
       fds,
       inclusions,
     ] = await Promise.all([
-      assetClassCurrentValuePaisa('stocks', session.user.id),
-      assetClassCurrentValuePaisa('mutualFunds', session.user.id),
-      assetClassCurrentValuePaisa('nps', session.user.id),
-      assetClassCurrentValuePaisa('pf', session.user.id),
-      db.select().from(goldHoldings).where(eq(goldHoldings.userId, session.user.id)),
-      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, session.user.id)),
-      db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id)),
-      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, session.user.id)),
-      db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, session.user.id)),
+      assetClassCurrentValuePaisa('stocks', userId),
+      assetClassCurrentValuePaisa('mutualFunds', userId),
+      assetClassCurrentValuePaisa('nps', userId),
+      assetClassCurrentValuePaisa('pf', userId),
+      db.select().from(goldHoldings).where(eq(goldHoldings.userId, userId)),
+      db.select().from(smallSavingsAccounts).where(eq(smallSavingsAccounts.userId, userId)),
+      db.select().from(chitFunds).where(eq(chitFunds.userId, userId)),
+      db.select().from(insurancePolicies).where(eq(insurancePolicies.userId, userId)),
+      db.select().from(fixedDeposits).where(eq(fixedDeposits.userId, userId)),
       db
         .select()
         .from(savingsAssetInclusion)
-        .where(and(isNull(savingsAssetInclusion.goalId), eq(savingsAssetInclusion.userId, session.user.id))),
+        .where(and(isNull(savingsAssetInclusion.goalId), eq(savingsAssetInclusion.userId, userId))),
     ]);
 
     const inclusionRows = inclusions.map((r) => ({
@@ -369,8 +369,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { assetClass, included, sourceId } = body;
@@ -394,7 +394,7 @@ export async function PATCH(request: NextRequest) {
             ? isNull(savingsAssetInclusion.sourceId)
             : eq(savingsAssetInclusion.sourceId, sourceIdVal),
           isNull(savingsAssetInclusion.goalId),
-          eq(savingsAssetInclusion.userId, session.user.id),
+          eq(savingsAssetInclusion.userId, userId),
         ),
       )
       .limit(1);
@@ -403,10 +403,10 @@ export async function PATCH(request: NextRequest) {
       await db
         .update(savingsAssetInclusion)
         .set({ included, updatedAt: new Date() })
-        .where(and(eq(savingsAssetInclusion.id, existing[0].id), eq(savingsAssetInclusion.userId, session.user.id)));
+        .where(and(eq(savingsAssetInclusion.id, existing[0].id), eq(savingsAssetInclusion.userId, userId)));
     } else {
       await db.insert(savingsAssetInclusion).values({
-        userId: session.user.id,
+        userId: userId,
         assetClass,
         sourceId: sourceIdVal,
         included,

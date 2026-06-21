@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, budgetCategories, budgetEntries } from '@/db';
 import { and, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // GET - Get a single category
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const categoryId = parseInt(id, 10);
@@ -24,7 +24,7 @@ export async function GET(
     const category = await db
       .select()
       .from(budgetCategories)
-      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, session.user.id)));
+      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, userId)));
 
     if (category.length === 0) {
       return NextResponse.json(
@@ -48,8 +48,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const categoryId = parseInt(id, 10);
@@ -72,7 +72,7 @@ export async function PUT(
         ...(sortOrder !== undefined && { sortOrder }),
         ...(isActive !== undefined && { isActive }),
       })
-      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, session.user.id)))
+      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, userId)))
       .returning();
 
     if (result.length === 0) {
@@ -97,8 +97,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const categoryId = parseInt(id, 10);
@@ -113,12 +113,12 @@ export async function DELETE(
     // First delete all budget entries for this category
     await db
       .delete(budgetEntries)
-      .where(and(eq(budgetEntries.categoryId, categoryId), eq(budgetEntries.userId, session.user.id)));
+      .where(and(eq(budgetEntries.categoryId, categoryId), eq(budgetEntries.userId, userId)));
 
     // Then delete the category itself
     const result = await db
       .delete(budgetCategories)
-      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, session.user.id)))
+      .where(and(eq(budgetCategories.id, categoryId), eq(budgetCategories.userId, userId)))
       .returning();
 
     if (result.length === 0) {

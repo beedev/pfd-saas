@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, salaryIncome } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 /**
  * Export CSV_TDS1.csv — TDS from salary employers (Form 16).
@@ -18,14 +18,14 @@ function csvCell(v: string | number): string {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
 
-    const rows = await db.select().from(salaryIncome).where(and(eq(salaryIncome.financialYear, fy), eq(salaryIncome.userId, session.user.id)));
+    const rows = await db.select().from(salaryIncome).where(and(eq(salaryIncome.financialYear, fy), eq(salaryIncome.userId, userId)));
 
     const lines: string[] = [
       ['TAN of Employer', 'Name of Employer', 'Income chargeable under Salaries', 'Total tax deducted']

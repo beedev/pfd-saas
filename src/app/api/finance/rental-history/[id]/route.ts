@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, rentalHistory } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -32,8 +32,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(rentalHistory)
-      .where(and(eq(rentalHistory.id, numericId), eq(rentalHistory.userId, session.user.id)))
+      .where(and(eq(rentalHistory.id, numericId), eq(rentalHistory.userId, userId)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -84,7 +84,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(rentalHistory)
       .set(update)
-      .where(and(eq(rentalHistory.id, numericId), eq(rentalHistory.userId, session.user.id)))
+      .where(and(eq(rentalHistory.id, numericId), eq(rentalHistory.userId, userId)))
       .returning();
     return NextResponse.json({ row: result[0] });
   } catch (err) {
@@ -94,8 +94,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -104,7 +104,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     }
     await db
       .delete(rentalHistory)
-      .where(and(eq(rentalHistory.id, numericId), eq(rentalHistory.userId, session.user.id)));
+      .where(and(eq(rentalHistory.id, numericId), eq(rentalHistory.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[rental-history/:id DELETE]', err);

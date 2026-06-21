@@ -9,13 +9,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, transformationPlans, transformationSections } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // POST /api/health/transformation/sections
 // Body: { name, sortOrder? }
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     const planRows = await db
       .select()
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (!planRows.length) {
       return NextResponse.json({ error: 'No plan found' }, { status: 404 });
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const inserted = await db
       .insert(transformationSections)
       .values({
-        userId: session.user.id,
+        userId: userId,
         planId: planRows[0].id,
         name: body.name.trim(),
         sortOrder: typeof body.sortOrder === 'number' ? body.sortOrder : 999,
@@ -50,8 +50,8 @@ export async function POST(request: NextRequest) {
 // PATCH — rename or reorder
 // Body: { id, name?, sortOrder? }
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -69,7 +69,7 @@ export async function PATCH(request: NextRequest) {
       .set(update)
       .where(
         and(
-          eq(transformationSections.userId, session.user.id),
+          eq(transformationSections.userId, userId),
           eq(transformationSections.id, body.id),
         ),
       )
@@ -84,8 +84,8 @@ export async function PATCH(request: NextRequest) {
 // DELETE — soft delete
 // Body: { id }
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -97,7 +97,7 @@ export async function DELETE(request: NextRequest) {
       .set({ deletedAt: new Date() })
       .where(
         and(
-          eq(transformationSections.userId, session.user.id),
+          eq(transformationSections.userId, userId),
           eq(transformationSections.id, body.id),
         ),
       );

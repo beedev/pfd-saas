@@ -14,16 +14,16 @@
 import { NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, chitFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { calculateChitXirrFromSummary } from '@/lib/finance/chit-xirr';
 
 export const runtime = 'nodejs';
 
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const rows = await db.select().from(chitFunds).where(eq(chitFunds.userId, session.user.id));
+    const rows = await db.select().from(chitFunds).where(eq(chitFunds.userId, userId));
     let updated = 0;
     let skipped = 0;
 
@@ -59,7 +59,7 @@ export async function POST() {
       await db
         .update(chitFunds)
         .set({ xirr, updatedAt: new Date() })
-        .where(and(eq(chitFunds.id, c.id), eq(chitFunds.userId, session.user.id)));
+        .where(and(eq(chitFunds.id, c.id), eq(chitFunds.userId, userId)));
       updated++;
     }
 

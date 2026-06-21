@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, mkdirSync, existsSync, rmSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { isSelfHost } from '@/lib/self-host';
 import { appName } from '@/lib/brand';
 
@@ -37,8 +37,8 @@ function persist(owner: string): void {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   return NextResponse.json({
     owner: process.env.APP_OWNER ?? '',
     appName: appName(),
@@ -47,8 +47,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   if (!isSelfHost()) {
     return NextResponse.json({ error: 'Branding is fixed on this deployment.' }, { status: 403 });
   }
@@ -73,8 +73,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   if (!isSelfHost()) {
     return NextResponse.json({ error: 'Branding is fixed on this deployment.' }, { status: 403 });
   }

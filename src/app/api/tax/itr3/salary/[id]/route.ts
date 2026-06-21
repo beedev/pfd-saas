@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, salaryIncome } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    const existing = await db.select().from(salaryIncome).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, session.user.id))).limit(1);
+    const existing = await db.select().from(salaryIncome).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, userId))).limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const cur = existing[0];
 
@@ -42,7 +42,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (typeof body.otherAllowancesRupees === 'number') update.otherAllowancesPaisa = Math.round(body.otherAllowancesRupees * 100);
     if (typeof body.rentPaidMonthlyRupees === 'number') update.rentPaidMonthlyPaisa = Math.round(body.rentPaidMonthlyRupees * 100);
 
-    const result = await db.update(salaryIncome).set(update).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, session.user.id))).returning();
+    const result = await db.update(salaryIncome).set(update).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, userId))).returning();
     return NextResponse.json({ entry: result[0] });
   } catch (err) {
     console.error('Failed to update salary income:', err);
@@ -51,15 +51,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(salaryIncome).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, session.user.id)));
+    await db.delete(salaryIncome).where(and(eq(salaryIncome.id, numericId), eq(salaryIncome.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete salary income:', err);

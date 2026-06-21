@@ -37,7 +37,7 @@ import {
   type PresumptiveSection,
   type ReceiptMode,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { computeItr4Summary } from '@/lib/finance/itr4-summary';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 import { deriveDeductions } from '@/lib/finance/deduction-engine';
@@ -47,14 +47,11 @@ import { resolveSalaryIncome, resolveSalaryTds } from '@/lib/finance/form16-tax-
 const ITR4_CAP_PAISA = 50 * 100 * 100000;
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
-    const userId = session.user.id;
 
     const { start: fyStart, end: fyEnd } = financialYearBoundsIso(fy);
 

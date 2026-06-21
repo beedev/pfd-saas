@@ -23,7 +23,7 @@
 import { NextResponse } from 'next/server';
 import { and, eq, gt } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { fetchTelegramUpdates, sendTelegramToChatId } from '@/lib/services/telegram';
 
 const START_RE = /^\/start\s+([A-Za-z0-9-]+)\s*$/;
@@ -57,16 +57,24 @@ async function drainAndPair(): Promise<void> {
         .limit(1);
       if (!rows.length) continue;
 
-      await db
-        .update(userPreferences)
-        .set({
-          telegramChatId: String(chatId),
-          telegramUsername: u.message?.from?.username ?? null,
-          telegramConnectToken: null,
-          telegramConnectTokenExpiresAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(userPreferences.userId, rows[0].userId));
+      // Atomic re-pair: release this chat from any previous owner before
+      // binding it (one chat ↔ one user; satisfies the partial-unique index).
+      await db.transaction(async (tx) => {
+        await tx
+          .update(userPreferences)
+          .set({ telegramChatId: null, telegramUsername: null, updatedAt: new Date() })
+          .where(eq(userPreferences.telegramChatId, String(chatId)));
+        await tx
+          .update(userPreferences)
+          .set({
+            telegramChatId: String(chatId),
+            telegramUsername: u.message?.from?.username ?? null,
+            telegramConnectToken: null,
+            telegramConnectTokenExpiresAt: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(userPreferences.userId, rows[0].userId));
+      });
 
       await sendTelegramToChatId(
         chatId,
@@ -81,10 +89,8 @@ async function drainAndPair(): Promise<void> {
 }
 
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   const mode = (process.env.TELEGRAM_CONNECT_MODE ?? 'webhook').toLowerCase();
   if (mode === 'getupdates') {
@@ -97,7 +103,7 @@ export async function POST() {
       username: userPreferences.telegramUsername,
     })
     .from(userPreferences)
-    .where(eq(userPreferences.userId, session.user.id))
+    .where(eq(userPreferences.userId, userId))
     .limit(1);
 
   const chatId = me[0]?.chatId ?? null;

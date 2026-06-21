@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, vehicleServiceLog, type ServiceType } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_SERVICE_TYPES: ServiceType[] = [
   'REGULAR',
@@ -43,8 +43,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .select()
       .from(vehicleServiceLog)
       .where(
-        and(eq(vehicleServiceLog.id, numericId), eq(vehicleServiceLog.userId, session.user.id)),
+        and(eq(vehicleServiceLog.id, numericId), eq(vehicleServiceLog.userId, userId)),
       )
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -93,7 +93,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .update(vehicleServiceLog)
       .set(update)
       .where(
-        and(eq(vehicleServiceLog.id, numericId), eq(vehicleServiceLog.userId, session.user.id)),
+        and(eq(vehicleServiceLog.id, numericId), eq(vehicleServiceLog.userId, userId)),
       )
       .returning();
     return NextResponse.json({ service: result[0] });
@@ -104,8 +104,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -115,7 +115,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     await db
       .delete(vehicleServiceLog)
       .where(
-        and(eq(vehicleServiceLog.id, numericId), eq(vehicleServiceLog.userId, session.user.id)),
+        and(eq(vehicleServiceLog.id, numericId), eq(vehicleServiceLog.userId, userId)),
       );
     return NextResponse.json({ success: true });
   } catch (err) {

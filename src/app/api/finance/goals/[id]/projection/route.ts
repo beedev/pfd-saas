@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, financialGoals, cashflowEvents } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   loadCorpusContext,
   corpusForGoal,
@@ -44,8 +44,8 @@ interface Params {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -59,7 +59,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       )
       .limit(1);
@@ -67,18 +67,18 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const goal = rows[0];
 
     const [ctx, allEvents, earmarked] = await Promise.all([
-      loadCorpusContext(session.user.id),
+      loadCorpusContext(userId),
       db
         .select()
         .from(cashflowEvents)
-        .where(eq(cashflowEvents.userId, session.user.id)),
+        .where(eq(cashflowEvents.userId, userId)),
       db
         .select()
         .from(cashflowEvents)
         .where(
           and(
             eq(cashflowEvents.goalId, numericId),
-            eq(cashflowEvents.userId, session.user.id),
+            eq(cashflowEvents.userId, userId),
           ),
         ),
     ]);
@@ -115,7 +115,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // conservative under-estimate for high earners (real marginal is
     // typically higher than effective) but it's directionally right
     // and stable across the projection horizon.
-    const taxProjection = await projectAnnualTax(session.user.id, currentFy());
+    const taxProjection = await projectAnnualTax(userId, currentFy());
     const marginalRatePct = taxProjection?.effectiveRatePct ?? 0;
 
     const projection = projectGoal({

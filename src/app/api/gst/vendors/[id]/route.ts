@@ -3,15 +3,15 @@ import { db, vendors } from '@/db';
 import { and, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // GET - Fetch single vendor
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const vendorId = parseInt(id, 10);
@@ -23,7 +23,7 @@ export async function GET(
     const result = await db
       .select()
       .from(vendors)
-      .where(and(eq(vendors.id, vendorId), eq(vendors.userId, session.user.id)))
+      .where(and(eq(vendors.id, vendorId), eq(vendors.userId, userId)))
       .limit(1);
 
     if (result.length === 0) {
@@ -45,8 +45,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const vendorId = parseInt(id, 10);
@@ -117,12 +117,12 @@ export async function PUT(
         phone: phone || null,
         updatedAt: new Date(),
       })
-      .where(and(eq(vendors.id, vendorId), eq(vendors.userId, session.user.id)));
+      .where(and(eq(vendors.id, vendorId), eq(vendors.userId, userId)));
 
     const updated = await db
       .select()
       .from(vendors)
-      .where(and(eq(vendors.id, vendorId), eq(vendors.userId, session.user.id)))
+      .where(and(eq(vendors.id, vendorId), eq(vendors.userId, userId)))
       .limit(1);
 
     return NextResponse.json({ vendor: updated[0] });
@@ -140,8 +140,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const vendorId = parseInt(id, 10);
@@ -150,7 +150,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid vendor ID' }, { status: 400 });
     }
 
-    await db.delete(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.userId, session.user.id)));
+    await db.delete(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.userId, userId)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

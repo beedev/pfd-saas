@@ -42,7 +42,7 @@ import {
   type PresumptiveSection,
   type ReceiptMode,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { computeItr1Summary } from '@/lib/finance/itr1-summary';
 import { computeItr2Summary } from '@/lib/finance/itr2-summary';
 import { computeItr4Summary } from '@/lib/finance/itr4-summary';
@@ -110,10 +110,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ form: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { form } = await params;
@@ -126,7 +124,6 @@ export async function GET(
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
 
-    const userId = session.user.id;
 
     // ITR-3 stays delegated — the dedicated multi-page walkthrough at
     // /tax/itr3 owns this filer's experience. We just hand the client

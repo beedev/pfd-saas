@@ -3,7 +3,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import { db, sips, mutualFunds, investmentTransactions, type SIPFrequency } from '@/db';
 import { calculateXirr, type CashFlow } from '@/lib/finance/xirr';
 import { recomputeSipBudgetForPeriod, dateToPeriod } from '@/lib/finance/budget-sync';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -31,8 +31,8 @@ function computeNextExecution(fromDate: string, frequency: SIPFrequency): string
 // POST /api/investments/sips/:id/execute
 // Body: { executionDate, navOnExecution (rupees), amount (rupees) }
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const sipRows = await db
       .select()
       .from(sips)
-      .where(and(eq(sips.id, numericId), eq(sips.userId, session.user.id)))
+      .where(and(eq(sips.id, numericId), eq(sips.userId, userId)))
       .limit(1);
     if (!sipRows.length) {
       return NextResponse.json({ error: 'SIP not found' }, { status: 404 });
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const mfRows = await db
       .select()
       .from(mutualFunds)
-      .where(and(eq(mutualFunds.id, sip.mutualFundId), eq(mutualFunds.userId, session.user.id)))
+      .where(and(eq(mutualFunds.id, sip.mutualFundId), eq(mutualFunds.userId, userId)))
       .limit(1);
     if (!mfRows.length) {
       return NextResponse.json({ error: 'Linked mutual fund not found' }, { status: 404 });
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const txnResult = await db
       .insert(investmentTransactions)
       .values({
-        userId: session.user.id,
+        userId: userId,
         type: 'SIP_EXECUTION',
         assetType: 'MUTUAL_FUND',
         assetId: sip.mutualFundId,
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         lastNavDate: executionDate,
         updatedAt: new Date(),
       })
-      .where(and(eq(mutualFunds.id, sip.mutualFundId), eq(mutualFunds.userId, session.user.id)));
+      .where(and(eq(mutualFunds.id, sip.mutualFundId), eq(mutualFunds.userId, userId)));
 
     // Recompute XIRR using the full transaction history of this MF
     const allTxns = await db
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .from(investmentTransactions)
       .where(
         and(
-          eq(investmentTransactions.userId, session.user.id),
+          eq(investmentTransactions.userId, userId),
           eq(investmentTransactions.assetType, 'MUTUAL_FUND'),
           eq(investmentTransactions.assetId, sip.mutualFundId)
         )
@@ -157,11 +157,11 @@ export async function POST(request: NextRequest, { params }: Params) {
         expectedXirr: xirrPct,
         updatedAt: new Date(),
       })
-      .where(and(eq(sips.id, numericId), eq(sips.userId, session.user.id)))
+      .where(and(eq(sips.id, numericId), eq(sips.userId, userId)))
       .returning();
 
     // Sync SIP spend to budget
-    await recomputeSipBudgetForPeriod(session.user.id, dateToPeriod(executionDate));
+    await recomputeSipBudgetForPeriod(userId, dateToPeriod(executionDate));
 
     return NextResponse.json({
       sip: updatedSipRows[0],

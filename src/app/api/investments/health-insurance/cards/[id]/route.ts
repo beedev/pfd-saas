@@ -12,7 +12,7 @@ import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, healthInsuranceCards, type FamilyRelationship } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_RELATIONSHIPS: FamilyRelationship[] = [
   'SELF',
@@ -42,8 +42,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .select()
       .from(healthInsuranceCards)
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       )
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -80,7 +80,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .update(healthInsuranceCards)
       .set(update)
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       )
       .returning();
     return NextResponse.json({ card: result[0] });
@@ -91,8 +91,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -105,7 +105,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .select()
       .from(healthInsuranceCards)
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       )
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -125,7 +125,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     await db
       .delete(healthInsuranceCards)
       .where(
-        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, session.user.id)),
+        and(eq(healthInsuranceCards.id, numericId), eq(healthInsuranceCards.userId, userId)),
       );
     return NextResponse.json({ success: true });
   } catch (err) {

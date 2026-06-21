@@ -18,7 +18,7 @@ import {
   transformationItems,
   transformationDays,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 /** Default starter template for a new plan — the proven V1 structure. */
 const STARTER_TEMPLATE: Array<{
@@ -68,14 +68,14 @@ const STARTER_TEMPLATE: Array<{
 // GET /api/health/transformation/plan
 // Returns the active plan with sections + items (omits soft-deleted rows).
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const planRows = await db
       .select()
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (!planRows.length) {
       return NextResponse.json({ plan: null, sections: [] });
@@ -87,7 +87,7 @@ export async function GET() {
       .from(transformationSections)
       .where(
         and(
-          eq(transformationSections.userId, session.user.id),
+          eq(transformationSections.userId, userId),
           eq(transformationSections.planId, plan.id),
           isNull(transformationSections.deletedAt),
         ),
@@ -99,7 +99,7 @@ export async function GET() {
       .from(transformationItems)
       .where(
         and(
-          eq(transformationItems.userId, session.user.id),
+          eq(transformationItems.userId, userId),
           isNull(transformationItems.deletedAt),
         ),
       )
@@ -126,15 +126,15 @@ export async function GET() {
 // PATCH /api/health/transformation/plan
 // Update plan-level fields (name, weight targets, calorie/protein, notes).
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
     const planRows = await db
       .select()
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (!planRows.length) {
       return NextResponse.json({ error: 'No plan found' }, { status: 404 });
@@ -158,7 +158,7 @@ export async function PATCH(request: NextRequest) {
       .set(update)
       .where(
         and(
-          eq(transformationPlans.userId, session.user.id),
+          eq(transformationPlans.userId, userId),
           eq(transformationPlans.id, plan.id),
         ),
       )
@@ -176,7 +176,7 @@ export async function PATCH(request: NextRequest) {
         .from(transformationDays)
         .where(
           and(
-            eq(transformationDays.userId, session.user.id),
+            eq(transformationDays.userId, userId),
             eq(transformationDays.planId, plan.id),
           ),
         );
@@ -204,14 +204,14 @@ export async function PATCH(request: NextRequest) {
 // Create the user's plan (one per user) and seed the starter template so an
 // empty account can begin from the UI. 409 if a plan already exists.
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const existing = await db
       .select({ id: transformationPlans.id })
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (existing.length) {
       return NextResponse.json({ error: 'A plan already exists.' }, { status: 409 });
@@ -221,7 +221,7 @@ export async function POST() {
     const [plan] = await db
       .insert(transformationPlans)
       .values({
-        userId: session.user.id,
+        userId: userId,
         name: '100 Days Transformation Challenge',
         startDate: today,
         dayCount: 100,
@@ -232,12 +232,12 @@ export async function POST() {
       const sec = STARTER_TEMPLATE[s];
       const [section] = await db
         .insert(transformationSections)
-        .values({ userId: session.user.id, planId: plan.id, name: sec.name, sortOrder: s })
+        .values({ userId: userId, planId: plan.id, name: sec.name, sortOrder: s })
         .returning({ id: transformationSections.id });
       for (let i = 0; i < sec.items.length; i++) {
         const it = sec.items[i];
         await db.insert(transformationItems).values({
-          userId: session.user.id,
+          userId: userId,
           sectionId: section.id,
           label: it.label,
           kind: it.kind,

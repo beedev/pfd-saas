@@ -24,7 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db, liabilities } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { aggregateLoanTaxDeductions } from '@/lib/finance/loan-tax';
 
 /** Default to the current Indian FY (April–March cycle). */
@@ -37,17 +37,15 @@ function defaultCurrentFY(): string {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const fy = new URL(request.url).searchParams.get('fy') ?? defaultCurrentFY();
     const rows = await db
       .select()
       .from(liabilities)
-      .where(eq(liabilities.userId, session.user.id));
+      .where(eq(liabilities.userId, userId));
 
     const result = aggregateLoanTaxDeductions(
       rows.map((r) => ({

@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, smallSavingsAccounts } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { projectBalance } from '@/lib/finance/small-savings';
 
 interface Params {
@@ -19,8 +19,8 @@ interface Params {
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(smallSavingsAccounts.id, numericId),
-          eq(smallSavingsAccounts.userId, session.user.id),
+          eq(smallSavingsAccounts.userId, userId),
         ),
       )
       .limit(1);

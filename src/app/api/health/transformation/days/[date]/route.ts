@@ -17,7 +17,7 @@ import {
   transformationDays,
   transformationChecks,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ date: string }>;
@@ -33,8 +33,8 @@ function dayNumberFor(startDate: string, date: string): number {
 
 // GET /api/health/transformation/days/[date]
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { date } = await params;
@@ -44,7 +44,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const planRows = await db
       .select()
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (!planRows.length) return NextResponse.json({ error: 'No plan' }, { status: 404 });
     const plan = planRows[0];
@@ -54,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .from(transformationDays)
       .where(
         and(
-          eq(transformationDays.userId, session.user.id),
+          eq(transformationDays.userId, userId),
           eq(transformationDays.planId, plan.id),
           eq(transformationDays.date, date),
         ),
@@ -85,7 +85,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .from(transformationChecks)
       .where(
         and(
-          eq(transformationChecks.userId, session.user.id),
+          eq(transformationChecks.userId, userId),
           eq(transformationChecks.dayId, stored.id),
         ),
       );
@@ -117,8 +117,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 // PUT /api/health/transformation/days/[date]
 // Body: { currentWeightKg?, journal?, checks?: { [itemId]: boolean }, texts?: {...} }
 export async function PUT(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { date } = await params;
@@ -129,7 +129,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const planRows = await db
       .select()
       .from(transformationPlans)
-      .where(eq(transformationPlans.userId, session.user.id))
+      .where(eq(transformationPlans.userId, userId))
       .limit(1);
     if (!planRows.length) return NextResponse.json({ error: 'No plan' }, { status: 404 });
     const plan = planRows[0];
@@ -142,7 +142,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       .from(transformationDays)
       .where(
         and(
-          eq(transformationDays.userId, session.user.id),
+          eq(transformationDays.userId, userId),
           eq(transformationDays.planId, plan.id),
           eq(transformationDays.date, date),
         ),
@@ -168,7 +168,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       const inserted = await db
         .insert(transformationDays)
         .values({
-          userId: session.user.id,
+          userId: userId,
           planId: plan.id,
           date,
           dayNumber,
@@ -209,7 +209,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         .from(transformationChecks)
         .where(
           and(
-            eq(transformationChecks.userId, session.user.id),
+            eq(transformationChecks.userId, userId),
             eq(transformationChecks.dayId, dayId),
             inArray(transformationChecks.itemId, itemIds),
           ),
@@ -238,7 +238,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
           }
         } else {
           await db.insert(transformationChecks).values({
-            userId: session.user.id,
+            userId: userId,
             dayId,
             itemId,
             checked: checkVal ?? false,
@@ -259,7 +259,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       .from(transformationChecks)
       .where(
         and(
-          eq(transformationChecks.userId, session.user.id),
+          eq(transformationChecks.userId, userId),
           eq(transformationChecks.dayId, dayId),
         ),
       );

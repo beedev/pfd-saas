@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { db, vehicles, vehicleServiceLog, type ServiceType } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_SERVICE_TYPES: ServiceType[] = [
   'REGULAR',
@@ -48,11 +48,11 @@ async function ensureVehicle(idRaw: string, userId: string) {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureVehicle(id, session.user.id);
+    const guard = await ensureVehicle(id, userId);
     if ('error' in guard) return guard.error;
 
     // Tie-break on id-asc to give a stable order when two services share
@@ -64,7 +64,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleServiceLog.vehicleId, guard.vehicleId),
-          eq(vehicleServiceLog.userId, session.user.id),
+          eq(vehicleServiceLog.userId, userId),
         ),
       )
       .orderBy(desc(vehicleServiceLog.serviceDate), asc(vehicleServiceLog.id));
@@ -88,11 +88,11 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensureVehicle(id, session.user.id);
+    const guard = await ensureVehicle(id, userId);
     if ('error' in guard) return guard.error;
 
     const body = (await request.json()) as CreateBody;
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const result = await db
       .insert(vehicleServiceLog)
       .values({
-        userId: session.user.id,
+        userId: userId,
         vehicleId: guard.vehicleId,
         serviceDate: body.serviceDate,
         odometerKm: typeof body.odometerKm === 'number' ? body.odometerKm : null,

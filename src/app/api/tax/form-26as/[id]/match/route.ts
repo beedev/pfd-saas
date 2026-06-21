@@ -16,16 +16,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, form26asUploads, tdsCredits } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { id } = await params;
@@ -47,7 +45,6 @@ export async function POST(
       return NextResponse.json({ error: 'No valid ids' }, { status: 400 });
     }
 
-    const userId = session.user.id;
 
     // Confirm upload exists and belongs to caller.
     const [upload] = await db
@@ -82,10 +79,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { id } = await params;
@@ -94,7 +89,6 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
 
-    const userId = session.user.id;
 
     // Clear all rows currently tied to this upload for this user.
     const cleared = await db

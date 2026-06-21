@@ -8,13 +8,13 @@
 import { NextResponse } from 'next/server';
 import { and, eq, gte, asc, desc } from 'drizzle-orm';
 import { db, investmentTransactions, sips, mutualFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
@@ -26,7 +26,7 @@ export async function GET() {
       .from(investmentTransactions)
       .where(
         and(
-          eq(investmentTransactions.userId, session.user.id),
+          eq(investmentTransactions.userId, userId),
           eq(investmentTransactions.type, 'SIP_EXECUTION'),
           gte(investmentTransactions.transactionDate, cutoffIso)
         )
@@ -34,8 +34,8 @@ export async function GET() {
       .orderBy(desc(investmentTransactions.transactionDate));
 
     // Enrich with scheme name and SIP id
-    const sipRows = await db.select().from(sips).where(eq(sips.userId, session.user.id));
-    const mfRows = await db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id));
+    const sipRows = await db.select().from(sips).where(eq(sips.userId, userId));
+    const mfRows = await db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId));
 
     const mfMap = new Map(mfRows.map((m) => [m.id, m]));
     const sipByMfId = new Map(sipRows.map((s) => [s.mutualFundId, s]));

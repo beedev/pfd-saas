@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, asc, eq } from 'drizzle-orm';
 import { db, priceSnapshots } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const SOURCE = 'NETWORTH_SNAPSHOT';
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const { searchParams } = new URL(request.url);
   const months = Number(searchParams.get('months') || '12');
 
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const all = await db
       .select()
       .from(priceSnapshots)
-      .where(and(eq(priceSnapshots.userId, session.user.id), eq(priceSnapshots.source, SOURCE)))
+      .where(and(eq(priceSnapshots.userId, userId), eq(priceSnapshots.source, SOURCE)))
       .orderBy(asc(priceSnapshots.priceDate));
 
     // Group by date -> { date, symbols: {symbol: paisa} }

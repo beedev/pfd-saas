@@ -5,7 +5,7 @@
  * PATCH  /api/tax/form-16/[id] — manual edit (any subset of fields)
  * DELETE /api/tax/form-16/[id] — delete + unlink PDF file
  *
- * Multi-tenant: every query scoped by session.user.id, including the
+ * Multi-tenant: every query scoped by userId, including the
  * file unlink (which only operates on paths under
  * uploads/<userId>/form-16/).
  */
@@ -15,7 +15,7 @@ import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, form16Uploads } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 function rupeesToPaisa(n: unknown): number | undefined {
   if (n === '' || n == null) return undefined;
@@ -28,10 +28,8 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const uploadId = Number(id);
@@ -42,7 +40,7 @@ export async function GET(
     const [row] = await db
       .select()
       .from(form16Uploads)
-      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, session.user.id)))
+      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, userId)))
       .limit(1);
 
     if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -57,10 +55,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const uploadId = Number(id);
@@ -114,12 +110,12 @@ export async function PATCH(
     await db
       .update(form16Uploads)
       .set(patch)
-      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, session.user.id)));
+      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, userId)));
 
     const [updated] = await db
       .select()
       .from(form16Uploads)
-      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, session.user.id)))
+      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, userId)))
       .limit(1);
 
     if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -134,10 +130,8 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const uploadId = Number(id);
@@ -148,7 +142,7 @@ export async function DELETE(
     const [existing] = await db
       .select()
       .from(form16Uploads)
-      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, session.user.id)))
+      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, userId)))
       .limit(1);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -163,7 +157,7 @@ export async function DELETE(
 
     await db
       .delete(form16Uploads)
-      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, session.user.id)));
+      .where(and(eq(form16Uploads.id, uploadId), eq(form16Uploads.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[tax/form-16/[id] DELETE]', err);

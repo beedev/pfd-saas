@@ -23,16 +23,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { db, form26asUploads, tdsCredits } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { NO_TAN_BUCKET } from '@/lib/finance/form-26as-recon';
 
 const FY_RE = /^\d{4}-\d{2}$/;
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = (await request.json()) as {
@@ -54,7 +52,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'uploadId required' }, { status: 400 });
     }
 
-    const userId = session.user.id;
 
     // Confirm the upload exists for this user (and matches the FY — we
     // don't want a TAN match wired to an upload from a different year).
@@ -117,10 +114,8 @@ export async function POST(request: NextRequest) {
  * accepted match.
  */
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const params = new URL(request.url).searchParams;
@@ -133,7 +128,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'tan required' }, { status: 400 });
     }
 
-    const userId = session.user.id;
     const tanClause =
       tan === NO_TAN_BUCKET
         ? or(isNull(tdsCredits.deductorTan), eq(tdsCredits.deductorTan, ''))

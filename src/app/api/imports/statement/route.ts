@@ -24,7 +24,7 @@
  *   • NPS: match by PRAN if present, else by tier if exactly one
  *     account in that tier exists.
  *
- * Multi-tenant: every operation scoped by session.user.id. Other
+ * Multi-tenant: every operation scoped by userId. Other
  * users' uploads can't be confirmed because the importId path
  * encodes the user.
  */
@@ -34,7 +34,7 @@ import { and, eq } from 'drizzle-orm';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { db, epfAccounts, npsAccounts } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseStatement, type DocType } from '@/lib/services/statement-parsers';
 import type { EpfPassbookData, NpsSotData } from '@/lib/services/statement-parsers/types';
 
@@ -161,11 +161,8 @@ async function matchNpsAccount(
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
-  const userId = session.user.id;
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const form = await request.formData();

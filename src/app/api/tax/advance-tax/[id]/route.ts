@@ -15,16 +15,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, advanceTaxInstallments } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const { id } = await params;
@@ -46,7 +44,6 @@ export async function PATCH(
       return NextResponse.json({ error: 'paidDate required' }, { status: 400 });
     }
 
-    const userId = session.user.id;
 
     const updated = await db
       .update(advanceTaxInstallments)

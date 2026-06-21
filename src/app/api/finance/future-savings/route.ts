@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, futureSavingsPlan } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 async function ensureRow(userId: string) {
   const rows = await db
@@ -26,10 +26,10 @@ async function ensureRow(userId: string) {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const plan = await ensureRow(session.user.id);
+    const plan = await ensureRow(userId);
     return NextResponse.json({
       lumpSumPaisa: plan.lumpSumPaisa,
       monthlyPaisa: plan.monthlyPaisa,
@@ -42,8 +42,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const update: Partial<typeof futureSavingsPlan.$inferInsert> = {
@@ -60,11 +60,11 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    const existing = await ensureRow(session.user.id);
+    const existing = await ensureRow(userId);
     const [updated] = await db
       .update(futureSavingsPlan)
       .set(update)
-      .where(and(eq(futureSavingsPlan.id, existing.id), eq(futureSavingsPlan.userId, session.user.id)))
+      .where(and(eq(futureSavingsPlan.id, existing.id), eq(futureSavingsPlan.userId, userId)))
       .returning();
 
     return NextResponse.json({

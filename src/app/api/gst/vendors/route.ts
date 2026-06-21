@@ -3,17 +3,17 @@ import { db, vendors } from '@/db';
 import { desc, eq } from 'drizzle-orm';
 import { validateGSTIN, extractStateCode } from '@/lib/validations/gstin';
 import { isValidStateCode } from '@/constants/state-codes';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // GET - List all vendors
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const allVendors = await db
       .select()
       .from(vendors)
-      .where(eq(vendors.userId, session.user.id))
+      .where(eq(vendors.userId, userId))
       .orderBy(desc(vendors.createdAt));
 
     return NextResponse.json({ vendors: allVendors });
@@ -28,8 +28,8 @@ export async function GET() {
 
 // POST - Create new vendor
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const {
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await db.insert(vendors).values({
-      userId: session.user.id,
+      userId: userId,
       name,
       gstin: validatedGstin,
       pan: pan?.toUpperCase().trim() || null,

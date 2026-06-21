@@ -22,7 +22,7 @@ import {
   type GoalType,
   type DisbursementType,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_GOAL_TYPES: GoalType[] = [
   'HOUSE', 'CAR', 'EDUCATION', 'TRAVEL',
@@ -38,8 +38,8 @@ interface Params {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -53,7 +53,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       )
       .limit(1);
@@ -65,7 +65,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(savingsAssetInclusion.goalId, numericId),
-          eq(savingsAssetInclusion.userId, session.user.id),
+          eq(savingsAssetInclusion.userId, userId),
         ),
       );
 
@@ -75,7 +75,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(cashflowEvents.goalId, numericId),
-          eq(cashflowEvents.userId, session.user.id),
+          eq(cashflowEvents.userId, userId),
         ),
       )
       .orderBy(asc(cashflowEvents.startDate));
@@ -109,8 +109,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -124,7 +124,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       )
       .limit(1);
@@ -168,7 +168,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       )
       .returning();
@@ -180,8 +180,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -196,7 +196,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(financialGoals.id, numericId),
-          eq(financialGoals.userId, session.user.id),
+          eq(financialGoals.userId, userId),
         ),
       );
     return NextResponse.json({ success: true });

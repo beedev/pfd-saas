@@ -13,7 +13,7 @@ import {
   getCurrentFinancialYear,
 } from '@/lib/finance/tax-constants';
 import { deriveDeductions } from '@/lib/finance/deduction-engine';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface SectionBucket {
   section: TaxSection;
@@ -29,8 +29,8 @@ interface SectionBucket {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || getCurrentFinancialYear();
 
@@ -52,16 +52,16 @@ export async function GET(request: NextRequest) {
     // `deductions` + `docs` are still fetched here for the per-section
     // manualEntries count + doc-coverage stats (response-shape preserving).
     const [deductions, docs, engineResult] = await Promise.all([
-      db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id))),
-      db.select().from(taxDocuments).where(and(eq(taxDocuments.financialYear, fy), eq(taxDocuments.userId, session.user.id))),
-      deriveDeductions(session.user.id, fy),
+      db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, userId))),
+      db.select().from(taxDocuments).where(and(eq(taxDocuments.financialYear, fy), eq(taxDocuments.userId, userId))),
+      deriveDeductions(userId, fy),
     ]);
 
     // Load section exclusion preferences for this FY
     const prefs = await db
       .select()
       .from(taxSectionPreferences)
-      .where(and(eq(taxSectionPreferences.financialYear, fy), eq(taxSectionPreferences.userId, session.user.id)));
+      .where(and(eq(taxSectionPreferences.financialYear, fy), eq(taxSectionPreferences.userId, userId)));
     const excludedSections = new Set(
       prefs.filter((p) => p.isExcluded).map((p) => p.section),
     );
@@ -140,8 +140,8 @@ export async function GET(request: NextRequest) {
 
 /** PATCH — toggle section inclusion/exclusion for a FY */
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { fy, section, exclude } = body;
@@ -156,17 +156,17 @@ export async function PATCH(request: NextRequest) {
       .where(and(
         eq(taxSectionPreferences.financialYear, fy),
         eq(taxSectionPreferences.section, section),
-        eq(taxSectionPreferences.userId, session.user.id),
+        eq(taxSectionPreferences.userId, userId),
       ));
 
     if (existing.length > 0) {
       await db
         .update(taxSectionPreferences)
         .set({ isExcluded: exclude })
-        .where(and(eq(taxSectionPreferences.id, existing[0].id), eq(taxSectionPreferences.userId, session.user.id)));
+        .where(and(eq(taxSectionPreferences.id, existing[0].id), eq(taxSectionPreferences.userId, userId)));
     } else {
       await db.insert(taxSectionPreferences).values({
-        userId: session.user.id,
+        userId: userId,
         financialYear: fy,
         section,
         isExcluded: exclude,

@@ -14,13 +14,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, mutualFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const ALLOWED_CATEGORIES = new Set(['EQUITY', 'DEBT', 'HYBRID', 'UNKNOWN']);
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       const result = await db
         .update(mutualFunds)
         .set({ category: u.category, updatedAt: new Date() })
-        .where(and(eq(mutualFunds.id, u.id), eq(mutualFunds.userId, session.user.id)))
+        .where(and(eq(mutualFunds.id, u.id), eq(mutualFunds.userId, userId)))
         .returning({ id: mutualFunds.id });
       if (result.length > 0) updated++;
     }

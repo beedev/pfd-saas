@@ -22,7 +22,7 @@ import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, form16Uploads, form16aUploads } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { extractPdfText, extractPdfRows } from '@/lib/services/statement-parsers/pdf-text';
 import {
   parseForm16,
@@ -37,11 +37,8 @@ const MAX_BYTES = 5 * 1024 * 1024;
 // ─── handlers ───────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
-  const userId = session.user.id;
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const contentType = request.headers.get('content-type') || '';
 

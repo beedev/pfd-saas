@@ -24,7 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, advanceTaxInstallments } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { projectAnnualTax } from '@/lib/finance/tax-projection';
 import { resolveTaxPaid } from '@/lib/finance/form16-tax-source';
 
@@ -89,10 +89,8 @@ async function seedIfMissing(userId: string, fy: string): Promise<void> {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const fy = new URL(request.url).searchParams.get('fy');
@@ -101,7 +99,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'fy must be YYYY-YY' }, { status: 400 });
     }
 
-    const userId = session.user.id;
     await seedIfMissing(userId, fy);
 
     const [rows, projection, taxPaid] = await Promise.all([

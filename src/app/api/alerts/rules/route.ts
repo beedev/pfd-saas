@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, alertRules } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const rules = await db
       .select()
       .from(alertRules)
-      .where(eq(alertRules.userId, session.user.id))
+      .where(eq(alertRules.userId, userId))
       .orderBy(desc(alertRules.createdAt));
     return NextResponse.json({ rules });
   } catch (err) {
@@ -20,8 +20,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const { name, category, ruleType, symbol, assetId, operator, threshold, cooldownHours } = body;
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(alertRules)
       .values({
-        userId: session.user.id,
+        userId: userId,
         name,
         category,
         ruleType,

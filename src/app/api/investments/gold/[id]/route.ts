@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, goldHoldings } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface Params {
   params: Promise<{ id: string }>;
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -19,7 +19,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(goldHoldings)
-      .where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, session.user.id)))
+      .where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, userId)))
       .limit(1);
     if (!rows.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -32,8 +32,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(goldHoldings)
-      .where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, session.user.id)))
+      .where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, userId)))
       .limit(1);
     if (!existing.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -93,7 +93,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(goldHoldings)
       .set(update)
-      .where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, session.user.id)))
+      .where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, userId)))
       .returning();
 
     return NextResponse.json({ gold: result[0] });
@@ -104,15 +104,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
     if (!Number.isFinite(numericId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
-    await db.delete(goldHoldings).where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, session.user.id)));
+    await db.delete(goldHoldings).where(and(eq(goldHoldings.id, numericId), eq(goldHoldings.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Failed to delete gold holding:', err);

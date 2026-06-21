@@ -14,7 +14,7 @@
  * or Form 16 number for the dimension and books is non-zero.
  *
  * Saas-specific:
- *   - All queries scoped by session.user.id.
+ *   - All queries scoped by userId.
  *   - 26AS attribution prefers per-section data from
  *     form_26as_uploads.parsed_deductors_json when present (added in
  *     Sprint 5.13). When NULL we fall back to the headline-attribution
@@ -34,7 +34,7 @@ import {
   form16aUploads,
   form26asUploads,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
 
 // ─── shape ──────────────────────────────────────────────────────────────
@@ -153,11 +153,8 @@ function aggregateSectionsFromDeductors(
 // ─── handler ────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
-  const userId = session.user.id;
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy') || getCurrentFinancialYear();
 

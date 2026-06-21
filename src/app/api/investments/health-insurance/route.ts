@@ -26,7 +26,7 @@ import {
   type HealthPolicyStatus,
   type PremiumFrequency,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_POLICY_TYPES: HealthPolicyType[] = [
   'INDIVIDUAL',
@@ -72,8 +72,8 @@ function findPgError(err: unknown): { code?: string; detail?: string } {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // One round-trip: policy rows with card/claim counts via correlated
     // subqueries. Using correlated COUNTs (rather than LEFT JOIN +
@@ -92,7 +92,7 @@ export async function GET() {
         )`,
       })
       .from(healthInsurancePolicies)
-      .where(eq(healthInsurancePolicies.userId, session.user.id))
+      .where(eq(healthInsurancePolicies.userId, userId))
       .orderBy(asc(healthInsurancePolicies.renewalDate));
 
     const policies = rows.map((r) => ({
@@ -126,8 +126,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
 
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(healthInsurancePolicies)
       .values({
-        userId: session.user.id,
+        userId: userId,
         insurer: body.insurer.trim(),
         policyNumber: body.policyNumber.trim(),
         policyType: body.policyType,

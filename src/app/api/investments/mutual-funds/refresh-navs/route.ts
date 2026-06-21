@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, mutualFunds } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getByIsin } from '@/lib/services/amfi';
 
 // POST /api/investments/mutual-funds/refresh-navs — refresh NAV for every MF
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const all = await db.select().from(mutualFunds).where(eq(mutualFunds.userId, session.user.id));
+    const all = await db.select().from(mutualFunds).where(eq(mutualFunds.userId, userId));
     let updated = 0;
     let failed = 0;
 
@@ -36,7 +36,7 @@ export async function POST() {
             lastNavDate: fund.navDate || null,
             updatedAt: new Date(),
           })
-          .where(and(eq(mutualFunds.id, mf.id), eq(mutualFunds.userId, session.user.id)));
+          .where(and(eq(mutualFunds.id, mf.id), eq(mutualFunds.userId, userId)));
         updated += 1;
       } catch (e) {
         console.error(`refresh failed for MF ${mf.id}:`, e);

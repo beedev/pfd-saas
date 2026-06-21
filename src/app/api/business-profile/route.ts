@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, businessProfile } from '@/db';
 import { and, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { validateGSTIN, extractPAN, extractStateCode } from '@/lib/validations/gstin';
 
 // GET - Fetch business profile
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const profiles = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     const profile = profiles[0] || null;
     return NextResponse.json({ profile });
@@ -28,8 +27,8 @@ export async function GET() {
 
 // POST - Create or update business profile
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const {
@@ -63,7 +62,7 @@ export async function POST(request: NextRequest) {
     const existingProfiles = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     const existing = existingProfiles[0];
 
@@ -91,12 +90,12 @@ export async function POST(request: NextRequest) {
       await db
         .update(businessProfile)
         .set(profileData)
-        .where(and(eq(businessProfile.id, existing.id), eq(businessProfile.userId, session.user.id)));
+        .where(and(eq(businessProfile.id, existing.id), eq(businessProfile.userId, userId)));
       savedProfile = { ...existing, ...profileData };
     } else {
       // Create new profile
       const result = await db.insert(businessProfile).values({
-        userId: session.user.id,
+        userId: userId,
         ...profileData,
         createdAt: new Date(),
       }).returning();

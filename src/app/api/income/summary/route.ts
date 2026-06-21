@@ -27,7 +27,7 @@
 
 import { NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   db,
   capitalGains,
@@ -58,12 +58,9 @@ function dateToFy(iso: string | null | undefined): string | null {
 }
 
 export async function GET(request: Request) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
-  const userId = session.user.id;
   // Accept ?fy=YYYY-YY to view prior-year roll-ups. Defaults to the
   // current Indian FY. Validate format strictly — a bad value would
   // silently return an empty roll-up which looks like a bug.

@@ -25,7 +25,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, asc, eq } from 'drizzle-orm';
 import { db, realEstate, rentalHistory } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 /** Walk the Drizzle error cause chain to find the underlying SQLSTATE
  *  code so we can map unique violations to 409. Same shape as the rest
@@ -52,14 +52,14 @@ function findPgError(err: unknown): { code?: string; detail?: string } {
 const FY_REGEX = /^\d{4}-\d{2}$/;
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const fy = searchParams.get('fy');
     const propertyIdRaw = searchParams.get('propertyId');
 
-    const filters = [eq(rentalHistory.userId, session.user.id)];
+    const filters = [eq(rentalHistory.userId, userId)];
     if (fy) {
       if (!FY_REGEX.test(fy)) {
         return NextResponse.json({ error: 'Invalid fy format — expected YYYY-YY' }, { status: 400 });
@@ -110,8 +110,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
 
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
     const owned = await db
       .select({ id: realEstate.id })
       .from(realEstate)
-      .where(and(eq(realEstate.id, body.realEstateId as number), eq(realEstate.userId, session.user.id)))
+      .where(and(eq(realEstate.id, body.realEstateId as number), eq(realEstate.userId, userId)))
       .limit(1);
     if (!owned.length) {
       return NextResponse.json({ error: 'Property not found' }, { status: 404 });
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
     const inserted = await db
       .insert(rentalHistory)
       .values({
-        userId: session.user.id,
+        userId: userId,
         realEstateId: body.realEstateId as number,
         fy: body.fy,
         rentReceivedPaisa: Math.round(body.rentReceivedRupees * 100),

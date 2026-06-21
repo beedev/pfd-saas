@@ -34,7 +34,8 @@ export async function getEffectiveCapabilities(userId: string): Promise<Effectiv
     return {
       ...c,
       included: o ? o.included : true,
-      integrity: o ? o.dataIntegrity : c.dataIntegrity,
+      // Integrity-locked writes can never be LLM-eligible — ignore any override.
+      integrity: c.integrityLocked ? true : o ? o.dataIntegrity : c.dataIntegrity,
     };
   });
 }

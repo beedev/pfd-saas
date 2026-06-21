@@ -19,7 +19,7 @@ import {
   healthInsuranceCards,
   type FamilyRelationship,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_RELATIONSHIPS: FamilyRelationship[] = [
   'SELF',
@@ -56,11 +56,11 @@ async function ensurePolicy(idRaw: string, userId: string) {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensurePolicy(id, session.user.id);
+    const guard = await ensurePolicy(id, userId);
     if ('error' in guard) return guard.error;
 
     // `relationship = 'SELF' DESC` puts the primary insured first;
@@ -71,7 +71,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsuranceCards.policyId, guard.policyId),
-          eq(healthInsuranceCards.userId, session.user.id),
+          eq(healthInsuranceCards.userId, userId),
         ),
       )
       .orderBy(
@@ -97,11 +97,11 @@ interface CreateCardBody {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
-    const guard = await ensurePolicy(id, session.user.id);
+    const guard = await ensurePolicy(id, userId);
     if ('error' in guard) return guard.error;
 
     const body = (await request.json()) as CreateCardBody;
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const result = await db
       .insert(healthInsuranceCards)
       .values({
-        userId: session.user.id,
+        userId: userId,
         policyId: guard.policyId,
         memberName: body.memberName.trim(),
         memberId: body.memberId || null,

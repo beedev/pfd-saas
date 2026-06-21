@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, invoices, businessProfile } from '@/db';
 import { desc, like, and, gte, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   getCurrentFinancialYear,
   financialYearBoundsIso,
@@ -9,14 +9,14 @@ import {
 
 // GET - Get next invoice number (resets per financial year)
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Get business profile for prefix and start number
     const profile = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     const prefix = profile[0]?.invoicePrefix || '';
     const startNumber = profile[0]?.invoiceStartNumber || 1;
@@ -30,7 +30,7 @@ export async function GET() {
     const latestInvoice = await db
       .select({ invoiceNumber: invoices.invoiceNumber })
       .from(invoices)
-      .where(and(gte(invoices.invoiceDate, fyStart), eq(invoices.userId, session.user.id)))
+      .where(and(gte(invoices.invoiceDate, fyStart), eq(invoices.userId, userId)))
       .orderBy(desc(invoices.invoiceNumber))
       .limit(1);
 

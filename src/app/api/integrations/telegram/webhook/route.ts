@@ -151,16 +151,25 @@ export async function POST(request: NextRequest) {
       const username = msg?.from?.username ?? null;
       failedPairingAttempts.delete(chatKey); // success — clear strikes
 
-      await db
-        .update(userPreferences)
-        .set({
-          telegramChatId: String(chatId),
-          telegramUsername: username,
-          telegramConnectToken: null,
-          telegramConnectTokenExpiresAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(userPreferences.userId, userId));
+      // Atomic re-pair: a Telegram chat binds to exactly one user. Release it
+      // from any previous owner before binding it here (also satisfies the
+      // telegram_chat_id partial-unique index).
+      await db.transaction(async (tx) => {
+        await tx
+          .update(userPreferences)
+          .set({ telegramChatId: null, telegramUsername: null, updatedAt: new Date() })
+          .where(eq(userPreferences.telegramChatId, String(chatId)));
+        await tx
+          .update(userPreferences)
+          .set({
+            telegramChatId: String(chatId),
+            telegramUsername: username,
+            telegramConnectToken: null,
+            telegramConnectTokenExpiresAt: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(userPreferences.userId, userId));
+      });
 
       await sendTelegramToChatId(
         chatId,

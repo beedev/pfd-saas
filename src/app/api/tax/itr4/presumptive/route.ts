@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, presumptiveIncome, type PresumptiveSection, type ReceiptMode } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { deemedProfitPctFor } from '@/lib/finance/itr4-summary';
 
 function findPgError(err: unknown): { code?: string; detail?: string } {
@@ -41,10 +41,8 @@ const VALID_SECTIONS: PresumptiveSection[] = ['44AD', '44ADA', '44AE'];
 const VALID_MODES: ReceiptMode[] = ['DIGITAL', 'CASH', 'MIXED'];
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
@@ -54,7 +52,7 @@ export async function GET(request: NextRequest) {
       .from(presumptiveIncome)
       .where(
         and(
-          eq(presumptiveIncome.userId, session.user.id),
+          eq(presumptiveIncome.userId, userId),
           eq(presumptiveIncome.fy, fy),
         ),
       )
@@ -68,10 +66,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const {
@@ -132,7 +128,7 @@ export async function POST(request: NextRequest) {
     const [row] = await db
       .insert(presumptiveIncome)
       .values({
-        userId: session.user.id,
+        userId: userId,
         fy,
         section: section as PresumptiveSection,
         businessName: businessName.trim(),

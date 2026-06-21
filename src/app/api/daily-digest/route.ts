@@ -7,16 +7,14 @@
  * dispatch. This endpoint is for interactive viewing.
  */
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { buildDailyDigest } from '@/lib/cron/daily-digest';
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const digest = await buildDailyDigest(session.user.id);
+    const digest = await buildDailyDigest(userId);
     return NextResponse.json(digest);
   } catch (err) {
     console.error('[daily-digest]', err);

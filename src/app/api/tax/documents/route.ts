@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { db, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 // Extension → MIME pairs accepted for tax document uploads. The stored
@@ -19,8 +19,8 @@ const ALLOWED_TYPES: Array<{ ext: string; mime: string }> = [
 ];
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || searchParams.get('financialYear');
   const category = searchParams.get('category');
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   const deductionId = searchParams.get('deductionId');
 
   try {
-    const conds = [eq(taxDocuments.userId, session.user.id)] as ReturnType<typeof eq>[];
+    const conds = [eq(taxDocuments.userId, userId)] as ReturnType<typeof eq>[];
     if (fy) conds.push(eq(taxDocuments.financialYear, fy));
     if (category) conds.push(eq(taxDocuments.category, category));
     if (deductionId) conds.push(eq(taxDocuments.deductionId, Number(deductionId)));
@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     const safeCategory = category.replace(/[^A-Z0-9_]/gi, '_');
     // Tenant-folder-first, matching the form-16 / migration-0037 convention.
-    const dir = path.join(process.cwd(), 'uploads', session.user.id, 'finance', financialYear, safeCategory);
+    const dir = path.join(process.cwd(), 'uploads', userId, 'finance', financialYear, safeCategory);
     await fs.promises.mkdir(dir, { recursive: true });
     const absPath = path.join(dir, `${hash}${ext}`);
     await fs.promises.writeFile(absPath, buffer);
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(taxDocuments)
       .values({
-        userId: session.user.id,
+        userId: userId,
         name: title,
         type: 'OTHER',
         fileSize: buffer.length,

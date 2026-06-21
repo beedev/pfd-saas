@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, itrFormSelection, type ItrWizardAnswers } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { selectItrForm } from '@/lib/finance/itr-selector';
 import { getTaxRules } from '@/lib/finance/tax-rules';
 
@@ -42,10 +42,8 @@ function findPgError(err: unknown): { code?: string; detail?: string } {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const fy = new URL(request.url).searchParams.get('fy');
     if (!fy) return NextResponse.json({ error: 'fy required' }, { status: 400 });
@@ -54,7 +52,7 @@ export async function GET(request: NextRequest) {
       .select()
       .from(itrFormSelection)
       .where(
-        and(eq(itrFormSelection.userId, session.user.id), eq(itrFormSelection.fy, fy)),
+        and(eq(itrFormSelection.userId, userId), eq(itrFormSelection.fy, fy)),
       )
       .limit(1);
 
@@ -66,10 +64,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = await request.json();
@@ -120,7 +116,6 @@ export async function POST(request: NextRequest) {
       ltcg112aExemptionPaisa: rules.capitalGains.sec112aExemptionPostPaisa,
     });
 
-    const userId = session.user.id;
 
     // UPSERT — on conflict over (user_id, fy), overwrite. The unique
     // index from the schema is the source of truth.

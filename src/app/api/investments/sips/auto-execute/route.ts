@@ -6,14 +6,12 @@
  * runSipAutoExecute() function, different dispatch.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { runSipAutoExecute } from '@/lib/cron/sip-auto-execute';
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   let dryRun = false;
   try {
     const body = await request.json();
@@ -22,7 +20,7 @@ export async function POST(request: NextRequest) {
     // empty body is fine
   }
   try {
-    const result = await runSipAutoExecute(session.user.id, { dryRun });
+    const result = await runSipAutoExecute(userId, { dryRun });
     return NextResponse.json(result);
   } catch (err) {
     console.error('[sips/auto-execute]', err);

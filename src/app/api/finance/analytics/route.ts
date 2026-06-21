@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, budgetEntries, budgetCategories } from '@/db';
 import { and, eq } from 'drizzle-orm';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 // GET - Get budget-focused analytics data
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const selectedPeriod = searchParams.get('period'); // Optional: specific period for category breakdown
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const categories = await db
       .select()
       .from(budgetCategories)
-      .where(and(eq(budgetCategories.userId, session.user.id), eq(budgetCategories.isActive, true)));
+      .where(and(eq(budgetCategories.userId, userId), eq(budgetCategories.isActive, true)));
 
     const incomeCategories = categories.filter(c => c.type === 'INCOME');
     const expenseCategories = categories.filter(c => c.type === 'EXPENSE');
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const allEntries = await db
       .select()
       .from(budgetEntries)
-      .where(eq(budgetEntries.userId, session.user.id));
+      .where(eq(budgetEntries.userId, userId));
 
     // Filter entries using proper period comparison (MMYYYY doesn't sort correctly as strings)
     const entries = allEntries.filter(entry => comparePeriods(entry.period, startPeriod) >= 0);

@@ -20,7 +20,7 @@ import { and, eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { db, form26asUploads } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { extractPdfRows } from '@/lib/services/statement-parsers/pdf-text';
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -192,10 +192,8 @@ function parseTotals(rows: string[]): {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const formData = await request.formData();
@@ -221,7 +219,6 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
 
     // userId-first dir so account deletion can `rm -rf uploads/<id>`
-    const userId = session.user.id;
     const dir = path.join(process.cwd(), 'uploads', userId, 'form-26as');
     await fs.promises.mkdir(dir, { recursive: true });
     const ts = Date.now();
@@ -272,10 +269,8 @@ export async function POST(request: NextRequest) {
 /** Used by the page to delete an erroneous upload + ON DELETE SET NULL
  *  the FK on tds_credits.reconciled_via_upload_id. */
 export async function DELETE(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const id = Number(new URL(request.url).searchParams.get('id'));
     if (!Number.isFinite(id)) {
@@ -287,7 +282,7 @@ export async function DELETE(request: NextRequest) {
       .select()
       .from(form26asUploads)
       .where(
-        and(eq(form26asUploads.id, id), eq(form26asUploads.userId, session.user.id)),
+        and(eq(form26asUploads.id, id), eq(form26asUploads.userId, userId)),
       )
       .limit(1);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -302,7 +297,7 @@ export async function DELETE(request: NextRequest) {
     await db
       .delete(form26asUploads)
       .where(
-        and(eq(form26asUploads.id, id), eq(form26asUploads.userId, session.user.id)),
+        and(eq(form26asUploads.id, id), eq(form26asUploads.userId, userId)),
       );
 
     return NextResponse.json({ success: true });

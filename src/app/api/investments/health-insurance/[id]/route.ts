@@ -28,7 +28,7 @@ import {
   type HealthPolicyStatus,
   type PremiumFrequency,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_POLICY_TYPES: HealthPolicyType[] = [
   'INDIVIDUAL',
@@ -59,8 +59,8 @@ function rupeesToPaisa(n: unknown): number | undefined {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -74,7 +74,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsurancePolicies.id, numericId),
-          eq(healthInsurancePolicies.userId, session.user.id),
+          eq(healthInsurancePolicies.userId, userId),
         ),
       )
       .limit(1);
@@ -88,7 +88,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsuranceCards.policyId, numericId),
-          eq(healthInsuranceCards.userId, session.user.id),
+          eq(healthInsuranceCards.userId, userId),
         ),
       )
       .orderBy(asc(healthInsuranceCards.id));
@@ -99,7 +99,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsurancePortability.policyId, numericId),
-          eq(healthInsurancePortability.userId, session.user.id),
+          eq(healthInsurancePortability.userId, userId),
         ),
       )
       .limit(1);
@@ -139,8 +139,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -153,7 +153,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsurancePolicies.id, numericId),
-          eq(healthInsurancePolicies.userId, session.user.id),
+          eq(healthInsurancePolicies.userId, userId),
         ),
       )
       .limit(1);
@@ -210,7 +210,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsurancePolicies.id, numericId),
-          eq(healthInsurancePolicies.userId, session.user.id),
+          eq(healthInsurancePolicies.userId, userId),
         ),
       )
       .returning();
@@ -222,8 +222,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -236,7 +236,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(healthInsurancePolicies.id, numericId),
-          eq(healthInsurancePolicies.userId, session.user.id),
+          eq(healthInsurancePolicies.userId, userId),
         ),
       );
     return NextResponse.json({ success: true });

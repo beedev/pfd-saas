@@ -33,7 +33,7 @@ import {
   type VehicleFuelType,
   type VehicleStatus,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_FUEL_TYPES: VehicleFuelType[] = [
   'PETROL',
@@ -67,8 +67,8 @@ function parseAddons(raw: string | null): string[] {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -79,7 +79,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const vehicleRows = await db
       .select()
       .from(vehicles)
-      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, session.user.id)))
+      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, userId)))
       .limit(1);
     if (!vehicleRows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -91,7 +91,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleInsurancePolicies.vehicleId, numericId),
-          eq(vehicleInsurancePolicies.userId, session.user.id),
+          eq(vehicleInsurancePolicies.userId, userId),
         ),
       )
       .orderBy(desc(vehicleInsurancePolicies.startDate));
@@ -100,7 +100,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .select()
       .from(vehiclePuc)
       .where(
-        and(eq(vehiclePuc.vehicleId, numericId), eq(vehiclePuc.userId, session.user.id)),
+        and(eq(vehiclePuc.vehicleId, numericId), eq(vehiclePuc.userId, userId)),
       )
       .orderBy(desc(vehiclePuc.validUntil));
 
@@ -110,7 +110,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .where(
         and(
           eq(vehicleServiceLog.vehicleId, numericId),
-          eq(vehicleServiceLog.userId, session.user.id),
+          eq(vehicleServiceLog.userId, userId),
         ),
       )
       .orderBy(desc(vehicleServiceLog.serviceDate), asc(vehicleServiceLog.id));
@@ -149,8 +149,8 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -160,7 +160,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(vehicles)
-      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, session.user.id)))
+      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, userId)))
       .limit(1);
     if (!existing.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -220,7 +220,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const result = await db
       .update(vehicles)
       .set(update)
-      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, session.user.id)))
+      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, userId)))
       .returning();
     return NextResponse.json({ vehicle: result[0] });
   } catch (err) {
@@ -230,8 +230,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -241,7 +241,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     // FK ON DELETE CASCADE handles insurance/puc/service automatically.
     await db
       .delete(vehicles)
-      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, session.user.id)));
+      .where(and(eq(vehicles.id, numericId), eq(vehicles.userId, userId)));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[vehicles/:id DELETE]', err);

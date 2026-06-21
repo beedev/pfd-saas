@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq, sql } from 'drizzle-orm';
 import { db, forexDeposits, type ForexDepositStatus } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
@@ -46,15 +46,15 @@ function enrichRow(row: typeof forexDeposits.$inferSelect, rates: Record<string,
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Order: ACTIVE first (CASE returns 0 for ACTIVE, 1 otherwise),
     // then opening_date descending so the most recent shows at the top.
     const rows = await db
       .select()
       .from(forexDeposits)
-      .where(eq(forexDeposits.userId, session.user.id))
+      .where(eq(forexDeposits.userId, userId))
       .orderBy(
         sql`CASE WHEN ${forexDeposits.status} = 'ACTIVE' THEN 0 ELSE 1 END`,
         sql`${forexDeposits.openingDate} DESC`,
@@ -75,8 +75,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
     const {
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
     const inserted = await db
       .insert(forexDeposits)
       .values({
-        userId: session.user.id,
+        userId: userId,
         bankName: bankName.trim(),
         accountNumber: accountNumber?.trim() || null,
         currencyCode: currencyCode.toUpperCase(),

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, retirementAssumptions } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 async function ensureRow(userId: string) {
   const rows = await db
@@ -25,10 +25,10 @@ async function ensureRow(userId: string) {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
-    const row = await ensureRow(session.user.id);
+    const row = await ensureRow(userId);
     return NextResponse.json(row);
   } catch (err) {
     console.error('GET retirement-assumptions:', err);
@@ -37,11 +37,11 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = await request.json();
-    const existing = await ensureRow(session.user.id);
+    const existing = await ensureRow(userId);
     const update: Partial<typeof retirementAssumptions.$inferInsert> = {
       updatedAt: new Date(),
     };
@@ -84,7 +84,7 @@ export async function PATCH(request: NextRequest) {
     const [updated] = await db
       .update(retirementAssumptions)
       .set(update)
-      .where(and(eq(retirementAssumptions.id, existing.id), eq(retirementAssumptions.userId, session.user.id)))
+      .where(and(eq(retirementAssumptions.id, existing.id), eq(retirementAssumptions.userId, userId)))
       .returning();
     return NextResponse.json(updated);
   } catch (err) {

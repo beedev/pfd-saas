@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, presumptiveIncome, type PresumptiveSection, type ReceiptMode } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { deemedProfitPctFor } from '@/lib/finance/itr4-summary';
 
 const VALID_SECTIONS: PresumptiveSection[] = ['44AD', '44ADA', '44AE'];
@@ -32,17 +32,15 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const idNum = Number(id);
     if (!Number.isFinite(idNum)) {
       return NextResponse.json({ error: 'invalid id' }, { status: 400 });
     }
-    const row = await loadOwn(session.user.id, idNum);
+    const row = await loadOwn(userId, idNum);
     if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
     return NextResponse.json({ entry: row });
   } catch (err) {
@@ -55,17 +53,15 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const idNum = Number(id);
     if (!Number.isFinite(idNum)) {
       return NextResponse.json({ error: 'invalid id' }, { status: 400 });
     }
-    const existing = await loadOwn(session.user.id, idNum);
+    const existing = await loadOwn(userId, idNum);
     if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
     const body = await request.json();
@@ -139,7 +135,7 @@ export async function PATCH(
       .where(
         and(
           eq(presumptiveIncome.id, idNum),
-          eq(presumptiveIncome.userId, session.user.id),
+          eq(presumptiveIncome.userId, userId),
         ),
       )
       .returning();
@@ -155,10 +151,8 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const idNum = Number(id);
@@ -170,7 +164,7 @@ export async function DELETE(
       .where(
         and(
           eq(presumptiveIncome.id, idNum),
-          eq(presumptiveIncome.userId, session.user.id),
+          eq(presumptiveIncome.userId, userId),
         ),
       )
       .returning({ id: presumptiveIncome.id });

@@ -19,7 +19,7 @@ import {
   type SmallSavingsStatus,
   type InterestCompounding,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import {
   defaultInterestRate,
   maturityDate as computeMaturityDate,
@@ -54,13 +54,13 @@ function findPgError(err: unknown): { code?: string; detail?: string } {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const accounts = await db
       .select()
       .from(smallSavingsAccounts)
-      .where(eq(smallSavingsAccounts.userId, session.user.id))
+      .where(eq(smallSavingsAccounts.userId, userId))
       .orderBy(asc(smallSavingsAccounts.schemeType), desc(smallSavingsAccounts.openingDate));
     return NextResponse.json({ accounts });
   } catch (err) {
@@ -90,8 +90,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
 
@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(smallSavingsAccounts)
       .values({
-        userId: session.user.id,
+        userId: userId,
         schemeType: body.schemeType,
         accountNumber: body.accountNumber.trim(),
         holderName: body.holderName.trim(),

@@ -3,7 +3,7 @@ import { db, invoices, invoiceItems, businessProfile } from '@/db';
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { paisaToRupees } from '@/lib/calculations/tax';
 import { STATE_CODES } from '@/constants/state-codes';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 interface B2BInvoice {
   customerGstin: string;
@@ -57,8 +57,8 @@ interface SACHSNSummary {
 
 // GET - Generate GSTR-1 summary for a period
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period'); // MMYYYY format
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
     const profile = await db
       .select()
       .from(businessProfile)
-      .where(eq(businessProfile.userId, session.user.id))
+      .where(eq(businessProfile.userId, userId))
       .limit(1);
     if (profile.length === 0) {
       return NextResponse.json(
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
         and(
           eq(invoices.returnPeriod, period),
           eq(invoices.status, 'FINAL'),
-          eq(invoices.userId, session.user.id)
+          eq(invoices.userId, userId)
         )
       );
 
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
       const items = await db
         .select()
         .from(invoiceItems)
-        .where(and(eq(invoiceItems.invoiceId, invoice.id), eq(invoiceItems.userId, session.user.id)));
+        .where(and(eq(invoiceItems.invoiceId, invoice.id), eq(invoiceItems.userId, userId)));
 
       // Calculate totals per tax rate for the invoice
       const rateWiseTotals = new Map<number, {

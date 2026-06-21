@@ -30,7 +30,7 @@ import {
   type VehicleFuelType,
   type VehicleStatus,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_FUEL_TYPES: VehicleFuelType[] = [
   'PETROL',
@@ -68,8 +68,8 @@ function findPgError(err: unknown): { code?: string; detail?: string } {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     // Each row carries a summary of its most-recent active insurance term
     // and most-recent valid PUC via correlated subqueries. Selecting JSON
@@ -117,7 +117,7 @@ export async function GET() {
         )`,
       })
       .from(vehicles)
-      .where(eq(vehicles.userId, session.user.id))
+      .where(eq(vehicles.userId, userId))
       .orderBy(desc(vehicles.purchaseDate));
 
     const out = rows.map((r) => ({
@@ -151,8 +151,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
 
@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(vehicles)
       .values({
-        userId: session.user.id,
+        userId: userId,
         // Registration numbers are case-insensitive in real life — store
         // upper-case so the unique index works regardless of how the user
         // typed it ("ka01ab1234" vs "KA01AB1234" collide).

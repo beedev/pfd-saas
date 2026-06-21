@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { db, liabilities, type LiabilityType } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const VALID_TYPES: LiabilityType[] = [
   'HOME_LOAN',
@@ -13,13 +13,13 @@ const VALID_TYPES: LiabilityType[] = [
 ];
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const rows = await db
       .select()
       .from(liabilities)
-      .where(eq(liabilities.userId, session.user.id))
+      .where(eq(liabilities.userId, userId))
       .orderBy(desc(liabilities.createdAt));
     return NextResponse.json({ liabilities: rows });
   } catch (err) {
@@ -51,8 +51,8 @@ interface CreateBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const body = (await request.json()) as CreateBody;
     if (!body.type || !VALID_TYPES.includes(body.type)) {
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(liabilities)
       .values({
-        userId: session.user.id,
+        userId: userId,
         name: (body.name || body.productName || body.creditorName).trim(),
         type: body.type,
         status: 'ACTIVE',

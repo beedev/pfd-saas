@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, forexDeposits, type ForexDepositStatus } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getFxRatesToInr } from '@/lib/services/yahoo-finance';
 
 interface Params {
@@ -36,8 +36,8 @@ function enrichRow(row: typeof forexDeposits.$inferSelect, rates: Record<string,
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -47,7 +47,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const rows = await db
       .select()
       .from(forexDeposits)
-      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, session.user.id)))
+      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, userId)))
       .limit(1);
     if (!rows.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -64,8 +64,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -75,7 +75,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existing = await db
       .select()
       .from(forexDeposits)
-      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, session.user.id)))
+      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, userId)))
       .limit(1);
     if (!existing.length) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -133,7 +133,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const updated = await db
       .update(forexDeposits)
       .set(updates)
-      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, session.user.id)))
+      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, userId)))
       .returning();
 
     const rates = await getFxRatesToInr([updated[0].currencyCode]);
@@ -145,8 +145,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   try {
     const { id } = await params;
     const numericId = Number(id);
@@ -155,7 +155,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     }
     await db
       .delete(forexDeposits)
-      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, session.user.id)));
+      .where(and(eq(forexDeposits.id, numericId), eq(forexDeposits.userId, userId)));
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('DELETE forex-deposits/[id]:', err);

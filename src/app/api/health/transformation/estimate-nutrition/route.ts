@@ -19,7 +19,7 @@ import {
   transformationDays,
   transformationPlans,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 export const runtime = 'nodejs';
 
@@ -37,8 +37,8 @@ interface NutritionEstimate {
 
 // POST /api/health/transformation/estimate-nutrition
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
     const body = (await request.json()) as EstimateRequest;
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       const planRows = await db
         .select()
         .from(transformationPlans)
-        .where(eq(transformationPlans.userId, session.user.id))
+        .where(eq(transformationPlans.userId, userId))
         .limit(1);
       if (planRows.length) {
         const dayRows = await db
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
           .from(transformationDays)
           .where(
             and(
-              eq(transformationDays.userId, session.user.id),
+              eq(transformationDays.userId, userId),
               eq(transformationDays.planId, planRows[0].id),
               eq(transformationDays.date, body.date),
             ),
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
             .from(transformationChecks)
             .where(
               and(
-                eq(transformationChecks.userId, session.user.id),
+                eq(transformationChecks.userId, userId),
                 eq(transformationChecks.dayId, cachedDayId),
                 eq(transformationChecks.itemId, body.itemId),
               ),
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
         .from(transformationChecks)
         .where(
           and(
-            eq(transformationChecks.userId, session.user.id),
+            eq(transformationChecks.userId, userId),
             eq(transformationChecks.dayId, cachedDayId),
             eq(transformationChecks.itemId, body.itemId),
           ),
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
           .where(eq(transformationChecks.id, existing[0].id));
       } else {
         await db.insert(transformationChecks).values({
-          userId: session.user.id,
+          userId: userId,
           dayId: cachedDayId,
           itemId: body.itemId,
           checked: false,

@@ -29,16 +29,14 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db, userPreferences } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getBotUsername, deleteTelegramWebhook } from '@/lib/services/telegram';
 
 const TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 export async function POST() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   // Self-host/localhost can't receive webhooks → 'getupdates' mode pairs by
   // polling the bot's inbound messages instead. Default 'webhook' keeps the
@@ -73,7 +71,7 @@ export async function POST() {
         telegramConnectTokenExpiresAt: expiresAt,
         updatedAt: new Date(),
       })
-      .where(eq(userPreferences.userId, session.user.id))
+      .where(eq(userPreferences.userId, userId))
       .returning({ userId: userPreferences.userId });
 
     if (!result.length) {

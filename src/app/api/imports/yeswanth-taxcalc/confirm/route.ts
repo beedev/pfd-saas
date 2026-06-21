@@ -45,7 +45,7 @@ import {
   tdsCredits,
   capitalGains,
 } from '@/db';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseYeswanthTaxCalc, type YeswanthPreview } from '@/lib/yeswanth-parser';
 
 /** userId-first per convention — MUST mirror ../route.ts, which writes
@@ -70,13 +70,10 @@ interface ConfirmBody {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  }
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
 
   try {
-    const userId = session.user.id;
     const body = (await request.json()) as ConfirmBody;
     const importId = body.importId;
     const mappings = body.mappings ?? {};

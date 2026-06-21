@@ -5,7 +5,7 @@ import path from 'path';
 import JSZip from 'jszip';
 import { db, taxDeductions, taxDocuments } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
-import { auth } from '@/auth';
+import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const INR = (paisa: number) => (paisa / 100).toFixed(2);
 
@@ -61,15 +61,15 @@ function generateSummaryCsv(deductions: DeductionRow[]): string {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+  const userId = await getSessionUserId();
+  if (!userId) return unauthenticated();
   const { searchParams } = new URL(request.url);
   const fy = searchParams.get('fy') || getCurrentFinancialYear();
 
   try {
     const [deductions, docs] = await Promise.all([
-      db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, session.user.id))),
-      db.select().from(taxDocuments).where(and(eq(taxDocuments.financialYear, fy), eq(taxDocuments.userId, session.user.id))),
+      db.select().from(taxDeductions).where(and(eq(taxDeductions.financialYear, fy), eq(taxDeductions.userId, userId))),
+      db.select().from(taxDocuments).where(and(eq(taxDocuments.financialYear, fy), eq(taxDocuments.userId, userId))),
     ]);
 
     const zip = new JSZip();
