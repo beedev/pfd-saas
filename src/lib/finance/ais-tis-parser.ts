@@ -246,26 +246,27 @@ export async function parseAisTis(
 
 /**
  * Per-source breakdown for dividend + interest, from the SFT detail lines in
- * the TIS annexure / AIS Part-B2. Each such line names the payer (with its PAN
- * in parentheses) and repeats the amount reported/processed/confirmed — we take
- * the last (confirmed) figure. Keyed to the same category keys parseTisCategories emits.
+ * the TIS annexure. The portal lays each entry across TWO extracted rows, e.g.
+ *
+ *   "1 ⟦tab⟧ SFT ⟦tab⟧ Dividend income ⟦tab⟧ I T C LIMITED ⟦tab⟧ Total Dividend ⟦tab⟧ 2,434 ⟦tab⟧ 2,434 ⟦tab⟧ 2,434"
+ *   "(SFT-015) ⟦tab⟧ (AAACI5950L.AZ257) ⟦tab⟧ amount"          ← PAN + sub-type continuation
+ *
+ * So the payer name is simply the cell after the "Dividend income" / "Interest
+ * income" category cell (NOT a parenthesised "NAME (PAN)" token), and the
+ * Savings/Term split for interest lives on the continuation row. We take the
+ * last (confirmed) rupee figure. Keyed to the category keys parseTisCategories emits.
  */
 function parseSourceDetails(rows: string[]): Record<string, AisTisDetailItem[]> {
   const out: Record<string, AisTisDetailItem[]> = {};
-  for (const row of rows) {
-    const cells = row.split('\t').map((c) => c.trim());
-    const joined = cells.join(' ');
+  for (let i = 0; i < rows.length; i++) {
+    const cells = rows[i].split('\t').map((c) => c.trim());
+    const catIdx = cells.findIndex((c) => /^(Dividend income|Interest income)$/i.test(c));
+    if (catIdx === -1) continue;
 
-    let key: string | null = null;
-    if (/SFT-015|Dividend income/i.test(joined)) key = 'dividend';
-    else if (/SFT-016/i.test(joined) && /Saving/i.test(joined)) key = 'interest_savings';
-    else if (/SFT-016/i.test(joined) && /(Term|Deposit)/i.test(joined)) key = 'interest_deposit';
-    else if (/SFT-016/i.test(joined)) key = 'interest_savings';
-    if (!key) continue;
+    const source = cells[catIdx + 1]?.replace(/\s+/g, ' ').trim();
+    if (!source) continue;
 
-    // Source = the cell shaped "NAME (PAN/ID)"; amount = last rupee cell on the row.
-    const sourceCell = cells.find((c) => /\([A-Z0-9.]{4,}\)/.test(c) && /[A-Za-z]{3,}/.test(c));
-    if (!sourceCell) continue;
+    // Amount = last rupee-formatted cell (skips the leading serial number).
     let amountPaisa: number | null = null;
     for (const c of cells) {
       const p = rupeesToPaisa(c);
@@ -273,7 +274,14 @@ function parseSourceDetails(rows: string[]): Record<string, AisTisDetailItem[]> 
     }
     if (amountPaisa == null || amountPaisa <= 0) continue;
 
-    const source = sourceCell.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+/g, ' ').trim();
+    let key: string;
+    if (/Dividend/i.test(cells[catIdx])) {
+      key = 'dividend';
+    } else {
+      // Savings vs Term is on the next 1–2 continuation rows.
+      const cont = `${rows[i + 1] ?? ''} ${rows[i + 2] ?? ''}`;
+      key = /Term|Deposit/i.test(cont) ? 'interest_deposit' : 'interest_savings';
+    }
     (out[key] ??= []).push({ source, amountPaisa });
   }
   return out;
