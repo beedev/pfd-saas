@@ -24,6 +24,12 @@ export async function GET(request: NextRequest) {
     // Per-row stored tax — kept as a display estimate (preserves shape).
     const totalTax = rows.reduce((s, r) => s + r.taxAmount, 0);
     const totalExemption = rows.reduce((s, r) => s + (r.exemptionApplied ?? 0), 0);
+    // Total sale proceeds (consideration) for securities + MF — lines up with
+    // the AIS "Sale of securities and units of mutual fund" figure on Gap Check.
+    const SECURITIES_MF = new Set(['STOCKS', 'EQUITY_MF', 'DEBT_MF']);
+    const totalProceeds = rows
+      .filter((r) => SECURITIES_MF.has(r.assetType))
+      .reduce((s, r) => s + (r.salePrice ?? 0), 0);
 
     // Aggregate (authoritative) CG tax — equity LTCG/STCG net all gains
     // and losses for the FY, applying the sec-112A annual exemption ONCE.
@@ -47,6 +53,7 @@ export async function GET(request: NextRequest) {
         stcgTotal,
         totalTax,
         totalExemption,
+        totalProceeds,
         // Aggregate-correct figures (added — existing fields unchanged).
         aggregateTaxPaisa: aggregate.totalTaxPaisa,
         totalTaxPaisa: aggregate.totalTaxPaisa,

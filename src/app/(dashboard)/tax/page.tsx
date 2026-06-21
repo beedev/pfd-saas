@@ -298,18 +298,18 @@ export default function TaxDashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Sprint C.3 — Reconciliation triangle entry cards (books vs
-              Form 16 vs 26AS). The Reconciliation card carries a status
-              indicator driven by /api/tax/reconciliation overall block. */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Link href="/tax/reconciliation">
+          {/* Entry cards — Gap Check is the single "our data vs IT department"
+              reconciliation (AIS/TIS/26AS all upload there). Form 16/16A is the
+              official-records surface that anchors it. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Link href="/tax/gap-check">
               <Card className="cursor-pointer hover:shadow-md transition-shadow">
                 <CardContent>
                   <div className="flex items-center gap-3">
                     <Scale className="h-8 w-8 text-[var(--dxp-brand)]" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="font-bold text-[var(--dxp-text)]">Reconciliation</p>
+                        <p className="font-bold text-[var(--dxp-text)]">Gap Check</p>
                         {reconOverall?.allMatched ? (
                           <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-label="all matched" />
                         ) : reconOverall && reconOverall.mismatchCount > 0 ? (
@@ -318,7 +318,9 @@ export default function TaxDashboardPage() {
                           <HelpCircle className="h-4 w-4 text-[var(--dxp-text-muted)]" aria-label="missing actual" />
                         ) : null}
                       </div>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">Books vs Form 16 vs 26AS</p>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">
+                        Our data vs IT dept — AIS · TIS · 26AS (upload here)
+                      </p>
                     </div>
                   </div>
                 </CardContent>
@@ -330,21 +332,10 @@ export default function TaxDashboardPage() {
                   <div className="flex items-center gap-3">
                     <FileText className="h-8 w-8 text-[var(--dxp-brand)]" />
                     <div>
-                      <p className="font-bold text-[var(--dxp-text)]">Form 16</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">Upload + manual entry</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-            <Link href="/tax/form-26as">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-8 w-8 text-[var(--dxp-brand)]" />
-                    <div>
-                      <p className="font-bold text-[var(--dxp-text)]">Form 26AS</p>
-                      <p className="text-xs text-[var(--dxp-text-muted)]">Upload + reconcile</p>
+                      <p className="font-bold text-[var(--dxp-text)]">Form 16 / 16A</p>
+                      <p className="text-xs text-[var(--dxp-text-muted)]">
+                        Your official records — upload + manual entry
+                      </p>
                     </div>
                   </div>
                 </CardContent>

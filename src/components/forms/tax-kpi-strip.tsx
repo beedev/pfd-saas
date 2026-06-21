@@ -29,6 +29,11 @@ interface AdvanceTaxResp {
   installments: Array<{ paidAmountPaisa: number }>;
 }
 
+interface TaxPaidResp {
+  tds: { salaryTdsPaisa: number; otherTdsPaisa: number } | null;
+  totalPaisa: number;
+}
+
 const formatINR = (paisa: number): string =>
   new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -45,7 +50,9 @@ export function TaxKpiStrip({ fy }: Props) {
   const [totalTaxPaisa, setTotalTaxPaisa] = useState<number>(0);
   const [recommendation, setRecommendation] = useState<'OLD' | 'NEW' | null>(null);
   const [tdsPaisa, setTdsPaisa] = useState<number>(0);
-  const [advancePaisa, setAdvancePaisa] = useState<number>(0);
+  // Advance-tax installments + self-assessment payments (everything paid that
+  // is NOT TDS). Kept as one number so the balance can't double-count.
+  const [otherPaidPaisa, setOtherPaidPaisa] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,18 +65,14 @@ export function TaxKpiStrip({ fy }: Props) {
       fetch(`/api/tax/advance-tax?fy=${fy}`).then(async (r) =>
         r.ok ? ((await r.json()) as AdvanceTaxResp) : null,
       ),
-      // TDS sources: tds_credits + salary_income.tdsPaisa. The ITR-1
-      // summary endpoint already aggregates salary TDS so we read it
-      // there to avoid a second round-trip; tds_credits comes from the
-      // ITR-3 TDS list.
-      fetch(`/api/tax/itr1/summary?fy=${fy}`).then(async (r) =>
-        r.ok ? await r.json() : null,
-      ),
-      fetch(`/api/tax/itr3/tds?fy=${fy}`).then(async (r) =>
-        r.ok ? await r.json() : null,
+      // Canonical tax-paid (Form 16 → 26AS → books precedence, 26AS-guarded so
+      // non-salary TDS isn't double-counted on top of a 26AS total). Same source
+      // as the "Tax Paid So Far" card → the page is internally consistent.
+      fetch(`/api/tax/tax-paid?fy=${fy}`).then(async (r) =>
+        r.ok ? ((await r.json()) as TaxPaidResp) : null,
       ),
     ])
-      .then(([regime, adv, itr1, tds]) => {
+      .then(([regime, adv, taxPaid]) => {
         if (cancelled) return;
         if (regime) {
           const rec = regime.comparison.recommendation;
@@ -80,20 +83,16 @@ export function TaxKpiStrip({ fy }: Props) {
               : regime.comparison.old.totalTaxPaisa,
           );
         }
-        const advTotal =
-          adv?.installments?.reduce(
-            (s, i) => s + (i.paidAmountPaisa ?? 0),
-            0,
-          ) ?? 0;
-        setAdvancePaisa(advTotal);
-
-        const salaryTds: number = itr1?.blocks?.salary?.tdsPaisa ?? 0;
-        const nonSalaryTds: number =
-          tds?.entries?.reduce(
-            (s: number, r: { tdsPaisa: number }) => s + (r.tdsPaisa ?? 0),
-            0,
-          ) ?? 0;
-        setTdsPaisa(salaryTds + nonSalaryTds);
+        // Canonical TDS — no double-count.
+        const canonicalTds =
+          (taxPaid?.tds?.salaryTdsPaisa ?? 0) + (taxPaid?.tds?.otherTdsPaisa ?? 0);
+        setTdsPaisa(canonicalTds);
+        // Self-assessment / manual payments already inside the tax-paid total.
+        const selfPaid = Math.max(0, (taxPaid?.totalPaisa ?? 0) - canonicalTds);
+        // Structured advance-tax installments (a separate tracker).
+        const advInstallments =
+          adv?.installments?.reduce((s, i) => s + (i.paidAmountPaisa ?? 0), 0) ?? 0;
+        setOtherPaidPaisa(selfPaid + advInstallments);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -116,7 +115,7 @@ export function TaxKpiStrip({ fy }: Props) {
     );
   }
 
-  const balance = totalTaxPaisa - tdsPaisa - advancePaisa;
+  const balance = totalTaxPaisa - tdsPaisa - otherPaidPaisa;
   const isRefund = balance < 0;
 
   return (
@@ -135,9 +134,9 @@ export function TaxKpiStrip({ fy }: Props) {
       />
       <KpiTile
         icon={<Coins className="h-4 w-4" />}
-        label="Advance tax paid"
-        value={formatINR(advancePaisa)}
-        subtitle="across 4 installments"
+        label="Advance / self-assessment"
+        value={formatINR(otherPaidPaisa)}
+        subtitle="advance + self-assessment paid"
       />
       <KpiTile
         icon={<Wallet className="h-4 w-4" />}

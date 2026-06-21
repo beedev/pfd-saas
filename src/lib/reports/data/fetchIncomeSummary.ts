@@ -22,6 +22,7 @@ import {
   otherSourcesIncome,
 } from '@/db';
 import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { resolveSalaryIncome, resolveSalaryTds } from '@/lib/finance/form16-tax-source';
 import type { ReportParams } from '@/types/reports';
 
 export interface IncomeSummaryReportData {
@@ -80,10 +81,14 @@ export async function fetchIncomeSummary(params: ReportParams): Promise<IncomeSu
   ]);
 
   // ── Salary aggregation ────────────────────────────────────────────
-  const grossPaisa = salaryRows.reduce((s, r) => s + (r.grossSalaryPaisa || 0), 0);
-  const exemptionsPaisa = salaryRows.reduce((s, r) => s + (r.exemptionsPaisa || 0), 0);
-  const taxablePaisa = salaryRows.reduce((s, r) => s + (r.taxableSalaryPaisa || 0), 0);
-  const tdsPaisa = salaryRows.reduce((s, r) => s + (r.tdsPaisa || 0), 0);
+  // Form 16 is the official "actual" when uploaded; resolver falls back to the
+  // manual salary_income rows. Single source of precedence (form16-tax-source).
+  const salaryResolved = await resolveSalaryIncome(userId, fy);
+  const salaryTdsResolved = await resolveSalaryTds(userId, fy);
+  const grossPaisa = salaryResolved.grossSalaryPaisa;
+  const taxablePaisa = salaryResolved.valuePaisa;
+  const exemptionsPaisa = Math.max(0, grossPaisa - taxablePaisa);
+  const tdsPaisa = salaryTdsResolved.valuePaisa;
 
   // ── Business aggregation ──────────────────────────────────────────
   // businessProfile is the user's GST/business meta; for income we

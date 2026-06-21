@@ -58,6 +58,9 @@ interface Summary {
   stcgTotal: number;
   totalTax: number;
   totalExemption: number;
+  /** Total sale proceeds (consideration) for securities + MF — matches the
+   *  AIS "Sale of securities and units of mutual fund" figure. */
+  totalProceeds?: number;
   /** Aggregate-correct CG tax (equity netted, sec-112A exemption applied
    *  once per FY). Falls back to per-row `totalTax` when absent. */
   aggregateTaxPaisa?: number;
@@ -291,6 +294,7 @@ export default function CapitalGainsPage() {
         locale="en-IN"
         columns={4}
         stats={[
+          { label: 'Total Proceeds (MF + Equity)', value: (summary.totalProceeds ?? 0) / 100, format: 'currency' },
           { label: 'LTCG Total', value: summary.ltcgTotal / 100, format: 'currency' },
           { label: 'STCG Total', value: summary.stcgTotal / 100, format: 'currency' },
           { label: 'Exemptions Applied', value: summary.totalExemption / 100, format: 'currency' },

@@ -28,6 +28,7 @@
 import { NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { resolveSalaryIncome } from '@/lib/finance/form16-tax-source';
 import {
   db,
   capitalGains,
@@ -88,7 +89,11 @@ export async function GET(request: Request) {
     const otherTaxableRows = otherThisFy.filter((r) => !r.isTaxExempt);
     const otherExemptRows = otherThisFy.filter((r) => r.isTaxExempt);
 
-    const salaryTotal = salaryThisFy.reduce((s, r) => s + (r.grossSalaryPaisa ?? 0), 0);
+    // Salary income: Form 16 gross is the official "actual" when uploaded; fall
+    // back to the manually-entered salary_income rows. The form16-tax-source
+    // resolver is the single place this precedence lives (used by every ITR page).
+    const salaryResolved = await resolveSalaryIncome(userId, fy);
+    const salaryTotal = salaryResolved.grossSalaryPaisa;
     const otherTaxableTotal = otherTaxableRows.reduce((s, r) => s + r.amountPaisa, 0);
     const otherExemptTotal = otherExemptRows.reduce((s, r) => s + r.amountPaisa, 0);
 
@@ -174,7 +179,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       currentFy: fy,
       stream: {
-        salary: { count: salaryThisFy.length, totalPaisa: salaryTotal },
+        salary: { count: salaryThisFy.length, totalPaisa: salaryTotal, source: salaryResolved.source },
         freelance: { count: invsThisFy.length, totalPaisa: freelanceTotal },
         otherTaxable: { count: otherTaxableRows.length, totalPaisa: otherTaxableTotal },
         otherExempt: { count: otherExemptRows.length, totalPaisa: otherExemptTotal },

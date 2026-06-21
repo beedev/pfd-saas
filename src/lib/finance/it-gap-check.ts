@@ -200,7 +200,12 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
   const booksSalaryTds = salaryRows.reduce((s, r) => s + (r.tdsPaisa || 0), 0);
   const booksTdsFamily = (fam: Family): number =>
     tdsRows.filter((r) => sectionFamily(r.section) === fam).reduce((s, r) => s + (r.tdsPaisa || 0), 0);
-  const booksSaleConsideration = cgRows.reduce((s, r) => s + (r.salePrice || 0), 0);
+  // Securities + MF only — matches the AIS "Sale of securities and units of
+  // mutual fund" line (excludes real estate / gold).
+  const SECURITIES_MF = new Set(['STOCKS', 'EQUITY_MF', 'DEBT_MF']);
+  const booksSaleConsideration = cgRows
+    .filter((r) => SECURITIES_MF.has(r.assetType))
+    .reduce((s, r) => s + (r.salePrice || 0), 0);
   const INTEREST_SRC = new Set(['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST']);
   const booksInterest = otherRows
     .filter((r) => INTEREST_SRC.has(r.source))

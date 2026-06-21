@@ -52,6 +52,7 @@ interface RegimeCompareResponse {
   fy: string;
   income: {
     salary: number;
+    salarySource?: string;
     hraExemption?: number;
     other: number;
     business: number;
@@ -177,19 +178,51 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
               )}
             </p>
           </div>
-          <div className="flex flex-wrap gap-1 text-[10px]">
-            {data.income.salary > 0 && (
-              <Badge variant="default">Salary {formatINR(data.income.salary)}</Badge>
-            )}
-            {data.income.business > 0 && (
-              <Badge variant="default">Business/GST {formatINR(data.income.business)}</Badge>
-            )}
-            {data.income.other > 0 && (
-              <Badge variant="default">Other {formatINR(data.income.other)}</Badge>
-            )}
-            {(data.income.rentalGross ?? 0) > 0 && (
-              <Badge variant="default">Rental {formatINR(data.income.rentalGross ?? 0)}</Badge>
-            )}
+          {/* Income composition — how we arrive at the slab-able income, before
+              each regime applies its own exemptions/deductions. */}
+          <div className="rounded-md border bg-[var(--dxp-surface-muted,#f8fafc)] p-3 text-xs">
+            <p className="mb-1.5 font-semibold text-[var(--dxp-text-secondary)]">How income is composed</p>
+            <dl className="space-y-1">
+              {data.income.salary > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-[var(--dxp-text-muted)]">
+                    Salary (gross)
+                    {data.income.salarySource === 'form16' && (
+                      <span className="ml-1 text-[10px] text-emerald-700">· from Form 16</span>
+                    )}
+                  </dt>
+                  <dd className="font-medium tabular-nums">{formatINR(data.income.salary)}</dd>
+                </div>
+              )}
+              {data.income.business > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-[var(--dxp-text-muted)]">Business / professional</dt>
+                  <dd className="font-medium tabular-nums">{formatINR(data.income.business)}</dd>
+                </div>
+              )}
+              {data.income.other > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-[var(--dxp-text-muted)]">Other sources</dt>
+                  <dd className="font-medium tabular-nums">{formatINR(data.income.other)}</dd>
+                </div>
+              )}
+              {(data.income.rentalGross ?? 0) > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-[var(--dxp-text-muted)]">Rental (gross)</dt>
+                  <dd className="font-medium tabular-nums">{formatINR(data.income.rentalGross ?? 0)}</dd>
+                </div>
+              )}
+              {cgTaxablePaisa > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-[var(--dxp-text-muted)]">Capital gains (taxed separately)</dt>
+                  <dd className="font-medium tabular-nums">{formatINR(cgTaxablePaisa)}</dd>
+                </div>
+              )}
+            </dl>
+            <p className="mt-1.5 text-[10px] text-[var(--dxp-text-muted)]">
+              Each regime below then applies its own exemptions (HRA, std. deduction) and Chapter VI-A
+              deductions to reach taxable income.
+            </p>
           </div>
         </div>
       </CardHeader>
@@ -218,7 +251,7 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
             result={data.comparison.new}
             grossSlabPaisa={data.income.grossNew ?? data.income.gross}
             deductionsPaisa={data.deductions.newRegime}
-            deductionBreakdown={recommended === 'NEW' ? [] : []}
+            deductionBreakdown={[]}
             hraExemptionPaisa={0}
             sec24bPaisa={0}
             sec80eeaPaisa={0}

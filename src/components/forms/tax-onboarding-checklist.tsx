@@ -56,8 +56,8 @@ const STEPS = [
   },
   {
     n: 3,
-    title: 'Upload Form 26AS',
-    href: '/tax/form-26as',
+    title: 'Upload AIS / TIS / 26AS (Gap Check)',
+    href: '/tax/gap-check',
     icon: <ClipboardCheck className="h-4 w-4" />,
     key: 'has26AS' as const,
   },
