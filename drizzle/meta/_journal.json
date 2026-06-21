@@ -309,6 +309,20 @@
       "when": 1782017451899,
       "tag": "0043_light_otto_octavius",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1782033502694,
+      "tag": "0044_strange_black_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1782033813452,
+      "tag": "0045_tiresome_blue_shield",
+      "breakpoints": true
     }
   ]
 }

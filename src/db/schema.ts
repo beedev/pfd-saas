@@ -718,6 +718,10 @@ export const businessProfile = pgTable('business_profile', {
   tradeName: text('trade_name'),
   gstin: text('gstin').notNull(),
   pan: text('pan').notNull(),
+  // Date of birth (ISO YYYY-MM-DD) — the taxpayer's, used with PAN to
+  // auto-derive the AIS/TIS PDF password. Optional; the AIS/TIS upload
+  // falls back to a manually-entered password when absent.
+  dob: text('dob'),
   stateCode: text('state_code').notNull(),
   address: text('address'),
   city: text('city'),
@@ -2912,6 +2916,38 @@ export const form16aUploads = pgTable('form_16a_uploads', {
 
 export type Form16aUpload = typeof form16aUploads.$inferSelect;
 export type NewForm16aUpload = typeof form16aUploads.$inferInsert;
+
+// AIS / TIS imports — the Income-Tax department's aggregate view of the
+// taxpayer, parsed from the PAN+DOB-encrypted compliance-portal PDFs. Stores
+// per-category income totals (TIS) and per-section TDS/TCS (AIS) in paisa for
+// the Gap-Check hub, which compares these against what's booked in the app.
+// One row per (userId, fy, kind) — re-uploading refreshes in place.
+export type AisTisDocKind = 'AIS' | 'TIS';
+
+export const aisImports = pgTable('ais_imports', {
+  id: serial('id').primaryKey(),
+  fy: text('fy').notNull(),
+  kind: text('kind').$type<AisTisDocKind>().notNull(),
+  pan: text('pan'),
+  // Parsed aggregates (paisa). categories = TIS income categories; tds = AIS
+  // Part-B1 tax deducted/collected per section.
+  categoriesJson:
+    jsonb('categories_json').$type<{ key: string; label: string; amountPaisa: number }[]>(),
+  tdsJson:
+    jsonb('tds_json').$type<{ code: string; label: string; grossPaisa: number; tdsPaisa: number }[]>(),
+  sourceFilename: text('source_filename'),
+  uploadedAt: timestamp('uploaded_at', { mode: 'date' }).defaultNow(),
+  notes: text('notes'),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('ais_imports_user_fy_idx').on(table.userId, table.fy),
+  index('ais_imports_user_id_idx').on(table.userId),
+  // One AIS + one TIS per FY — re-upload refreshes in place.
+  uniqueIndex('ais_imports_user_fy_kind_uq').on(table.userId, table.fy, table.kind),
+]);
+
+export type AisImport = typeof aisImports.$inferSelect;
+export type NewAisImport = typeof aisImports.$inferInsert;
 
 // TDS credits — non-salary (consulting/interest/property) — feeds CSV_TDS2 / CSV_TDS3
 export type TdsCategory = 'CONSULTING' | 'INTEREST' | 'RENT' | 'PROPERTY' | 'OTHER';
