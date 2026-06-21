@@ -24,7 +24,7 @@ import {
 import { toast } from 'sonner';
 import { useFinancialYear } from '@/components/providers/financial-year-provider';
 
-type GapStatus = 'matched' | 'mismatch' | 'no_cert' | 'awaiting_docs' | 'review';
+type GapStatus = 'matched' | 'mismatch' | 'missing' | 'awaiting_docs';
 
 interface GapRow {
   key: string;
@@ -42,7 +42,7 @@ interface GapResult {
   fy: string;
   has: { form16: boolean; form16a: boolean; tis: boolean; ais: boolean; form26as: boolean };
   rows: GapRow[];
-  summary: { mismatches: number };
+  summary: { flagged: number };
 }
 
 const inr = (p: number | null) =>
@@ -50,10 +50,9 @@ const inr = (p: number | null) =>
 
 const STATUS: Record<GapStatus, { label: string; cls: string }> = {
   matched: { label: 'Matches', cls: 'bg-emerald-100 text-emerald-700' },
-  mismatch: { label: 'Dept ≠ Form 16', cls: 'bg-red-100 text-red-700' },
-  no_cert: { label: 'No certificate', cls: 'bg-amber-100 text-amber-800' },
+  mismatch: { label: 'Differs from Form 16', cls: 'bg-red-100 text-red-700' },
+  missing: { label: 'Gap — in AIS, not recorded', cls: 'bg-red-100 text-red-700' },
   awaiting_docs: { label: 'Awaiting docs', cls: 'bg-slate-100 text-slate-500' },
-  review: { label: 'Review — maybe unrecorded', cls: 'bg-amber-100 text-amber-800' },
 };
 
 export default function GapCheckPage() {
@@ -64,6 +63,7 @@ export default function GapCheckPage() {
   const [password, setPassword] = useState('');
   const [needPw, setNeedPw] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const file26asRef = useRef<HTMLInputElement>(null);
   const [pan, setPan] = useState<string | null>(null);
   const [dob, setDob] = useState('');
   const [savingDob, setSavingDob] = useState(false);
@@ -145,6 +145,33 @@ export default function GapCheckPage() {
     if (f) upload(f);
   };
 
+  // 26AS (TRACES) — not encrypted; reuse the existing parse-and-store endpoint.
+  const upload26as = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('fy', fy);
+      const res = await fetch('/api/tax/form-26as/upload', { method: 'POST', body: fd });
+      const j = await res.json();
+      if (!res.ok) {
+        toast.error(j.error || '26AS upload failed');
+        return;
+      }
+      toast.success(`26AS imported for FY ${fy} — gaps refreshed`);
+      await load();
+    } catch {
+      toast.error('26AS upload failed');
+    } finally {
+      setUploading(false);
+      if (file26asRef.current) file26asRef.current.value = '';
+    }
+  };
+  const on26as = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) upload26as(f);
+  };
+
   const anyDocs =
     !!data &&
     (data.has.form16 || data.has.form16a || data.has.tis || data.has.ais || data.has.form26as);
@@ -168,10 +195,10 @@ export default function GapCheckPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Mismatches vs Form 16</div>
-            <div className="mt-1 text-3xl font-semibold">{data?.summary.mismatches ?? '—'}</div>
+            <div className="text-sm text-muted-foreground">Gaps flagged</div>
+            <div className="mt-1 text-3xl font-semibold">{data?.summary.flagged ?? '—'}</div>
             <div className="text-xs text-muted-foreground">
-              department figures that disagree with your certificates
+              differs from Form 16, or in AIS/TIS but not recorded
             </div>
           </CardContent>
         </Card>
@@ -201,7 +228,7 @@ export default function GapCheckPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2 font-medium">
-            <Upload className="h-4 w-4" /> Upload AIS / TIS
+            <Upload className="h-4 w-4" /> Upload department documents (AIS · TIS · 26AS)
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -238,24 +265,39 @@ export default function GapCheckPage() {
               className="max-w-sm"
             />
           )}
-          <div className="flex items-center gap-3">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf"
-              onChange={onPick}
-              disabled={uploading}
-              className="block text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-primary-foreground"
-            />
-            {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">AIS / TIS PDF (auto-decrypted)</label>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="application/pdf"
+                onChange={onPick}
+                disabled={uploading}
+                className="mt-1 block text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-primary-foreground"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">26AS PDF (TRACES)</label>
+              <div className="mt-1 flex items-center gap-3">
+                <input
+                  ref={file26asRef}
+                  type="file"
+                  accept="application/pdf"
+                  onChange={on26as}
+                  disabled={uploading}
+                  className="block text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-primary-foreground"
+                />
+                {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+              </div>
+            </div>
           </div>
           <p className="flex items-start gap-1 text-xs text-muted-foreground">
             <FileText className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
-              Form 16, Form 16A and 26AS are uploaded on their own pages and feed this reconciliation
-              automatically —{' '}
-              <a href="/tax/form-16" className="text-primary hover:underline">Form 16 / 16A</a> ·{' '}
-              <a href="/tax/form-26as" className="text-primary hover:underline">26AS</a>.
+              Form 16 / 16A — your official records — are uploaded on their own page and anchor this
+              reconciliation:{' '}
+              <a href="/tax/form-16" className="text-primary hover:underline">Form 16 / 16A</a>.
             </span>
           </p>
         </CardContent>
@@ -266,8 +308,8 @@ export default function GapCheckPage() {
         <Card>
           <CardContent className="flex items-center gap-3 py-10 text-muted-foreground">
             <Info className="h-5 w-5" />
-            Upload your AIS / TIS above (and Form 16 / 16A / 26AS on their pages) to reconcile what
-            the department has against your certificates.
+            Upload your AIS / TIS / 26AS above and Form 16 / 16A on its page to reconcile what the
+            department has against your certificates.
           </CardContent>
         </Card>
       ) : (
@@ -316,10 +358,10 @@ export default function GapCheckPage() {
                 </tbody>
               </table>
             </div>
-            {data && data.summary.mismatches === 0 && (
+            {data && data.summary.flagged === 0 && (
               <p className="mt-4 flex items-center gap-2 text-sm text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" /> No mismatches — the department&apos;s figures agree
-                with your Form 16 / 16A.
+                <CheckCircle2 className="h-4 w-4" /> No gaps — the department&apos;s figures agree with
+                your Form 16 / 16A and everything is recorded.
               </p>
             )}
             <p className="mt-4 text-xs text-muted-foreground">
@@ -328,9 +370,6 @@ export default function GapCheckPage() {
               estimate and never drives a flag.
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 text-sm">
-              <a href="/tax/form-26as" className="text-primary hover:underline">
-                26AS per-TAN detail →
-              </a>
               <a href="/tax/form-16" className="text-primary hover:underline">
                 Form 16 / 16A →
               </a>

@@ -24,6 +24,7 @@ import {
   db,
   aisImports,
   salaryIncome,
+  otherSourcesIncome,
   capitalGains,
   tdsCredits,
   form16Uploads,
@@ -34,11 +35,10 @@ import {
 const TOLERANCE_PAISA = 10_000; // ₹100
 
 export type ItGapStatus =
-  | 'matched' // department agrees with the certificate (within tolerance)
-  | 'mismatch' // a department source disagrees with the certificate — chase it
-  | 'no_cert' // department reports a value but there's no Form 16/16A to verify it
-  | 'awaiting_docs' // not enough uploaded to compare this row yet
-  | 'review'; // completeness rows: department sees more than our records
+  | 'matched' // our side agrees with the department (within tolerance)
+  | 'mismatch' // Form 16/16A present but a department source disagrees — chase it
+  | 'missing' // department (AIS/TIS/26AS) reports a value our side doesn't account for — a gap
+  | 'awaiting_docs'; // not enough uploaded to compare this row yet
 
 export type ItGapGroup = 'income' | 'tax_paid' | 'completeness';
 
@@ -58,7 +58,7 @@ export interface ItGapResult {
   fy: string;
   has: { form16: boolean; form16a: boolean; tis: boolean; ais: boolean; form26as: boolean };
   rows: ItGapRow[];
-  summary: { mismatches: number };
+  summary: { flagged: number };
 }
 
 type Family = 'salary' | 'professional' | 'interest' | 'dividend' | 'other';
@@ -93,19 +93,35 @@ function anchoredStatus(
 ): ItGapStatus {
   const dept = deptValues.filter((v): v is number => v != null);
   if (certPaisa == null) {
-    // No certificate. If a department source reports a real value, you have
-    // income/TDS the dept sees but you can't verify — surface it.
-    return dept.some((v) => v > TOLERANCE_PAISA) ? 'no_cert' : 'awaiting_docs';
+    // No certificate, but the department reports a value → it's a gap to add.
+    return dept.some((v) => v > TOLERANCE_PAISA) ? 'missing' : 'awaiting_docs';
   }
   if (dept.length === 0) return 'awaiting_docs'; // cert present, no dept doc yet
   const allAgree = dept.every((v) => Math.abs(v - certPaisa) <= TOLERANCE_PAISA);
   return allAgree ? 'matched' : 'mismatch';
 }
 
+/**
+ * Income row: anchor on the certificate if one exists; otherwise (e.g. small
+ * interest/dividend below the TDS threshold, which never gets a Form 16A) fall
+ * back to a completeness check of our records against the department figure.
+ */
+function incomeStatus(
+  certPaisa: number | null,
+  aisPaisa: number | null,
+  booksPaisa: number,
+): ItGapStatus {
+  if (certPaisa != null) return anchoredStatus(certPaisa, [aisPaisa]);
+  if (aisPaisa == null) return 'awaiting_docs';
+  // Department has it; if our records don't (or have materially less) → a gap.
+  return aisPaisa - booksPaisa > TOLERANCE_PAISA ? 'missing' : 'matched';
+}
+
 export async function computeItGapCheck(userId: string, fy: string): Promise<ItGapResult> {
   const [
     aisRows,
     salaryRows,
+    otherRows,
     cgRows,
     tdsRows,
     f16Rows,
@@ -117,6 +133,10 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
       .select()
       .from(salaryIncome)
       .where(and(eq(salaryIncome.userId, userId), eq(salaryIncome.financialYear, fy))),
+    db
+      .select()
+      .from(otherSourcesIncome)
+      .where(and(eq(otherSourcesIncome.userId, userId), eq(otherSourcesIncome.financialYear, fy))),
     db
       .select()
       .from(capitalGains)
@@ -165,10 +185,15 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
   const f16GrossSalary = hasF16 ? f16Rows.reduce((s, r) => s + (r.grossSalaryPaisa || 0), 0) : null;
   const f16SalaryTds = hasF16 ? f16Rows.reduce((s, r) => s + (r.totalTdsPaisa || 0), 0) : null;
   const hasF16a = f16aRows.length > 0;
-  const f16aTds = (fam: Family): number | null =>
-    !hasF16a
-      ? null
-      : f16aRows.filter((r) => sectionFamily(r.section) === fam).reduce((s, r) => s + (r.tdsPaisa || 0), 0);
+  // Form 16A TDS / amount-paid by section family — null when there is NO
+  // certificate for that family (so income with no cert reads as "no anchor",
+  // not "anchor = ₹0").
+  const f16aBy = (fam: Family, field: 'tdsPaisa' | 'amountPaidPaisa'): number | null => {
+    const m = f16aRows.filter((r) => sectionFamily(r.section) === fam);
+    return m.length ? m.reduce((s, r) => s + (r[field] || 0), 0) : null;
+  };
+  const f16aTds = (fam: Family) => f16aBy(fam, 'tdsPaisa');
+  const f16aAmount = (fam: Family) => f16aBy(fam, 'amountPaidPaisa');
 
   // ── Books (provisional reference only) ───────────────────────────────
   const booksSalary = salaryRows.reduce((s, r) => s + (r.grossSalaryPaisa || 0), 0);
@@ -176,6 +201,16 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
   const booksTdsFamily = (fam: Family): number =>
     tdsRows.filter((r) => sectionFamily(r.section) === fam).reduce((s, r) => s + (r.tdsPaisa || 0), 0);
   const booksSaleConsideration = cgRows.reduce((s, r) => s + (r.salePrice || 0), 0);
+  const INTEREST_SRC = new Set(['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST']);
+  const booksInterest = otherRows
+    .filter((r) => INTEREST_SRC.has(r.source))
+    .reduce((s, r) => s + (r.amountPaisa || 0), 0);
+  const booksDividend = otherRows
+    .filter((r) => r.source === 'DIVIDEND')
+    .reduce((s, r) => s + (r.amountPaisa || 0), 0);
+  // TIS reports interest split into savings + deposit; compare the combined total.
+  const tisInterest =
+    tis == null ? null : (tisCat('interest_savings') ?? 0) + (tisCat('interest_deposit') ?? 0);
 
   const rows: ItGapRow[] = [];
 
@@ -192,7 +227,40 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
     note: 'Anchor: Form 16 gross salary.',
   });
 
-  // 2. Salary TDS (Sec 192) — Form 16 TDS vs AIS-192 + 26AS-192.
+  // 2. Interest income — Form 16A (194A) amount if a certificate exists, else a
+  //    completeness check of our records vs AIS/TIS (no cert below threshold).
+  rows.push({
+    key: 'interest_income',
+    label: 'Interest income (savings + deposit)',
+    group: 'income',
+    certPaisa: f16aAmount('interest'),
+    aisPaisa: tisInterest,
+    form26asPaisa: null,
+    booksPaisa: booksInterest,
+    status: incomeStatus(f16aAmount('interest'), tisInterest, booksInterest),
+    note:
+      f16aAmount('interest') != null
+        ? 'Anchor: Form 16A (194A).'
+        : 'No certificate (below TDS threshold) — from our records; AIS flags what we haven’t recorded.',
+  });
+
+  // 3. Dividend income — same treatment.
+  rows.push({
+    key: 'dividend_income',
+    label: 'Dividend income',
+    group: 'income',
+    certPaisa: f16aAmount('dividend'),
+    aisPaisa: tisCat('dividend'),
+    form26asPaisa: null,
+    booksPaisa: booksDividend,
+    status: incomeStatus(f16aAmount('dividend'), tisCat('dividend'), booksDividend),
+    note:
+      f16aAmount('dividend') != null
+        ? 'Anchor: Form 16A (194).'
+        : 'No certificate — from our records; AIS flags what we haven’t recorded.',
+  });
+
+  // 4. Salary TDS (Sec 192) — Form 16 TDS vs AIS-192 + 26AS-192.
   rows.push({
     key: 'salary_tds',
     label: 'Salary TDS (Sec 192)',
@@ -230,7 +298,7 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
     const aisSale = tisCat('sale_securities_mf');
     let status: ItGapStatus = 'awaiting_docs';
     if (aisSale != null) {
-      status = aisSale - booksSaleConsideration > TOLERANCE_PAISA ? 'review' : 'matched';
+      status = aisSale - booksSaleConsideration > TOLERANCE_PAISA ? 'missing' : 'matched';
     }
     rows.push({
       key: 'capital_gains',
@@ -245,10 +313,21 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
     });
   }
 
+  // Hide rows where every column is empty (e.g. interest/dividend TDS when no
+  // TDS was deducted) so the view stays on real figures.
+  const nonEmpty = (r: ItGapRow) =>
+    (r.certPaisa ?? 0) > TOLERANCE_PAISA ||
+    (r.aisPaisa ?? 0) > TOLERANCE_PAISA ||
+    (r.form26asPaisa ?? 0) > TOLERANCE_PAISA ||
+    r.booksPaisa > TOLERANCE_PAISA;
+  const visible = rows.filter(nonEmpty);
+
   return {
     fy,
     has: { form16: hasF16, form16a: hasF16a, tis: !!tis, ais: !!ais, form26as: has26as },
-    rows,
-    summary: { mismatches: rows.filter((r) => r.status === 'mismatch' || r.status === 'no_cert').length },
+    rows: visible,
+    summary: {
+      flagged: visible.filter((r) => r.status === 'mismatch' || r.status === 'missing').length,
+    },
   };
 }
