@@ -1,4 +1,4 @@
-CREATE TABLE "form_16a_uploads" (
+CREATE TABLE IF NOT EXISTS "form_16a_uploads" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"fy" text NOT NULL,
 	"cert_number" text NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE "form_16a_uploads" (
 	"user_id" text NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "mf_redemptions" (
+CREATE TABLE IF NOT EXISTS "mf_redemptions" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"mutual_fund_id" integer NOT NULL,
 	"request_date" text NOT NULL,
@@ -45,16 +45,26 @@ CREATE TABLE "mf_redemptions" (
 	"user_id" text NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "form_16a_uploads" ADD CONSTRAINT "form_16a_uploads_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_mutual_fund_id_mutual_funds_id_fk" FOREIGN KEY ("mutual_fund_id") REFERENCES "public"."mutual_funds"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_transaction_id_investment_transactions_id_fk" FOREIGN KEY ("transaction_id") REFERENCES "public"."investment_transactions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_capital_gain_id_capital_gains_id_fk" FOREIGN KEY ("capital_gain_id") REFERENCES "public"."capital_gains"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "form_16a_uploads_fy_idx" ON "form_16a_uploads" USING btree ("user_id","fy");--> statement-breakpoint
-CREATE INDEX "form_16a_uploads_tan_idx" ON "form_16a_uploads" USING btree ("user_id","deductor_tan");--> statement-breakpoint
-CREATE INDEX "form_16a_uploads_user_id_idx" ON "form_16a_uploads" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "form_16a_uploads_cert_uq" ON "form_16a_uploads" USING btree ("user_id","cert_number");--> statement-breakpoint
-CREATE INDEX "mf_redemptions_mf_idx" ON "mf_redemptions" USING btree ("user_id","mutual_fund_id");--> statement-breakpoint
-CREATE INDEX "mf_redemptions_status_idx" ON "mf_redemptions" USING btree ("status");--> statement-breakpoint
-CREATE INDEX "mf_redemptions_user_id_idx" ON "mf_redemptions" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "mf_redemptions_one_pending_per_fund" ON "mf_redemptions" USING btree ("mutual_fund_id") WHERE "mf_redemptions"."status" = 'PENDING';
+DO $$ BEGIN
+ ALTER TABLE "form_16a_uploads" ADD CONSTRAINT "form_16a_uploads_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_mutual_fund_id_mutual_funds_id_fk" FOREIGN KEY ("mutual_fund_id") REFERENCES "public"."mutual_funds"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_transaction_id_investment_transactions_id_fk" FOREIGN KEY ("transaction_id") REFERENCES "public"."investment_transactions"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_capital_gain_id_capital_gains_id_fk" FOREIGN KEY ("capital_gain_id") REFERENCES "public"."capital_gains"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "mf_redemptions" ADD CONSTRAINT "mf_redemptions_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN null; END $$;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "form_16a_uploads_fy_idx" ON "form_16a_uploads" USING btree ("user_id","fy");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "form_16a_uploads_tan_idx" ON "form_16a_uploads" USING btree ("user_id","deductor_tan");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "form_16a_uploads_user_id_idx" ON "form_16a_uploads" USING btree ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "form_16a_uploads_cert_uq" ON "form_16a_uploads" USING btree ("user_id","cert_number");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "mf_redemptions_mf_idx" ON "mf_redemptions" USING btree ("user_id","mutual_fund_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "mf_redemptions_status_idx" ON "mf_redemptions" USING btree ("status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "mf_redemptions_user_id_idx" ON "mf_redemptions" USING btree ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "mf_redemptions_one_pending_per_fund" ON "mf_redemptions" USING btree ("mutual_fund_id") WHERE "mf_redemptions"."status" = 'PENDING';
