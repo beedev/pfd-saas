@@ -209,12 +209,14 @@ export async function getHistoricalNavOn(
     const target = new Date(dateIso + 'T00:00:00Z');
     if (isNaN(target.getTime())) return null;
 
-    // mfapi.in data is sorted newest-first. Find the NAV for the exact date
-    // or the nearest business day on or after the target (handles weekends/holidays).
-    // If no NAV exists on or after target (i.e., future date), return null.
-    let exactNav: number | null = null;
-    let nearestAfterNav: number | null = null;
-    let nearestAfterDate: Date | null = null;
+    // mfapi.in data is sorted newest-first. Take the EARLIEST published NAV on or
+    // after the target date: exact match if present, otherwise the next available
+    // NAV — with NO distance cap, so weekends, holidays and any gap in the feed
+    // resolve naturally (the published NAV dates ARE the business calendar). If
+    // nothing exists on or after the target (NAV not yet published / future date),
+    // return null so the caller keeps the redemption pending.
+    let bestNav: number | null = null;
+    let bestDate: Date | null = null;
 
     for (const point of dataPoints) {
       const parts = point.date.split('-');
@@ -226,25 +228,15 @@ export async function getHistoricalNavOn(
       const nav = parseFloat(point.nav);
       if (!Number.isFinite(nav) || nav <= 0) continue;
 
-      // Exact match
-      if (entryDate.getTime() === target.getTime()) {
-        exactNav = nav;
-        break;
-      }
-
-      // Nearest entry on or after target (within 5 days to handle long weekends)
-      if (entryDate > target) {
-        const diffDays = (entryDate.getTime() - target.getTime()) / 86400000;
-        if (diffDays <= 5 && (!nearestAfterDate || entryDate < nearestAfterDate)) {
-          nearestAfterNav = nav;
-          nearestAfterDate = entryDate;
-        }
+      if (entryDate.getTime() < target.getTime()) continue; // only on/after target
+      if (!bestDate || entryDate < bestDate) {
+        bestNav = nav;
+        bestDate = entryDate;
       }
     }
 
-    if (exactNav != null) return { navRupees: exactNav, navDateIso: dateIso };
-    if (nearestAfterNav != null && nearestAfterDate != null) {
-      return { navRupees: nearestAfterNav, navDateIso: nearestAfterDate.toISOString().slice(0, 10) };
+    if (bestNav != null && bestDate != null) {
+      return { navRupees: bestNav, navDateIso: bestDate.toISOString().slice(0, 10) };
     }
     return null;
   } catch (err) {

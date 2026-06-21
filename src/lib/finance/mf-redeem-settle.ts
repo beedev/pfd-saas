@@ -161,7 +161,7 @@ export async function settleRedemption(
       : '';
     const dateNote =
       navDateIso !== claim.applicableNavDate
-        ? ` — settled at NAV of ${navDateIso} (no published NAV on the applicable date ${claim.applicableNavDate}).`
+        ? ` — settled at the NAV published on ${navDateIso} (first available on/after ${claim.applicableNavDate}).`
         : '';
     const noteSuffix = clampNote + dateNote;
     const [settled] = await tx
