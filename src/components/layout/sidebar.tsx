@@ -136,14 +136,11 @@ const navigation: NavSection[] = [
     items: [
       { name: 'Income', href: '/income', icon: Banknote },
       { name: 'Deductions', href: '/tax', icon: Receipt },
-      // Sprint C — reconciliation triangle (books vs Form 16 vs 26AS)
-      { name: 'Reconciliation', href: '/tax/reconciliation', icon: Calculator },
-      // Unified IT-dept gap check — AIS/TIS + 26AS totals vs the app's books
-      { name: 'Gap Check (AIS/TIS)', href: '/tax/gap-check', icon: ClipboardCheck },
+      // Unified IT-dept gap check — AIS/TIS + 26AS + reconciliation in one place
+      { name: 'Tax Gap Check', href: '/tax/gap-check', icon: ClipboardCheck },
       { name: 'Form 16', href: '/tax/form-16', icon: FileText },
       { name: '80G Donations', href: '/tax/80g', icon: PiggyBank },
       { name: 'Capital Gains', href: '/tax/ltcg-stcg', icon: Calculator },
-      { name: 'Form 26AS', href: '/tax/form-26as', icon: ClipboardCheck },
       { name: 'Documents', href: '/tax/documents', icon: FolderOpen },
       { name: 'Filing Pack', href: '/tax/filing-pack', icon: Package },
       { name: 'ITR Wizard', href: '/tax/itr-wizard', icon: FileCheck2 },

@@ -21,6 +21,7 @@ import {
   capitalGains,
   tdsCredits,
   form16aUploads,
+  form26asUploads,
 } from '@/db';
 
 const TOLERANCE_PAISA = 10_000; // ₹100
@@ -54,6 +55,9 @@ export interface ItGapResult {
   hasAis: boolean;
   uploadedAt: { tis: string | null; ais: string | null };
   rows: ItGapRow[];
+  // 26AS (TRACES) total TDS for the FY — the authoritative tax-credit figure
+  // to rely on at filing. null when no 26AS has been uploaded.
+  form26asTotalTdsPaisa: number | null;
   summary: { flagged: number; totalGapPaisa: number; estTaxAtRiskPaisa: number };
 }
 
@@ -66,7 +70,7 @@ function statusFor(itDept: number | null, booked: number): ItGapStatus {
 }
 
 export async function computeItGapCheck(userId: string, fy: string): Promise<ItGapResult> {
-  const [aisRows, salaryRows, otherRows, cgRows, tdsRows, f16aRows] = await Promise.all([
+  const [aisRows, salaryRows, otherRows, cgRows, tdsRows, f16aRows, f26asRows] = await Promise.all([
     db.select().from(aisImports).where(and(eq(aisImports.userId, userId), eq(aisImports.fy, fy))),
     db
       .select()
@@ -88,7 +92,15 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
       .select()
       .from(form16aUploads)
       .where(and(eq(form16aUploads.userId, userId), eq(form16aUploads.fy, fy))),
+    db
+      .select()
+      .from(form26asUploads)
+      .where(and(eq(form26asUploads.userId, userId), eq(form26asUploads.fy, fy))),
   ]);
+
+  const form26asTotalTdsPaisa = f26asRows.length
+    ? f26asRows.reduce((s, r) => s + (r.parsedTotalTdsPaisa || 0), 0)
+    : null;
 
   const tis = aisRows.find((r) => r.kind === 'TIS');
   const ais = aisRows.find((r) => r.kind === 'AIS');
@@ -215,6 +227,7 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
       ais: ais?.uploadedAt?.toISOString() ?? null,
     },
     rows,
+    form26asTotalTdsPaisa,
     summary: { flagged, totalGapPaisa, estTaxAtRiskPaisa },
   };
 }

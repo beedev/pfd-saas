@@ -45,6 +45,7 @@ interface GapResult {
   hasAis: boolean;
   uploadedAt: { tis: string | null; ais: string | null };
   rows: GapRow[];
+  form26asTotalTdsPaisa: number | null;
   summary: { flagged: number; totalGapPaisa: number; estTaxAtRiskPaisa: number };
 }
 
@@ -67,6 +68,9 @@ export default function GapCheckPage() {
   const [password, setPassword] = useState('');
   const [needPw, setNeedPw] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [pan, setPan] = useState<string | null>(null);
+  const [dob, setDob] = useState('');
+  const [savingDob, setSavingDob] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +87,36 @@ export default function GapCheckPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    fetch('/api/business-profile')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j?.profile) {
+          setPan(j.profile.pan ?? null);
+          setDob(j.profile.dob ?? '');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveDob = async () => {
+    setSavingDob(true);
+    try {
+      const res = await fetch('/api/business-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dob }),
+      });
+      const j = await res.json();
+      if (res.ok) toast.success('Date of birth saved — AIS/TIS will auto-unlock');
+      else toast.error(j.error || 'Failed to save');
+    } catch {
+      toast.error('Failed to save');
+    } finally {
+      setSavingDob(false);
+    }
+  };
 
   const upload = async (file: File) => {
     setUploading(true);
@@ -172,9 +206,28 @@ export default function GapCheckPage() {
         <CardContent className="space-y-3">
           <p className="flex items-start gap-2 text-sm text-muted-foreground">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-            Unlocked automatically from your PAN + Date of Birth (set them in Profile). The password
-            is used only to decrypt — never stored.
+            Unlocked automatically from your PAN + Date of Birth. The password is used only to
+            decrypt — never stored.
           </p>
+          {/* Tax identity — PAN (from GST profile) + DOB for auto-unlock */}
+          <div className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
+            <div className="text-sm">
+              <div className="text-xs text-muted-foreground">PAN</div>
+              <div className="font-mono font-medium">{pan ?? '— set up your profile —'}</div>
+            </div>
+            <div className="text-sm">
+              <label className="text-xs text-muted-foreground">Date of birth</label>
+              <Input
+                type="date"
+                value={/^\d{4}-\d{2}-\d{2}$/.test(dob) ? dob : ''}
+                onChange={(e) => setDob(e.target.value)}
+                className="w-44"
+              />
+            </div>
+            <Button variant="secondary" size="sm" onClick={saveDob} disabled={savingDob || !dob}>
+              {savingDob ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            </Button>
+          </div>
           {needPw && (
             <Input
               type="password"
@@ -278,6 +331,20 @@ export default function GapCheckPage() {
                 <CheckCircle2 className="h-4 w-4" /> No gaps — your books match the department&apos;s data.
               </p>
             )}
+            <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 text-sm">
+              {data?.form26asTotalTdsPaisa != null && (
+                <span className="text-muted-foreground">
+                  26AS (TRACES) total TDS:{' '}
+                  <span className="font-medium text-foreground">{inr(data.form26asTotalTdsPaisa)}</span>
+                </span>
+              )}
+              <a href="/tax/reconciliation" className="text-primary hover:underline">
+                Per-dimension reconciliation →
+              </a>
+              <a href="/tax/form-26as" className="text-primary hover:underline">
+                26AS per-TAN detail →
+              </a>
+            </div>
           </CardContent>
         </Card>
       )}
