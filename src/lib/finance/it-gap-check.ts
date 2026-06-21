@@ -54,7 +54,8 @@ export interface ItGapRow {
   note?: string;
   // Per-source AIS/TIS breakdown (each bank's interest, each company's dividend)
   // for mental reconciliation. Only populated for interest/dividend income rows.
-  aisDetail?: { source: string; amountPaisa: number }[];
+  // `kind` distinguishes savings-bank vs fixed-deposit interest where AIS does.
+  aisDetail?: { source: string; amountPaisa: number; kind?: string }[];
   // Residual income the department reports beyond what our records account for,
   // which the user can one-click accept into other-sources income (AIS_ACCEPTED).
   // Present (> 0) only when this row is a "missing" income gap with no certificate.
@@ -227,9 +228,16 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
     tis == null ? null : (tisCat('interest_savings') ?? 0) + (tisCat('interest_deposit') ?? 0);
 
   // Per-source AIS detail for mental reconciliation (each bank / company).
+  // Tag interest lines as savings-bank vs fixed-deposit so the two are
+  // distinguishable in the breakdown (AIS reports them as separate categories).
   const tisDetail = (key: string) =>
     tis?.categoriesJson?.find((c) => c.key === key)?.detail ?? [];
-  const interestDetail = [...tisDetail('interest_savings'), ...tisDetail('interest_deposit')];
+  const tagged = (key: string, kind: string) =>
+    tisDetail(key).map((d) => ({ ...d, kind }));
+  const interestDetail = [
+    ...tagged('interest_savings', 'Savings bank'),
+    ...tagged('interest_deposit', 'Fixed deposit'),
+  ];
   const dividendDetail = tisDetail('dividend');
 
   // Residual the department reports beyond our records — what an Accept would book.

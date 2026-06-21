@@ -40,7 +40,7 @@ interface GapRow {
   booksPaisa: number; // provisional estimate
   status: GapStatus;
   note?: string;
-  aisDetail?: { source: string; amountPaisa: number }[];
+  aisDetail?: { source: string; amountPaisa: number; kind?: string }[];
   acceptableResidualPaisa?: number;
   acceptFamily?: 'interest' | 'dividend';
 }
@@ -469,7 +469,14 @@ export default function GapCheckPage() {
                                 <tbody>
                                   {r.aisDetail!.map((d, i) => (
                                     <tr key={`${r.key}-${i}`}>
-                                      <td className="py-0.5 pr-6">{d.source}</td>
+                                      <td className="py-0.5 pr-6">
+                                        {d.source}
+                                        {d.kind && (
+                                          <span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
+                                            {d.kind}
+                                          </span>
+                                        )}
+                                      </td>
                                       <td className="py-0.5 text-right tabular-nums">
                                         {inr(d.amountPaisa)}
                                       </td>
