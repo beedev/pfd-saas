@@ -22,7 +22,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { db, fixedDeposits, otherSourcesIncome, type FixedDeposit, type FDCompoundingFreq } from '@/db';
-import { getMostRecentCompletedFinancialYear } from './tax-constants';
+import { getTaxFilingYear } from './tax-filing-year';
 
 const N_PER_YEAR: Record<FDCompoundingFreq, number> = {
   MONTHLY: 12,
@@ -171,10 +171,11 @@ export async function syncFdInterest(
     )
     .returning({ id: otherSourcesIncome.id });
 
-  // Only book interest for financial years that have CLOSED — never surface a
-  // year still in progress as earned income (owner's rule: don't show next year
-  // until the previous one is closed). FY strings sort lexically, so "≤" works.
-  const cutoffFy = getMostRecentCompletedFinancialYear();
+  // Only book interest up to the tax filing year — never surface a year you
+  // haven't started filing as earned income (owner's rule: don't show next year
+  // until the previous one is closed). Closing 2025-26 advances this to 2026-27,
+  // which then reveals 2026-27's interest. FY strings sort lexically, so "≤" works.
+  const cutoffFy = await getTaxFilingYear(userId);
   const rows = fds.flatMap((fd) =>
     fdInterestByFy(fd)
       .filter((slice) => slice.fy <= cutoffFy)

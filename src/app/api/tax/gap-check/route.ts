@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { computeItGapCheck } from '@/lib/finance/it-gap-check';
 import { syncFdInterest } from '@/lib/finance/fd-interest';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
+import { getTaxFilingYear } from '@/lib/finance/tax-filing-year';
 
 export const runtime = 'nodejs';
 
@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
   if (!userId) return unauthenticated();
 
   const fyParam = new URL(request.url).searchParams.get('fy');
-  const fy = fyParam && /^\d{4}-\d{2}$/.test(fyParam) ? fyParam : getCurrentFinancialYear();
+  // Default to the tax filing year (the year you're filing), not the calendar year.
+  const fy = fyParam && /^\d{4}-\d{2}$/.test(fyParam) ? fyParam : await getTaxFilingYear(userId);
 
   // Keep auto-derived FD interest fresh before reconciling (regenerate-from-source).
   await syncFdInterest(userId);

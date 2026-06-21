@@ -12,6 +12,7 @@ import {
 } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { financialYearBoundsIso } from '@/lib/finance/tax-constants';
+import { TAX_CLOSED_CATEGORY } from '@/lib/finance/tax-filing-year';
 
 interface ChecklistItem {
   label: string;
@@ -224,11 +225,39 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(businessProfile.userId, userId));
 
+    // Record the tax-close marker so the TAX filing year advances. This is what
+    // reveals the next year's tax income (FD interest, capital gains, etc.) —
+    // distinct from the GST/calendar year. Upsert (idempotent).
+    const existingMarker = await db
+      .select({ id: fyCloseStatus.id })
+      .from(fyCloseStatus)
+      .where(
+        and(
+          eq(fyCloseStatus.userId, userId),
+          eq(fyCloseStatus.financialYear, fy),
+          eq(fyCloseStatus.category, TAX_CLOSED_CATEGORY),
+        ),
+      );
+    if (existingMarker.length > 0) {
+      await db
+        .update(fyCloseStatus)
+        .set({ isLocked: true, lockedAt: new Date() })
+        .where(eq(fyCloseStatus.id, existingMarker[0].id));
+    } else {
+      await db.insert(fyCloseStatus).values({
+        userId,
+        financialYear: fy,
+        category: TAX_CLOSED_CATEGORY,
+        isLocked: true,
+        lockedAt: new Date(),
+      });
+    }
+
     return NextResponse.json({
       success: true,
       previousFy: fy,
       newFy: nextFy,
-      message: `FY ${fy} closed. Business profile updated to ${nextFy}. Invoice numbering reset.`,
+      message: `FY ${fy} closed for tax. Tax filing year is now ${nextFy}; next-year income (FD interest, capital gains, …) will now show under ${nextFy}.`,
     });
   } catch (err) {
     console.error('[fy-close POST]', err);
