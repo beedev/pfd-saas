@@ -19,6 +19,7 @@ import {
 } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { calculateFdMaturityPaisa, monthsBetween } from '@/lib/finance/fd';
+import { syncFdInterest } from '@/lib/finance/fd-interest';
 
 interface Params {
   params: Promise<{ id: string }>;
@@ -135,6 +136,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       .set(update)
       .where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, userId)))
       .returning();
+    await syncFdInterest(userId); // refresh per-FY FD interest (handles closure)
     return NextResponse.json({ fixedDeposit: updated });
   } catch (err) {
     console.error('PATCH fd:', err);
@@ -152,6 +154,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
     await db.delete(fixedDeposits).where(and(eq(fixedDeposits.id, numericId), eq(fixedDeposits.userId, userId)));
+    await syncFdInterest(userId); // remove this FD's auto interest rows
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('DELETE fd:', err);

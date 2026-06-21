@@ -2940,7 +2940,16 @@ export const aisImports = pgTable('ais_imports', {
   // Parsed aggregates (paisa). categories = TIS income categories; tds = AIS
   // Part-B1 tax deducted/collected per section.
   categoriesJson:
-    jsonb('categories_json').$type<{ key: string; label: string; amountPaisa: number }[]>(),
+    jsonb('categories_json').$type<
+      {
+        key: string;
+        label: string;
+        amountPaisa: number;
+        // Per-source breakdown for dividend + interest (each company / bank),
+        // for mental reconciliation on the Gap Check. Absent for other categories.
+        detail?: { source: string; amountPaisa: number }[];
+      }[]
+    >(),
   tdsJson:
     jsonb('tds_json').$type<{ code: string; label: string; grossPaisa: number; tdsPaisa: number }[]>(),
   sourceFilename: text('source_filename'),
@@ -3151,6 +3160,15 @@ export type OtherIncomeSource =
   | 'INSURANCE_MATURITY' // Section 10(10D) typically exempt
   | 'OTHER';
 
+// Provenance of an other-sources-income row:
+//   MANUAL       — user entered it by hand.
+//   FD_AUTO      — auto-derived FD interest for one (FD × FY); sourceRefId =
+//                  fixed_deposits.id. Regenerated/cleaned by syncFdInterest, so
+//                  these rows must never be hand-edited (they'll be overwritten).
+//   AIS_ACCEPTED — accepted from the AIS Gap Check (residual interest / dividend
+//                  the app can't derive). sourceRefId is null.
+export type OtherIncomeSourceKind = 'MANUAL' | 'FD_AUTO' | 'AIS_ACCEPTED';
+
 export const otherSourcesIncome = pgTable('other_sources_income', {
   id: serial('id').primaryKey(),
   financialYear: text('financial_year').notNull(),
@@ -3162,6 +3180,9 @@ export const otherSourcesIncome = pgTable('other_sources_income', {
   // summary while still reporting them for ITR rate determination.
   isTaxExempt: boolean('is_tax_exempt').notNull().default(false),
   taxSection: text('tax_section'),
+  // Provenance — drives FD-interest auto-sync + AIS-accept cleanup.
+  sourceKind: text('source_kind').$type<OtherIncomeSourceKind>().notNull().default('MANUAL'),
+  sourceRefId: integer('source_ref_id'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),

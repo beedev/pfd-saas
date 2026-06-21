@@ -52,6 +52,15 @@ export interface ItGapRow {
   booksPaisa: number; // our provisional estimate
   status: ItGapStatus;
   note?: string;
+  // Per-source AIS/TIS breakdown (each bank's interest, each company's dividend)
+  // for mental reconciliation. Only populated for interest/dividend income rows.
+  aisDetail?: { source: string; amountPaisa: number }[];
+  // Residual income the department reports beyond what our records account for,
+  // which the user can one-click accept into other-sources income (AIS_ACCEPTED).
+  // Present (> 0) only when this row is a "missing" income gap with no certificate.
+  acceptableResidualPaisa?: number;
+  // Which income family an Accept applies to (drives the accept endpoint).
+  acceptFamily?: 'interest' | 'dividend';
 }
 
 export interface ItGapResult {
@@ -217,6 +226,16 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
   const tisInterest =
     tis == null ? null : (tisCat('interest_savings') ?? 0) + (tisCat('interest_deposit') ?? 0);
 
+  // Per-source AIS detail for mental reconciliation (each bank / company).
+  const tisDetail = (key: string) =>
+    tis?.categoriesJson?.find((c) => c.key === key)?.detail ?? [];
+  const interestDetail = [...tisDetail('interest_savings'), ...tisDetail('interest_deposit')];
+  const dividendDetail = tisDetail('dividend');
+
+  // Residual the department reports beyond our records — what an Accept would book.
+  const residual = (deptTotal: number | null, books: number): number =>
+    deptTotal == null ? 0 : Math.max(0, deptTotal - books);
+
   const rows: ItGapRow[] = [];
 
   // 1. Salary income — Form 16 gross vs AIS/TIS salary.
@@ -246,7 +265,11 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
     note:
       f16aAmount('interest') != null
         ? 'Anchor: Form 16A (194A).'
-        : 'No certificate (below TDS threshold) — from our records; AIS flags what we haven’t recorded.',
+        : 'No certificate (below TDS threshold) — FD interest is auto-derived from your deposits; the residual can be accepted from AIS.',
+    aisDetail: interestDetail,
+    acceptableResidualPaisa:
+      f16aAmount('interest') == null ? residual(tisInterest, booksInterest) : 0,
+    acceptFamily: 'interest',
   });
 
   // 3. Dividend income — same treatment.
@@ -262,7 +285,11 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
     note:
       f16aAmount('dividend') != null
         ? 'Anchor: Form 16A (194).'
-        : 'No certificate — from our records; AIS flags what we haven’t recorded.',
+        : 'No certificate — the residual the department reports can be accepted from AIS.',
+    aisDetail: dividendDetail,
+    acceptableResidualPaisa:
+      f16aAmount('dividend') == null ? residual(tisCat('dividend'), booksDividend) : 0,
+    acceptFamily: 'dividend',
   });
 
   // 4. Salary TDS (Sec 192) — Form 16 TDS vs AIS-192 + 26AS-192.

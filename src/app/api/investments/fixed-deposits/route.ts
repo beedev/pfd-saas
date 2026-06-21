@@ -22,6 +22,7 @@ import {
 } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { calculateFdMaturityPaisa, monthsBetween } from '@/lib/finance/fd';
+import { syncFdInterest } from '@/lib/finance/fd-interest';
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -123,6 +124,7 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
+    await syncFdInterest(userId); // refresh per-FY FD interest in other income
     return NextResponse.json({ fixedDeposit: created }, { status: 201 });
   } catch (err) {
     console.error('POST fixed-deposits:', err);

@@ -28,6 +28,14 @@ export interface AisTisCategory {
   key: string; // normalized — maps to a booked dimension in the gap check
   label: string; // as printed in the document
   amountPaisa: number;
+  /** Per-source breakdown (e.g. each company's dividend, each bank's interest)
+   *  for mental reconciliation. Present for dividend + interest categories. */
+  detail?: AisTisDetailItem[];
+}
+
+export interface AisTisDetailItem {
+  source: string; // payer / bank / company name (PAN stripped)
+  amountPaisa: number;
 }
 
 export interface AisTisTds {
@@ -217,11 +225,56 @@ export async function parseAisTis(
 
   const text = rows.join(' ');
   const kind: AisTisKind = /Annual Information Statement/i.test(text) ? 'AIS' : 'TIS';
+  const categories = kind === 'TIS' ? parseTisCategories(rows) : [];
+
+  // Attach per-source detail (each company's dividend, each bank's interest)
+  // from the annexure to the matching page-1 category, so the gap check can
+  // show a reconcilable breakdown rather than a single opaque total.
+  const details = parseSourceDetails(rows);
+  for (const cat of categories) {
+    if (details[cat.key]?.length) cat.detail = details[cat.key];
+  }
+
   return {
     kind,
     fy: parseFy(text),
     pan: parsePan(text),
-    categories: kind === 'TIS' ? parseTisCategories(rows) : [],
+    categories,
     tds: kind === 'AIS' ? parseAisTds(rows) : [],
   };
+}
+
+/**
+ * Per-source breakdown for dividend + interest, from the SFT detail lines in
+ * the TIS annexure / AIS Part-B2. Each such line names the payer (with its PAN
+ * in parentheses) and repeats the amount reported/processed/confirmed — we take
+ * the last (confirmed) figure. Keyed to the same category keys parseTisCategories emits.
+ */
+function parseSourceDetails(rows: string[]): Record<string, AisTisDetailItem[]> {
+  const out: Record<string, AisTisDetailItem[]> = {};
+  for (const row of rows) {
+    const cells = row.split('\t').map((c) => c.trim());
+    const joined = cells.join(' ');
+
+    let key: string | null = null;
+    if (/SFT-015|Dividend income/i.test(joined)) key = 'dividend';
+    else if (/SFT-016/i.test(joined) && /Saving/i.test(joined)) key = 'interest_savings';
+    else if (/SFT-016/i.test(joined) && /(Term|Deposit)/i.test(joined)) key = 'interest_deposit';
+    else if (/SFT-016/i.test(joined)) key = 'interest_savings';
+    if (!key) continue;
+
+    // Source = the cell shaped "NAME (PAN/ID)"; amount = last rupee cell on the row.
+    const sourceCell = cells.find((c) => /\([A-Z0-9.]{4,}\)/.test(c) && /[A-Za-z]{3,}/.test(c));
+    if (!sourceCell) continue;
+    let amountPaisa: number | null = null;
+    for (const c of cells) {
+      const p = rupeesToPaisa(c);
+      if (p != null) amountPaisa = p;
+    }
+    if (amountPaisa == null || amountPaisa <= 0) continue;
+
+    const source = sourceCell.replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+/g, ' ').trim();
+    (out[key] ??= []).push({ source, amountPaisa });
+  }
+  return out;
 }

@@ -9,7 +9,8 @@
  * an indicative tax impact. Refresh re-parses and updates the gaps.
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { Button, Card, CardHeader, CardContent, Input } from '@dxp/ui';
 import {
   Loader2,
@@ -20,6 +21,9 @@ import {
   FileText,
   Info,
   ShieldCheck,
+  ChevronRight,
+  ChevronDown,
+  PlusCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFinancialYear } from '@/components/providers/financial-year-provider';
@@ -36,6 +40,9 @@ interface GapRow {
   booksPaisa: number; // provisional estimate
   status: GapStatus;
   note?: string;
+  aisDetail?: { source: string; amountPaisa: number }[];
+  acceptableResidualPaisa?: number;
+  acceptFamily?: 'interest' | 'dividend';
 }
 
 interface GapResult {
@@ -67,6 +74,42 @@ export default function GapCheckPage() {
   const [pan, setPan] = useState<string | null>(null);
   const [dob, setDob] = useState('');
   const [savingDob, setSavingDob] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [accepting, setAccepting] = useState<string | null>(null);
+
+  const toggleRow = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const acceptFromAis = async (family: 'interest' | 'dividend') => {
+    setAccepting(family);
+    try {
+      const res = await fetch('/api/tax/gap-check/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fy, family }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast.error(j.error || 'Accept failed');
+        return;
+      }
+      toast.success(
+        j.created
+          ? `Booked ${inr(j.residualPaisa)} ${family} from AIS into other income`
+          : 'Nothing left to accept — your records already cover the AIS figure',
+      );
+      await load();
+    } catch {
+      toast.error('Accept failed');
+    } finally {
+      setAccepting(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -297,7 +340,7 @@ export default function GapCheckPage() {
             <span>
               Form 16 / 16A — your official records — are uploaded on their own page and anchor this
               reconciliation:{' '}
-              <a href="/tax/form-16" className="text-primary hover:underline">Form 16 / 16A</a>.
+              <Link href="/tax/form-16" className="text-primary hover:underline">Form 16 / 16A</Link>.
             </span>
           </p>
         </CardContent>
@@ -333,28 +376,113 @@ export default function GapCheckPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data?.rows.map((r) => (
-                    <tr key={r.key} className="border-b last:border-0 align-top">
-                      <td className="py-3 pr-4">
-                        <div className="font-medium">{r.label}</div>
-                        {r.note && <div className="text-xs text-muted-foreground">{r.note}</div>}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">{inr(r.certPaisa)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{inr(r.aisPaisa)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{inr(r.form26asPaisa)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                        {inr(r.booksPaisa)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[r.status].cls}`}
-                        >
-                          {r.status === 'matched' && <CheckCircle2 className="h-3 w-3" />}
-                          {STATUS[r.status].label}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {data?.rows.map((r) => {
+                    const hasDetail = !!r.aisDetail && r.aisDetail.length > 0;
+                    const canAccept = (r.acceptableResidualPaisa ?? 0) > 10_000 && !!r.acceptFamily;
+                    const isOpen = expanded.has(r.key);
+                    return (
+                      <React.Fragment key={r.key}>
+                        <tr className="border-b last:border-0 align-top">
+                          <td className="py-3 pr-4">
+                            <div className="flex items-start gap-1.5">
+                              {hasDetail ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRow(r.key)}
+                                  className="mt-0.5 text-muted-foreground hover:text-foreground"
+                                  aria-label={isOpen ? 'Collapse' : 'Expand'}
+                                >
+                                  {isOpen ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="w-4" />
+                              )}
+                              <div>
+                                <div className="font-medium">{r.label}</div>
+                                {r.note && (
+                                  <div className="text-xs text-muted-foreground">{r.note}</div>
+                                )}
+                                {hasDetail && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleRow(r.key)}
+                                    className="text-xs text-primary hover:underline"
+                                  >
+                                    {isOpen ? 'Hide' : 'Show'} {r.aisDetail!.length} source
+                                    {r.aisDetail!.length > 1 ? 's' : ''} from AIS
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium tabular-nums">
+                            {inr(r.certPaisa)}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">{inr(r.aisPaisa)}</td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {inr(r.form26asPaisa)}
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                            {inr(r.booksPaisa)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col items-start gap-1.5">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[r.status].cls}`}
+                              >
+                                {r.status === 'matched' && <CheckCircle2 className="h-3 w-3" />}
+                                {STATUS[r.status].label}
+                              </span>
+                              {canAccept && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  disabled={accepting === r.acceptFamily}
+                                  onClick={() => acceptFromAis(r.acceptFamily!)}
+                                >
+                                  {accepting === r.acceptFamily ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <PlusCircle className="h-3 w-3" />
+                                  )}
+                                  <span className="ml-1">
+                                    Accept {inr(r.acceptableResidualPaisa ?? null)} from AIS
+                                  </span>
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        {hasDetail && isOpen && (
+                          <tr className="border-b bg-muted/30 last:border-0">
+                            <td colSpan={6} className="px-4 py-2">
+                              <div className="ml-5 text-xs text-muted-foreground">
+                                Per-source breakdown the department (AIS/TIS) reports — use it to
+                                reconcile against your records:
+                              </div>
+                              <table className="ml-5 mt-1 w-auto text-xs">
+                                <tbody>
+                                  {r.aisDetail!.map((d, i) => (
+                                    <tr key={`${r.key}-${i}`}>
+                                      <td className="py-0.5 pr-6">{d.source}</td>
+                                      <td className="py-0.5 text-right tabular-nums">
+                                        {inr(d.amountPaisa)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -370,9 +498,9 @@ export default function GapCheckPage() {
               estimate and never drives a flag.
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 text-sm">
-              <a href="/tax/form-16" className="text-primary hover:underline">
+              <Link href="/tax/form-16" className="text-primary hover:underline">
                 Form 16 / 16A →
-              </a>
+              </Link>
             </div>
           </CardContent>
         </Card>
