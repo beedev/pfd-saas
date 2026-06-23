@@ -20,7 +20,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
-import { db, scheduledJobs, type JobType } from '@/db';
+import { db, scheduledJobs, mfRedemptions, type JobType } from '@/db';
 import { runSipAutoExecute } from '@/lib/cron/sip-auto-execute';
 import { runAlertsCheck } from '@/lib/cron/alerts-check';
 import { runDailyDigestJob } from '@/lib/cron/daily-digest';
@@ -62,6 +62,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Self-heal: ensure every user has the default cron jobs before selecting due
+  // ones. A user seeded outside the onboarding flow (e.g. the demo account) would
+  // otherwise have NO jobs, so its digests/alerts/SIP pass never run.
+  await ensureDefaultJobsForAllUsers();
+
   // Compare in DB-time. The migration's NOW() wrote next_run_at as
   // wall-clock IST (timestamp without timezone). A JS Date sent through
   // postgres-js serialises to UTC, so a JS-side `<=` comparison fails
@@ -80,8 +85,16 @@ export async function POST(request: NextRequest) {
     );
 
   const tickStartedAt = new Date().toISOString();
+
+  // Global MF redemption settlement — runs EVERY tick for every user that has a
+  // PENDING redemption, independent of scheduled jobs. A redemption must never be
+  // orphaned because its owner lacks a sip_auto_execute job (e.g. a seeded/demo
+  // account that never went through onboarding). Idempotent: already-settled
+  // redemptions are skipped; NAV-not-yet-published ones stay pending.
+  const settlement = await settleAllPendingRedemptions();
+
   if (due.length === 0) {
-    return NextResponse.json({ now: tickStartedAt, dispatched: 0, jobs: [] });
+    return NextResponse.json({ now: tickStartedAt, dispatched: 0, jobs: [], settlement });
   }
 
   const reports: JobReport[] = [];
@@ -103,14 +116,11 @@ export async function POST(request: NextRequest) {
         case 'alerts_check':
           report.result = await runAlertsCheck(job.userId);
           break;
-        case 'sip_auto_execute': {
-          // Same NAV-driven daily pass also settles any PENDING MF
-          // redemptions whose applicable NAV has now published.
-          const sip = await runSipAutoExecute(job.userId);
-          const redemptions = await settlePendingRedemptions(job.userId);
-          report.result = { sip, redemptions };
+        case 'sip_auto_execute':
+          // MF redemption settlement is handled by the global pass below (so it
+          // runs for every user, not only those with this job).
+          report.result = await runSipAutoExecute(job.userId);
           break;
-        }
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);
       }
@@ -146,5 +156,48 @@ export async function POST(request: NextRequest) {
     now: tickStartedAt,
     dispatched: reports.length,
     jobs: reports,
+    settlement,
   });
+}
+
+/**
+ * Idempotently create the default cron jobs for any user missing them. Fixes
+ * accounts seeded outside onboarding (demo/seed users), which otherwise have no
+ * scheduled jobs at all. next_run_at = NOW() so they fire on this same tick.
+ */
+async function ensureDefaultJobsForAllUsers(): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO scheduled_jobs (user_id, job_type, enabled, next_run_at)
+    SELECT u.id, j.jt, true, NOW()
+    FROM "user" u
+    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute')) AS j(jt)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM scheduled_jobs s WHERE s.user_id = u.id AND s.job_type = j.jt
+    )
+  `);
+}
+
+/**
+ * Settle PENDING MF redemptions for every user that has one. Decoupled from
+ * scheduled jobs so settlement is never gated on a per-user sip_auto_execute row.
+ */
+async function settleAllPendingRedemptions(): Promise<
+  Array<{ userId: string; settled?: number; stillPending?: number; error?: string }>
+> {
+  const usersWithPending = await db
+    .selectDistinct({ userId: mfRedemptions.userId })
+    .from(mfRedemptions)
+    .where(eq(mfRedemptions.status, 'PENDING'));
+
+  const out: Array<{ userId: string; settled?: number; stillPending?: number; error?: string }> = [];
+  for (const { userId } of usersWithPending) {
+    try {
+      const r = await settlePendingRedemptions(userId);
+      out.push({ userId, settled: r.settled, stillPending: r.stillPending });
+    } catch (err) {
+      console.error(`[cron/tick] redemption settlement failed for ${userId}:`, err);
+      out.push({ userId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return out;
 }
