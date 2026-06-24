@@ -337,6 +337,13 @@
       "when": 1782053691953,
       "tag": "0047_goofy_vance_astro",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1782271537803,
+      "tag": "0048_nebulous_wonder_man",
+      "breakpoints": true
     }
   ]
 }

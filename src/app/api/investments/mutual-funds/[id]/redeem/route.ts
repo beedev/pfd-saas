@@ -109,6 +109,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const applicableNavDate = resolveApplicableNavDate(requestDate, afterCutoff);
 
+    // Optional user override of the gain tax-type (when we can't auto-detect the
+    // holding period). Only 'STCG' / 'LTCG' are accepted; anything else = auto.
+    const cgTypeOverride: 'STCG' | 'LTCG' | null =
+      body.cgType === 'STCG' || body.cgType === 'LTCG' ? body.cgType : null;
+
     // Create the redemption (PENDING). Settlement may flip it immediately.
     const [redemption] = await db
       .insert(mfRedemptions)
@@ -120,6 +125,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         applicableNavDate,
         mode: effectiveMode,
         requestedValue: value,
+        cgTypeOverride,
         status: 'PENDING',
         notes: typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null,
       })

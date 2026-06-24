@@ -1,0 +1,1 @@
+ALTER TABLE "mf_redemptions" ADD COLUMN IF NOT EXISTS "cg_type_override" text;

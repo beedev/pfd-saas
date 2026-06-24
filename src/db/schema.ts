@@ -2304,6 +2304,10 @@ export const mfRedemptions = pgTable('mf_redemptions', {
   applicableNavDate: text('applicable_nav_date').notNull(),
   mode: text('mode').$type<MfRedemptionMode>().notNull(),
   requestedValue: real('requested_value').notNull(), // units or rupees, per mode
+  // Optional user override of the gain tax-type, captured at redeem time. When
+  // set it wins over auto-detection at settlement (used when we can't determine
+  // the holding period — e.g. SIP units with no purchase history).
+  cgTypeOverride: text('cg_type_override').$type<HoldingPeriod>(),
   status: text('status').$type<MfRedemptionStatus>().notNull().default('PENDING'),
   // Settlement results (null until SETTLED).
   navPaisa: bigint('nav_paisa', { mode: 'number' }),

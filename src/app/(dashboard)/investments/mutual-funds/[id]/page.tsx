@@ -388,6 +388,7 @@ function RedeemSection({
   const [requestDate, setRequestDate] = useState(new Date().toISOString().slice(0, 10));
   const [afterCutoff, setAfterCutoff] = useState(false);
   const [navOverride, setNavOverride] = useState('');
+  const [treatAsStcg, setTreatAsStcg] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [settling, setSettling] = useState(false);
   const [list, setList] = useState<Redemption[]>([]);
@@ -424,6 +425,7 @@ function RedeemSection({
           requestDate,
           afterCutoff,
           navOverride: navOverride ? Number(navOverride) : undefined,
+          cgType: treatAsStcg ? 'STCG' : undefined,
         }),
       });
       const j = await r.json();
@@ -440,6 +442,7 @@ function RedeemSection({
       setValue('');
       setRedeemAll(false);
       setNavOverride('');
+      setTreatAsStcg(false);
       await loadList();
       onChanged();
     } catch (e) {
@@ -536,11 +539,28 @@ function RedeemSection({
               className="w-32"
             />
           </div>
+          <label
+            className="flex items-center gap-1 text-sm pb-2"
+            title="Tick if these units were held under 12 months"
+          >
+            <input
+              type="checkbox"
+              checked={treatAsStcg}
+              onChange={(e) => setTreatAsStcg(e.target.checked)}
+            />
+            Treat as STCG
+          </label>
           <Button variant="primary" onClick={submit} disabled={submitting} className="mb-0.5">
             {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Wallet className="h-3 w-3 mr-1" />}
             Redeem
           </Button>
         </div>
+        <p className="text-xs text-[var(--dxp-text-muted)]">
+          We can&apos;t always determine the holding period (e.g. SIP units with no purchase
+          history). This redemption defaults to <strong>LTCG</strong> — tick{' '}
+          <em>Treat as STCG</em> if these units were held under 12 months. When your purchase
+          history or a lump-sum start date is known, that is used automatically.
+        </p>
         {estProceeds != null && estProceeds > 0 && (
           <p className="text-xs text-[var(--dxp-text-muted)]">
             ≈ {formatINR(Math.round(estProceeds * 100))} at the latest known NAV (final value uses the

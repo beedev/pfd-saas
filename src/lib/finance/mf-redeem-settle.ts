@@ -16,6 +16,7 @@ import {
   investmentTransactions,
   capitalGains,
   mfRedemptions,
+  sips,
   type MfRedemption,
 } from '@/db';
 import { computeRedemption, type BuyLeg } from './mf-redeem';
@@ -68,6 +69,19 @@ export async function settleRedemption(
       .filter((t) => t.type === 'BUY' || t.type === 'SIP_EXECUTION')
       .map((t) => ({ quantity: t.quantity, transactionDate: t.transactionDate }));
 
+    // Holding-period inputs when there's no buy history to date the lots:
+    //  - lump-sum (no SIP plan) → fall back to the fund's investment start date;
+    //  - SIP (a sips plan exists) → no reliable per-lot date, so leave the
+    //    fallback null and let the default (LTCG) apply, unless the user
+    //    overrode the tax type at redeem time (cgTypeOverride).
+    const [sipPlan] = await tx
+      .select({ id: sips.id })
+      .from(sips)
+      .where(and(eq(sips.mutualFundId, claim.mutualFundId), eq(sips.userId, userId)))
+      .limit(1);
+    const isSip = !!sipPlan;
+    const fallbackAcquisitionDate = isSip ? null : mf.investmentStartDate ?? null;
+
     // Units to sell (clamp to the locked holding — can't redeem more than held).
     const requestedUnits =
       claim.mode === 'units' ? claim.requestedValue : claim.requestedValue / navRupees;
@@ -84,6 +98,9 @@ export async function settleRedemption(
       navRupees,
       saleDate: navDateIso,
       buys,
+      holdingPeriodOverride: claim.cgTypeOverride,
+      fallbackAcquisitionDate,
+      defaultHoldingPeriod: 'LTCG',
     });
 
     // SELL transaction.

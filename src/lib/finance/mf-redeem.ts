@@ -103,8 +103,19 @@ export function computeRedemption(opts: {
   navRupees: number;
   saleDate: string;
   buys: BuyLeg[];
+  /** User-chosen tax type captured at redeem time — wins over auto-detection. */
+  holdingPeriodOverride?: HoldingPeriod | null;
+  /** Acquisition date to fall back on when there's no buy history (lump-sum:
+   *  the fund's investment_start_date). Ignored when buy legs exist. */
+  fallbackAcquisitionDate?: string | null;
+  /** Tax type to assume when neither buy history nor a fallback date is usable
+   *  (e.g. a SIP with no recorded installments). Defaults to LTCG. */
+  defaultHoldingPeriod?: HoldingPeriod;
 }): RedemptionComputation {
-  const { mf, mode, value, navRupees, saleDate, buys } = opts;
+  const {
+    mf, mode, value, navRupees, saleDate, buys,
+    holdingPeriodOverride, fallbackAcquisitionDate, defaultHoldingPeriod = 'LTCG',
+  } = opts;
   const navPaisa = Math.round(navRupees * 100);
 
   const unitsSold = mode === 'units' ? value : value / navRupees;
@@ -118,8 +129,14 @@ export function computeRedemption(opts: {
   const realizedGainPaisa = proceedsPaisa - costBasisPaisa;
 
   const assetType = cgAssetTypeFor(mf.fundType);
-  const acquisitionDate = weightedAcquisitionDate(buys);
-  const holdingPeriod = classifyHolding(assetType, acquisitionDate, saleDate);
+  // Acquisition date: buy history (most precise) → lump-sum fallback date.
+  const acquisitionDate = weightedAcquisitionDate(buys) ?? fallbackAcquisitionDate ?? null;
+  // Holding period precedence: explicit user override → date-based → default.
+  const holdingPeriod: HoldingPeriod =
+    holdingPeriodOverride ??
+    (acquisitionDate
+      ? classifyHolding(assetType, acquisitionDate, saleDate)
+      : defaultHoldingPeriod);
 
   return {
     navPaisa,
