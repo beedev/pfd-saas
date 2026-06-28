@@ -75,12 +75,13 @@ export default function BacktestPage() {
         <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Run a sleeve</h3></CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {sleeves.map((s) => (
+            {sleeves.filter((s) => s.strategy !== 'INTRADAY_ORB').map((s) => (
               <Button key={s.id} variant="secondary" onClick={() => run(s.id)} disabled={runningId != null}>
                 {runningId === s.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{s.name}
               </Button>
             ))}
           </div>
+          <p className="mt-2 text-xs text-[var(--dxp-text-muted)]">The Intraday (ORB) sleeve is a forward-only live paper experiment — not backtested.</p>
         </CardContent>
       </Card>
 

@@ -6,14 +6,15 @@
  * SAFETY: paper money only — agent_* tables + price_snapshots(AGENT_*) only.
  */
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import {
-  db, agentPortfolios, agentSleeves, agentRuns, priceSnapshots,
+  db, agentPortfolios, agentSleeves, agentRuns, agentPositions, priceSnapshots,
   type AgentPortfolio, type AgentSleeve,
 } from '@/db';
 import { getQuote } from '@/lib/services/yahoo-finance';
 import { isMarketOpen } from '@/lib/agent/market-data';
 import { runSleeve } from '@/lib/agent/engine/run-sleeve';
+import { runIntradayOrb } from '@/lib/agent/engine/run-intraday';
 import { markSleeveToMarket } from '@/lib/agent/engine/mark-sleeve';
 import { snapshotEquity, snapshotSleeveEquity, agentBenchmarkSymbol } from '@/lib/agent/engine/equity-curve';
 import { DEFAULT_SLEEVES } from '@/lib/agent/strategies/registry';
@@ -80,7 +81,11 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
 
     for (const sleeve of sleeves) {
       if (!sleeve.enabled) continue;
-      const r = await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute });
+      // Intraday ORB is owned by the intraday runner — at the daily open it has
+      // no setup yet, so just mark it to market so it counts in the total.
+      const r = sleeve.strategy === 'INTRADAY_ORB'
+        ? { sleeveKey: sleeve.key, quotesFetched: 0, decisions: 0, tradesExecuted: 0, cashBalancePaisa: sleeve.cashBalancePaisa }
+        : await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute });
       const equity = await markSleeveToMarket(userId, sleeve.id, r.cashBalancePaisa);
       await snapshotSleeveEquity(userId, portfolio.id, sleeve.id, sleeve.name, equity, runDate);
       totalEquity += equity;
@@ -138,12 +143,19 @@ function istStamp(): string {
  */
 export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   const runDate = istDate();
-  if (!(await isMarketOpen())) return { status: 'SKIPPED', reason: 'market-closed', runDate };
+  const marketOpen = await isMarketOpen();
   const portfolio = (await db.select().from(agentPortfolios).where(eq(agentPortfolios.userId, userId)).limit(1))[0];
   if (!portfolio || !portfolio.enabled) return { status: 'SKIPPED', reason: 'disabled', runDate };
   const all = await db.select().from(agentSleeves).where(eq(agentSleeves.portfolioId, portfolio.id));
   const sleeves = all.filter((s) => s.enabled && s.cadence === 'INTRADAY');
   if (!sleeves.length) return { status: 'SKIPPED', reason: 'no-intraday-sleeves', runDate };
+  // When the market is closed we still run ORB sleeves that hold positions (to
+  // square them off — never overnight); legacy intraday sleeves wait for open.
+  const orbIds = sleeves.filter((s) => s.strategy === 'INTRADAY_ORB').map((s) => s.id);
+  const openOrb = orbIds.length
+    ? (await db.select({ id: agentPositions.id }).from(agentPositions).where(inArray(agentPositions.sleeveId, orbIds))).length
+    : 0;
+  if (!marketOpen && !openOrb) return { status: 'SKIPPED', reason: 'market-closed', runDate };
 
   const inserted = await db
     .insert(agentRuns)
@@ -157,7 +169,13 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
     let trades = 0;
     const results: Array<{ key: string; equityPaisa: number; trades: number }> = [];
     for (const sleeve of sleeves) {
-      const r = await runSleeve(userId, sleeve, run.id, runDate, { execute: true });
+      let r;
+      if (sleeve.strategy === 'INTRADAY_ORB') {
+        r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen });
+      } else {
+        if (!marketOpen) continue; // legacy intraday sleeves only fill during hours
+        r = await runSleeve(userId, sleeve, run.id, runDate, { execute: true });
+      }
       const equity = await markSleeveToMarket(userId, sleeve.id, r.cashBalancePaisa);
       await snapshotSleeveEquity(userId, portfolio.id, sleeve.id, sleeve.name, equity, runDate);
       trades += r.tradesExecuted;

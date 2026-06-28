@@ -325,5 +325,36 @@ async function getDailyOHLC(symbol: string, range = '1y'): Promise<DailyBar[]> {
   }
 }
 
-export { getQuote, getQuotes, searchSymbol, getDailyCloses, getDailyOHLC };
+export interface IntradayBar { epoch: number; open: number; high: number; low: number; close: number }
+
+/**
+ * Intraday OHLC bars for today (default 5-min). For the same-day ORB sleeve.
+ * Not cached — bars change through the session and the runner ticks every ~30m.
+ * `epoch` is seconds; the caller converts to IST to find the opening range /
+ * square-off time. Empty on failure.
+ */
+async function getIntradayBars(symbol: string, interval = '5m'): Promise<IntradayBar[]> {
+  try {
+    const url = `${CHART_ENDPOINT}/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}&range=1d`;
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, cache: 'no-store' });
+    if (!response.ok) return [];
+    const data = (await response.json()) as YahooChartOHLC;
+    const result = data.chart?.result?.[0];
+    const ts = result?.timestamp;
+    const q = result?.indicators?.quote?.[0];
+    if (!ts || !q || data.chart.error) return [];
+    const bars: IntradayBar[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
+      if (o == null || h == null || l == null || c == null) continue;
+      bars.push({ epoch: ts[i], open: o, high: h, low: l, close: c });
+    }
+    return bars;
+  } catch (err) {
+    console.error(`Failed to fetch intraday bars for ${symbol}:`, err);
+    return [];
+  }
+}
+
+export { getQuote, getQuotes, searchSymbol, getDailyCloses, getDailyOHLC, getIntradayBars };
 export type { YahooQuote, YahooSearchResult };

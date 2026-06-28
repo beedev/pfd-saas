@@ -69,6 +69,9 @@ export async function POST(request: NextRequest) {
 
     const sleeve = (await db.select().from(agentSleeves).where(and(eq(agentSleeves.id, sleeveId), eq(agentSleeves.userId, userId))).limit(1))[0];
     if (!sleeve) return NextResponse.json({ error: 'sleeve not found' }, { status: 404 });
+    if (sleeve.strategy === 'INTRADAY_ORB') {
+      return NextResponse.json({ error: 'Intraday ORB is a forward-only live paper experiment — not backtested (no curve-fitting on ~60 days of 5-min bars).' }, { status: 400 });
+    }
 
     const wl = await db.select().from(agentWatchlist).where(and(eq(agentWatchlist.userId, userId), eq(agentWatchlist.sleeveId, sleeveId)));
     if (!wl.length) return NextResponse.json({ error: 'no instruments in this sleeve' }, { status: 400 });

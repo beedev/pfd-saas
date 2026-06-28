@@ -3465,8 +3465,8 @@ export type AgentTradeStatus = 'FILLED' | 'PENDING';
 export type AgentSide = 'LONG' | 'SHORT';
 
 // v2 — strategy sleeves (each a slice of capital with its own quant strategy).
-export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION';
-export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF';
+export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION' | 'INTRADAY_ORB';
+export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF' | 'STK_INTRADAY';
 export type AgentCadence = 'DAILY_OPEN' | 'INTRADAY';
 
 export interface AgentSleeveParams {
