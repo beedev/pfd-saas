@@ -41,6 +41,7 @@ import {
   Car,
   Tag,
   Banknote,
+  Bot,
   Home,
   Umbrella,
   CreditCard,
@@ -90,6 +91,7 @@ const navigation: NavSection[] = [
       { name: 'Small Savings', href: '/investments/small-savings', icon: PiggyBank },
       { name: 'Fixed Deposits', href: '/investments/fixed-deposits', icon: Banknote },
       { name: 'Recurring Deposits', href: '/investments/recurring-deposits', icon: Repeat },
+      { name: 'Analyst (Paper)', href: '/investments/analyst', icon: Bot },
       { name: 'Real Estate', href: '/investments/real-estate', icon: Home },
       // Sprint 5.10d — Forex deposits asset class.
       { name: 'Forex Deposits', href: '/investments/forex-deposits', icon: Banknote },

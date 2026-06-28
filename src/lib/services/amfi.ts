@@ -258,6 +258,55 @@ export async function getHistoricalNav(
 }
 
 /**
+ * Full NAV history for a scheme, chronologically ordered (oldest → newest),
+ * for the analyst agent's trailing-return signals. Reuses the same mfapi.in
+ * source + 30-min cache as {@link getHistoricalNavOn}. Empty array on failure.
+ */
+export async function getNavHistory(
+  schemeCode: string,
+): Promise<Array<{ dateIso: string; nav: number }>> {
+  try {
+    const code = schemeCode.trim();
+    if (!code || !/^\d+$/.test(code)) return [];
+
+    let dataPoints: MfApiDataPoint[];
+    const cached = historyCache.get(code);
+    if (cached && Date.now() - cached.timestamp < HISTORY_CACHE_TTL_MS) {
+      dataPoints = cached.data;
+    } else {
+      const response = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(code)}`, {
+        headers: { 'User-Agent': USER_AGENT },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        console.error(`mfapi.in fetch failed for ${code}: ${response.status}`);
+        return [];
+      }
+      const json: MfApiResponse = await response.json();
+      if (!json.data || !Array.isArray(json.data)) return [];
+      dataPoints = json.data;
+      historyCache.set(code, { data: dataPoints, timestamp: Date.now() });
+    }
+
+    const out: Array<{ dateIso: string; nav: number }> = [];
+    for (const point of dataPoints) {
+      const parts = point.date.split('-');
+      if (parts.length !== 3) continue;
+      const [dd, mm, yyyy] = parts;
+      const nav = parseFloat(point.nav);
+      if (!Number.isFinite(nav) || nav <= 0) continue;
+      out.push({ dateIso: `${yyyy}-${mm}-${dd}`, nav });
+    }
+    // mfapi.in is newest-first; sort ascending for the signal engine.
+    out.sort((a, b) => (a.dateIso < b.dateIso ? -1 : a.dateIso > b.dateIso ? 1 : 0));
+    return out;
+  } catch (err) {
+    console.error('NAV history lookup error:', err);
+    return [];
+  }
+}
+
+/**
  * Resolve an ISIN to an AMFI scheme code by looking up the daily NAV file.
  */
 export async function getSchemeCodeByIsin(isin: string): Promise<string | null> {

@@ -24,6 +24,7 @@ import { db, scheduledJobs, mfRedemptions, type JobType } from '@/db';
 import { runSipAutoExecute } from '@/lib/cron/sip-auto-execute';
 import { runAlertsCheck } from '@/lib/cron/alerts-check';
 import { runDailyDigestJob } from '@/lib/cron/daily-digest';
+import { runAgentDailyRun } from '@/lib/cron/agent-run';
 import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
@@ -42,6 +43,7 @@ const ADVANCE_MS: Record<JobType, number> = {
   daily_digest: 24 * 60 * 60 * 1000,
   alerts_check: 5 * 60 * 1000,
   sip_auto_execute: 24 * 60 * 60 * 1000,
+  agent_daily_run: 24 * 60 * 60 * 1000,
 };
 
 interface JobReport {
@@ -121,6 +123,10 @@ export async function POST(request: NextRequest) {
           // runs for every user, not only those with this job).
           report.result = await runSipAutoExecute(job.userId);
           break;
+        case 'agent_daily_run':
+          // No-ops unless the user has an enabled paper portfolio.
+          report.result = await runAgentDailyRun(job.userId);
+          break;
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);
       }
@@ -170,7 +176,7 @@ async function ensureDefaultJobsForAllUsers(): Promise<void> {
     INSERT INTO scheduled_jobs (user_id, job_type, enabled, next_run_at)
     SELECT u.id, j.jt, true, NOW()
     FROM "user" u
-    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute')) AS j(jt)
+    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run')) AS j(jt)
     WHERE NOT EXISTS (
       SELECT 1 FROM scheduled_jobs s WHERE s.user_id = u.id AND s.job_type = j.jt
     )

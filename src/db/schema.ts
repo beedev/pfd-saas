@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {
@@ -3441,3 +3441,225 @@ export type TelegramCommandLog = typeof telegramCommandLog.$inferSelect;
 export type NewTelegramCommandLog = typeof telegramCommandLog.$inferInsert;
 export type AssistantApiSetting = typeof assistantApiSettings.$inferSelect;
 export type NewAssistantApiSetting = typeof assistantApiSettings.$inferInsert;
+
+// ============================================================================
+// FINANCIAL ANALYST AGENT (autonomous paper-trading advisor)
+// ----------------------------------------------------------------------------
+// Monitors stocks / mutual funds / futures, computes deterministic signals,
+// and autonomously executes PAPER trades with virtual money to track how the
+// analysis performs over time (equity curve vs benchmark).
+//
+// SAFETY INVARIANT: the agent engine touches ONLY these agent* tables (plus
+// price_snapshots rows tagged source='AGENT_*'). It must NEVER read or write
+// real holdings / mutualFunds / investmentTransactions. Paper trading only.
+// All money in integer paisa; quantities/percentages are real; dates text ISO.
+// ============================================================================
+
+export type AgentAssetClass = 'STOCK' | 'MF' | 'FUTURE';
+export type AgentRiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';
+export type AgentRunStatus = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+export type AgentRecommendation = 'BUY' | 'SELL' | 'HOLD';
+export type AgentAction = 'BUY' | 'SELL' | 'HOLD' | 'WATCH';
+export type AgentTradeType = 'BUY' | 'SELL';
+export type AgentTradeStatus = 'FILLED' | 'PENDING';
+export type AgentSide = 'LONG' | 'SHORT';
+
+export interface AgentSignalsJson {
+  momentum1mPct?: number;
+  momentum3mPct?: number;
+  sma50Paisa?: number;
+  sma200Paisa?: number;
+  ema12Paisa?: number;
+  ema26Paisa?: number;
+  crossover?: 'GOLDEN' | 'DEATH' | 'NONE';
+  fiftyTwoWkPositionPct?: number;
+  trailing?: { m1?: number; m3?: number; m6?: number; m12?: number };
+  trendPct?: number;
+  volatilityPct?: number;
+}
+
+// One virtual portfolio per user — also holds the agent's per-user settings.
+export const agentPortfolios = pgTable('agent_portfolios', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull().default('Paper Portfolio'),
+  mode: text('mode').notNull().default('PAPER'),
+  startingCapitalPaisa: bigint('starting_capital_paisa', { mode: 'number' }).notNull().default(100000000),
+  cashBalancePaisa: bigint('cash_balance_paisa', { mode: 'number' }).notNull().default(100000000),
+  benchmarkSymbol: text('benchmark_symbol').notNull().default('^NSEI'),
+  riskProfile: text('risk_profile').$type<AgentRiskProfile>().notNull().default('BALANCED'),
+  enabled: boolean('enabled').notNull().default(false),       // opt-in: cron skips until true
+  telegramEnabled: boolean('telegram_enabled').notNull().default(true),
+  maxPositions: integer('max_positions').notNull().default(12),
+  perPositionPct: real('per_position_pct').notNull().default(8),
+  cashBufferPct: real('cash_buffer_pct').notNull().default(10),
+  lastRunDate: text('last_run_date'),                          // IST YYYY-MM-DD
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  uniqueIndex('agent_portfolios_user_id_idx').on(table.userId),
+]);
+
+export type AgentPortfolio = typeof agentPortfolios.$inferSelect;
+export type NewAgentPortfolio = typeof agentPortfolios.$inferInsert;
+
+// Instruments the agent monitors.
+export const agentWatchlist = pgTable('agent_watchlist', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
+  symbol: text('symbol').notNull().default(''),               // Yahoo symbol (STOCK/FUTURE)
+  schemeCode: text('scheme_code').notNull().default(''),      // AMFI scheme code (MF)
+  isin: text('isin'),
+  name: text('name').notNull(),
+  contractMultiplier: real('contract_multiplier').notNull().default(1),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_watchlist_user_id_idx').on(table.userId),
+  uniqueIndex('agent_watchlist_unique_idx').on(table.userId, table.assetClass, table.symbol, table.schemeCode),
+]);
+
+export type AgentWatchlistItem = typeof agentWatchlist.$inferSelect;
+export type NewAgentWatchlistItem = typeof agentWatchlist.$inferInsert;
+
+// One row per daily run — the idempotency anchor (unique on user+runDate).
+export const agentRuns = pgTable('agent_runs', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  runDate: text('run_date').notNull(),                        // IST YYYY-MM-DD
+  status: text('status').$type<AgentRunStatus>().notNull().default('RUNNING'),
+  startedAt: timestamp('started_at', { mode: 'date' }).defaultNow(),
+  finishedAt: timestamp('finished_at', { mode: 'date' }),
+  quotesFetched: integer('quotes_fetched').notNull().default(0),
+  signalsComputed: integer('signals_computed').notNull().default(0),
+  tradesExecuted: integer('trades_executed').notNull().default(0),
+  equityValuePaisa: bigint('equity_value_paisa', { mode: 'number' }),
+  benchmarkValuePaisa: bigint('benchmark_value_paisa', { mode: 'number' }),
+  digestText: text('digest_text'),
+  error: text('error'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_runs_user_id_idx').on(table.userId),
+  uniqueIndex('agent_runs_user_date_idx').on(table.userId, table.runDate),
+]);
+
+export type AgentRun = typeof agentRuns.$inferSelect;
+export type NewAgentRun = typeof agentRuns.$inferInsert;
+
+// Deterministic signals per instrument per run.
+export const agentSignals = pgTable('agent_signals', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  runId: integer('run_id').notNull().references(() => agentRuns.id, { onDelete: 'cascade' }),
+  runDate: text('run_date').notNull(),
+  assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
+  symbol: text('symbol').notNull(),
+  name: text('name').notNull(),
+  lastPricePaisa: bigint('last_price_paisa', { mode: 'number' }),
+  score: real('score').notNull().default(0),
+  recommendation: text('recommendation').$type<AgentRecommendation>().notNull().default('HOLD'),
+  signalsJson: jsonb('signals_json').$type<AgentSignalsJson>(),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_signals_user_date_idx').on(table.userId, table.runDate),
+  uniqueIndex('agent_signals_run_symbol_idx').on(table.runId, table.symbol),
+]);
+
+export type AgentSignal = typeof agentSignals.$inferSelect;
+export type NewAgentSignal = typeof agentSignals.$inferInsert;
+
+// Suggestions / decisions log (with grounded LLM rationale).
+export const agentDecisions = pgTable('agent_decisions', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  runId: integer('run_id').notNull().references(() => agentRuns.id, { onDelete: 'cascade' }),
+  signalId: integer('signal_id'),
+  action: text('action').$type<AgentAction>().notNull(),
+  assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
+  symbol: text('symbol').notNull(),
+  name: text('name').notNull(),
+  quantity: real('quantity'),
+  pricePaisa: bigint('price_paisa', { mode: 'number' }),
+  amountPaisa: bigint('amount_paisa', { mode: 'number' }),
+  confidence: text('confidence'),
+  rationale: text('rationale'),
+  executed: boolean('executed').notNull().default(false),
+  tradeId: integer('trade_id'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_decisions_user_run_idx').on(table.userId, table.runId),
+]);
+
+export type AgentDecision = typeof agentDecisions.$inferSelect;
+export type NewAgentDecision = typeof agentDecisions.$inferInsert;
+
+// Paper-trade ledger (mirrors investmentTransactions + mfRedemptions deferred fill).
+export const agentTrades = pgTable('agent_trades', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  decisionId: integer('decision_id'),
+  runId: integer('run_id'),
+  type: text('type').$type<AgentTradeType>().notNull(),
+  assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
+  symbol: text('symbol').notNull().default(''),
+  schemeCode: text('scheme_code').notNull().default(''),
+  name: text('name').notNull(),
+  side: text('side').$type<AgentSide>().notNull().default('LONG'),
+  quantity: real('quantity').notNull(),
+  contractMultiplier: real('contract_multiplier').notNull().default(1),
+  pricePerUnitPaisa: bigint('price_per_unit_paisa', { mode: 'number' }).notNull(),
+  grossAmountPaisa: bigint('gross_amount_paisa', { mode: 'number' }).notNull(),
+  feesPaisa: bigint('fees_paisa', { mode: 'number' }).notNull().default(0),
+  netAmountPaisa: bigint('net_amount_paisa', { mode: 'number' }).notNull(),
+  status: text('status').$type<AgentTradeStatus>().notNull().default('FILLED'),
+  tradeDate: text('trade_date').notNull(),
+  fillDate: text('fill_date'),
+  applicableNavDate: text('applicable_nav_date'),
+  realizedPnlPaisa: bigint('realized_pnl_paisa', { mode: 'number' }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_trades_user_id_idx').on(table.userId),
+  index('agent_trades_portfolio_idx').on(table.userId, table.portfolioId),
+  index('agent_trades_date_idx').on(table.tradeDate),
+  // One open deferred (PENDING) fill per instrument per portfolio.
+  uniqueIndex('agent_trades_one_pending_idx')
+    .on(table.portfolioId, table.symbol, table.schemeCode)
+    .where(sql`status = 'PENDING'`),
+]);
+
+export type AgentTrade = typeof agentTrades.$inferSelect;
+export type NewAgentTrade = typeof agentTrades.$inferInsert;
+
+// Current open paper positions (reconcilable from the ledger; stored for reads).
+export const agentPositions = pgTable('agent_positions', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  watchlistId: integer('watchlist_id'),
+  assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
+  symbol: text('symbol').notNull().default(''),
+  schemeCode: text('scheme_code').notNull().default(''),
+  name: text('name').notNull(),
+  side: text('side').$type<AgentSide>().notNull().default('LONG'),
+  quantity: real('quantity').notNull(),
+  contractMultiplier: real('contract_multiplier').notNull().default(1),
+  avgPricePaisa: bigint('avg_price_paisa', { mode: 'number' }).notNull(),
+  lastPricePaisa: bigint('last_price_paisa', { mode: 'number' }),
+  marketValuePaisa: bigint('market_value_paisa', { mode: 'number' }),
+  unrealizedPnlPaisa: bigint('unrealized_pnl_paisa', { mode: 'number' }),
+  openedDate: text('opened_date').notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_positions_user_id_idx').on(table.userId),
+  uniqueIndex('agent_positions_unique_idx').on(table.portfolioId, table.assetClass, table.symbol),
+]);
+
+export type AgentPosition = typeof agentPositions.$inferSelect;
+export type NewAgentPosition = typeof agentPositions.$inferInsert;

@@ -215,5 +215,73 @@ export async function getFxRatesToInr(
   return result;
 }
 
-export { getQuote, getQuotes, searchSymbol };
+// ─── Daily close history — for the analyst agent's signal engine ──────
+// SMA/EMA/momentum need a daily close series, which the latest-quote calls
+// above don't provide. Reuse the same chart endpoint with a wider range and
+// read the timestamp[] + indicators.quote[0].close[] arrays. Separate 30-min
+// cache (history changes at most once a day; no need for the 5-min quote TTL).
+
+export interface DailyClose {
+  date: string; // ISO YYYY-MM-DD (UTC date of the bar)
+  close: number; // native currency (e.g. INR for .NS)
+}
+
+interface YahooChartHistory {
+  chart: {
+    result: Array<{
+      timestamp?: number[];
+      indicators?: { quote?: Array<{ close?: Array<number | null> }> };
+    }> | null;
+    error: { code: string; description: string } | null;
+  };
+}
+
+const historyCache = new Map<string, { closes: DailyClose[]; timestamp: number }>();
+const HISTORY_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Daily closing prices for a symbol over the given range (default 1 year).
+ * Returns chronologically-ordered bars with non-null closes. Empty array on
+ * failure (callers skip the instrument). Stale-on-error like getQuote.
+ */
+async function getDailyCloses(symbol: string, range = '1y'): Promise<DailyClose[]> {
+  const key = `${symbol}|${range}`;
+  const cached = historyCache.get(key);
+  if (cached && Date.now() - cached.timestamp < HISTORY_TTL_MS) {
+    return cached.closes;
+  }
+
+  try {
+    const url = `${CHART_ENDPOINT}/${encodeURIComponent(symbol)}?interval=1d&range=${encodeURIComponent(range)}`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      console.error(`Yahoo history error for ${symbol}: ${response.status}`);
+      return cached?.closes ?? [];
+    }
+    const data = (await response.json()) as YahooChartHistory;
+    const result = data.chart?.result?.[0];
+    const ts = result?.timestamp;
+    const closes = result?.indicators?.quote?.[0]?.close;
+    if (!ts || !closes || data.chart.error) {
+      console.warn(`No history data for symbol: ${symbol}`);
+      return cached?.closes ?? [];
+    }
+    const out: DailyClose[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const c = closes[i];
+      if (c == null || !Number.isFinite(c)) continue; // skip gaps/holidays
+      out.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), close: c });
+    }
+    historyCache.set(key, { closes: out, timestamp: Date.now() });
+    return out;
+  } catch (err) {
+    console.error(`Failed to fetch history for ${symbol}:`, err);
+    return cached?.closes ?? [];
+  }
+}
+
+export { getQuote, getQuotes, searchSymbol, getDailyCloses };
 export type { YahooQuote, YahooSearchResult };
