@@ -11,7 +11,7 @@ import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getInstrumentHistory, type InstrumentRef } from '@/lib/agent/market-data';
 import { getDailyCloses } from '@/lib/services/yahoo-finance';
 import { runBacktest, type BacktestInstrument } from '@/lib/agent/backtest/engine';
-import { DEFAULT_COST_MODEL } from '@/lib/agent/backtest/costs';
+import { DEFAULT_COST_MODEL, roundTripCostPct } from '@/lib/agent/backtest/costs';
 
 /** Downsample an equity curve to ~400 points for storage/UI. */
 function downsample<T>(arr: T[], max = 400): T[] {
@@ -128,6 +128,9 @@ export async function POST(request: NextRequest) {
     const bench = benchmarkOverCurve(result.equityCurve, idx);
     const metrics: Record<string, number> = { ...(result.metrics as unknown as Record<string, number>) };
     if (bench) { metrics.benchmarkTotalPct = bench.totalPct; metrics.benchmarkCagrPct = bench.cagrPct; }
+    // Edge hurdle: what each round trip must clear before tax (intraday vs delivery).
+    metrics.breakevenIntradayPct = roundTripCostPct(DEFAULT_COST_MODEL, true);
+    metrics.breakevenDeliveryPct = roundTripCostPct(DEFAULT_COST_MODEL, false);
 
     const curve = downsample(result.equityCurve.map((p) => ({ ...p, benchmarkClose: bench?.closeByDate.get(p.date) })));
     const fromDate = result.equityCurve[0]?.date;

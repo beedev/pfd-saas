@@ -27,6 +27,8 @@ import { buildRationale } from './rationale';
 import { applyRiskControls } from './risk';
 import { hasFreshNegativeNews } from '../news/ingest';
 import { agentSleeveEquitySymbol } from './equity-curve';
+import { DEFAULT_COST_MODEL, tradeCostPaisa, cgTaxPaisa } from '../backtest/costs';
+import { daysBetween } from '../strategies/types';
 import type { InstrumentInput, OpenPositionLite, SleeveContext } from '../strategies/types';
 
 export interface SleeveRunResult {
@@ -181,21 +183,29 @@ export async function runSleeve(
       cash -= net; trades += 1;
       await db.update(agentDecisions).set({ tradeId: trade.id }).where(eq(agentDecisions.id, decision.id));
     } else {
-      // SELL — close (or reduce) the position, book realized P&L.
+      // SELL — close (or reduce) the position, book realized P&L NET of the
+      // holding-aware round-trip cost (same-day → intraday rates, overnight →
+      // delivery) and capital-gains/slab tax. Honest paper accounting.
       const existing = posRows.find((p) => p.assetClass === it.assetClass && p.symbol === it.symbol && p.schemeCode === it.schemeCode);
       if (!existing) continue;
       const qty = Math.min(it.quantity, existing.quantity);
-      const realized = Math.round((it.pricePaisa - existing.avgPricePaisa) * qty * existing.contractMultiplier);
+      const holdDays = daysBetween(existing.openedDate, runDate);
+      const sellGross = Math.round(it.pricePaisa * qty * existing.contractMultiplier);
+      const grossPnl = Math.round((it.pricePaisa - existing.avgPricePaisa) * qty * existing.contractMultiplier);
+      const cost = tradeCostPaisa(sellGross, it.assetClass, true, holdDays, DEFAULT_COST_MODEL);
+      const tax = cgTaxPaisa(grossPnl, holdDays, DEFAULT_COST_MODEL);
+      const proceeds = sellGross - cost - tax;
+      const realized = grossPnl - cost - tax;
       const [trade] = await db.insert(agentTrades).values({
         userId, portfolioId: sleeve.portfolioId, sleeveId: sleeve.id, decisionId: decision.id, runId,
         type: 'SELL', assetClass: it.assetClass, symbol: it.symbol, schemeCode: it.schemeCode, name: it.name, side: existing.side,
         quantity: qty, contractMultiplier: existing.contractMultiplier, pricePerUnitPaisa: it.pricePaisa,
-        grossAmountPaisa: net, netAmountPaisa: net, status: 'FILLED', tradeDate: runDate, fillDate: runDate, realizedPnlPaisa: realized,
+        grossAmountPaisa: sellGross, netAmountPaisa: proceeds, status: 'FILLED', tradeDate: runDate, fillDate: runDate, realizedPnlPaisa: realized,
       }).returning();
       const remaining = existing.quantity - qty;
       if (remaining <= 0.0000001) await db.delete(agentPositions).where(eq(agentPositions.id, existing.id));
       else await db.update(agentPositions).set({ quantity: remaining, updatedAt: new Date() }).where(eq(agentPositions.id, existing.id));
-      cash += net; trades += 1;
+      cash += proceeds; trades += 1;
       await db.update(agentDecisions).set({ tradeId: trade.id }).where(eq(agentDecisions.id, decision.id));
     }
   }

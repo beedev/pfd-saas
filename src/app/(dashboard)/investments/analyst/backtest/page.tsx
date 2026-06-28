@@ -20,6 +20,7 @@ interface Metrics {
   calmar: number; hitRatePct: number; profitFactor: number; turnoverPct: number; trades: number; psr: number; bars: number;
   finalEquityPaisa: number; startEquityPaisa: number;
   benchmarkTotalPct?: number; benchmarkCagrPct?: number;
+  breakevenIntradayPct?: number; breakevenDeliveryPct?: number;
 }
 interface Backtest {
   id: number; sleeveId: number; strategy: string; label: string | null; fromDate: string | null; toDate: string | null;
@@ -110,6 +111,15 @@ export default function BacktestPage() {
                 <Metric label="PSR (Sharpe>0)" value={`${num(m.psr * 100, 0)}%`} good={m.psr >= 0.95} />
                 <Metric label="Final equity" value={inr(m.finalEquityPaisa)} good={m.finalEquityPaisa >= m.startEquityPaisa} />
               </div>
+              {m.breakevenIntradayPct != null && (
+                <div className="mt-3 rounded border border-[var(--dxp-border-light)] bg-[var(--dxp-surface)] p-3 text-xs text-[var(--dxp-text-secondary)]">
+                  <span className="font-bold text-[var(--dxp-text)]">Edge hurdle</span> — each round trip must clear costs before it makes a rupee:
+                  {' '}<span className="font-mono">same-day (intraday) ≈ {num(m.breakevenIntradayPct)}%</span>,
+                  {' '}<span className="font-mono">overnight (delivery) ≈ {num(m.breakevenDeliveryPct)}%</span>,
+                  {' '}<span className="font-mono">+ tax on gains (intraday slab / {num(20,0)}% STCG)</span>.
+                  A strategy holding 2–3 days pays the delivery hurdle; only genuine same-day trades pay the cheaper intraday one.
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>
