@@ -54,6 +54,25 @@ export async function POST(request: NextRequest) {
     }
     if (!instruments.length) return NextResponse.json({ error: 'no usable history' }, { status: 400 });
 
+    // Guard against history-alignment artifacts: drop instruments whose data has
+    // gone STALE (defunct/old scheme codes that stop mid-window — their frozen
+    // price corrupts the replay), then cap everyone to a recent aligned window so
+    // funds are comparable and a single 2007-era series can't span 19 years.
+    const lastOf = (i: BacktestInstrument) => i.history[i.history.length - 1].date;
+    const globalLast = instruments.map(lastOf).sort().at(-1)!;
+    const gl = new Date(globalLast + 'T00:00:00Z');
+    const staleCutoff = new Date(gl); staleCutoff.setUTCDate(staleCutoff.getUTCDate() - 45);
+    const minDate = new Date(gl); minDate.setUTCFullYear(minDate.getUTCFullYear() - 8);
+    const staleISO = staleCutoff.toISOString().slice(0, 10);
+    const minISO = minDate.toISOString().slice(0, 10);
+    const aligned = instruments
+      .filter((i) => lastOf(i) >= staleISO)                                  // drop defunct codes
+      .map((i) => ({ ...i, history: i.history.filter((p) => p.date >= minISO) })) // cap to ~8y window
+      .filter((i) => i.history.length >= 60);
+    if (!aligned.length) return NextResponse.json({ error: 'no usable history after alignment' }, { status: 400 });
+    instruments.length = 0;
+    instruments.push(...aligned);
+
     // #5 regime series: Nifty 50 above its trailing 200-DMA = risk-on (per date, no look-ahead).
     const regimeRiskOnByDate = new Map<string, boolean>();
     try {
