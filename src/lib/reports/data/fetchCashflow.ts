@@ -140,7 +140,7 @@ export async function fetchCashflow(params: ReportParams): Promise<CashflowRepor
   // Other sources — split into interest / dividend / other buckets
   // and spread each evenly across 12 months.
   const interestAnnual = otherRows
-    .filter((r) => ['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST'].includes(r.source))
+    .filter((r) => ['BANK_INTEREST', 'FD_INTEREST', 'RD_INTEREST', 'PF_INTEREST'].includes(r.source))
     .reduce((s, r) => s + (r.amountPaisa || 0), 0);
   if (interestAnnual > 0) {
     const m = Array.from({ length: 12 }, () => Math.round(interestAnnual / 12));
@@ -164,7 +164,7 @@ export async function fetchCashflow(params: ReportParams): Promise<CashflowRepor
   const otherAnnual = otherRows
     .filter(
       (r) =>
-        !['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST', 'DIVIDEND'].includes(r.source),
+        !['BANK_INTEREST', 'FD_INTEREST', 'RD_INTEREST', 'PF_INTEREST', 'DIVIDEND'].includes(r.source),
     )
     .reduce((s, r) => s + (r.amountPaisa || 0), 0);
   if (otherAnnual > 0) {

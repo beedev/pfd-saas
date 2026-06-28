@@ -1778,6 +1778,47 @@ export const fixedDeposits = pgTable('fixed_deposits', {
 export type FixedDeposit = typeof fixedDeposits.$inferSelect;
 export type NewFixedDeposit = typeof fixedDeposits.$inferInsert;
 
+// ─── Recurring Deposits ─────────────────────────────────────────────────
+// A fixed monthly installment for `tenureMonths`, interest compounded
+// (quarterly by Indian convention) and paid with the corpus at maturity.
+// Unlike an FD, the principal grows installment-by-installment, so maturity
+// is the sum of each installment compounded for its remaining term.
+export type RDStatus = 'ACTIVE' | 'MATURED' | 'BROKEN';
+export type RDCompoundingFreq = 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY' | 'YEARLY';
+
+export const recurringDeposits = pgTable('recurring_deposits', {
+  id: serial('id').primaryKey(),
+  bankName: text('bank_name').notNull(),
+  accountNumber: text('account_number'),                      // RD account / receipt no
+  monthlyInstallmentPaisa: bigint('monthly_installment_paisa', { mode: 'number' }).notNull(),
+  interestRate: real('interest_rate').notNull(),               // annual %
+  compoundingFreq: text('compounding_freq')
+    .$type<RDCompoundingFreq>()
+    .default('QUARTERLY'),
+  tenureMonths: integer('tenure_months').notNull(),            // number of monthly installments
+  startDate: text('start_date').notNull(),                     // ISO date — first installment
+  maturityDate: text('maturity_date').notNull(),               // ISO date — derived (start + tenure)
+  totalDepositPaisa: bigint('total_deposit_paisa', { mode: 'number' }),     // derived = installment × tenure
+  maturityAmountPaisa: bigint('maturity_amount_paisa', { mode: 'number' }), // auto-computed
+  status: text('status').$type<RDStatus>().default('ACTIVE'),
+  autoRenew: boolean('auto_renew').default(false),
+  prematureWithdrawalPenaltyPct: real('premature_withdrawal_penalty_pct').default(1.0),
+  jointHolderName: text('joint_holder_name'),
+  documentPath: text('document_path'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('rd_bank_idx').on(table.bankName),
+  index('rd_status_idx').on(table.status),
+  index('rd_maturity_idx').on(table.maturityDate),
+  index('recurring_deposits_user_id_idx').on(table.userId),
+]);
+
+export type RecurringDeposit = typeof recurringDeposits.$inferSelect;
+export type NewRecurringDeposit = typeof recurringDeposits.$inferInsert;
+
 // ─── Forex deposits — Sprint 5.10 ─────────────────────────────────────
 // Foreign-currency holdings (NRE FX accounts, multi-currency wallets,
 // foreign FDs, GIFT-City balances). Amounts kept in the foreign currency
@@ -3152,6 +3193,7 @@ export type NewPresumptiveIncome = typeof presumptiveIncome.$inferInsert;
 export type OtherIncomeSource =
   | 'BANK_INTEREST'
   | 'FD_INTEREST'
+  | 'RD_INTEREST'
   | 'PF_INTEREST'
   | 'DIVIDEND'
   // Sprint 3 Phase 2 — broader categorisation for the /income summary.
@@ -3169,9 +3211,12 @@ export type OtherIncomeSource =
 //   FD_AUTO      — auto-derived FD interest for one (FD × FY); sourceRefId =
 //                  fixed_deposits.id. Regenerated/cleaned by syncFdInterest, so
 //                  these rows must never be hand-edited (they'll be overwritten).
+//   RD_AUTO      — auto-derived RD interest, booked once in the maturity FY;
+//                  sourceRefId = recurring_deposits.id. Regenerated/cleaned by
+//                  syncRdInterest, so these rows must never be hand-edited.
 //   AIS_ACCEPTED — accepted from the AIS Gap Check (residual interest / dividend
 //                  the app can't derive). sourceRefId is null.
-export type OtherIncomeSourceKind = 'MANUAL' | 'FD_AUTO' | 'AIS_ACCEPTED';
+export type OtherIncomeSourceKind = 'MANUAL' | 'FD_AUTO' | 'RD_AUTO' | 'AIS_ACCEPTED';
 
 export const otherSourcesIncome = pgTable('other_sources_income', {
   id: serial('id').primaryKey(),

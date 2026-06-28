@@ -54,6 +54,7 @@ const VALID: ItrForm[] = ['ITR-1', 'ITR-2', 'ITR-3', 'ITR-4'];
 const ITR1_OTHER_SOURCES: OtherIncomeSource[] = [
   'BANK_INTEREST',
   'FD_INTEREST',
+  'RD_INTEREST',
   'PF_INTEREST',
   'DIVIDEND',
 ];

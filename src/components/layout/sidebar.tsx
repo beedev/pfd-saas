@@ -89,6 +89,7 @@ const navigation: NavSection[] = [
       { name: 'EPF', href: '/investments/pf', icon: ShieldCheck },
       { name: 'Small Savings', href: '/investments/small-savings', icon: PiggyBank },
       { name: 'Fixed Deposits', href: '/investments/fixed-deposits', icon: Banknote },
+      { name: 'Recurring Deposits', href: '/investments/recurring-deposits', icon: Repeat },
       { name: 'Real Estate', href: '/investments/real-estate', icon: Home },
       // Sprint 5.10d — Forex deposits asset class.
       { name: 'Forex Deposits', href: '/investments/forex-deposits', icon: Banknote },

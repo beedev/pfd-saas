@@ -20,13 +20,14 @@ import { and, eq } from 'drizzle-orm';
 import { db, aisImports, otherSourcesIncome, type OtherIncomeSource } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { syncFdInterest } from '@/lib/finance/fd-interest';
+import { syncRdInterest } from '@/lib/finance/rd-interest';
 
 export const runtime = 'nodejs';
 
 const TOLERANCE_PAISA = 10_000; // ₹100 — don't bother booking sub-₹100 residuals.
 
 // Books that count toward each family (must mirror it-gap-check.ts).
-const INTEREST_SRC = new Set<OtherIncomeSource>(['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST']);
+const INTEREST_SRC = new Set<OtherIncomeSource>(['BANK_INTEREST', 'FD_INTEREST', 'RD_INTEREST', 'PF_INTEREST']);
 
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -47,8 +48,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "family must be 'interest' or 'dividend'" }, { status: 400 });
   }
 
-  // Keep auto-derived FD interest current so the residual is computed against it.
+  // Keep auto-derived FD + RD interest current so the residual is computed against it.
   await syncFdInterest(userId);
+  await syncRdInterest(userId);
 
   // Department total for this family from the stored TIS categories.
   const tisRow = (

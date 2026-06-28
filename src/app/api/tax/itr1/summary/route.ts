@@ -54,6 +54,7 @@ const ITR1_CAP_PAISA = 50 * 100 * 100000;
 const ITR1_OTHER_SOURCES: OtherIncomeSource[] = [
   'BANK_INTEREST',
   'FD_INTEREST',
+  'RD_INTEREST',
   'PF_INTEREST',
   'DIVIDEND',
 ];

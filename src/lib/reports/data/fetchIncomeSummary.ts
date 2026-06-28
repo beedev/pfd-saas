@@ -117,7 +117,7 @@ export async function fetchIncomeSummary(params: ReportParams): Promise<IncomeSu
   // a dedicated other-sources value — it lives in the property's
   // rental_history table — so the bucket here is always 0; the user-
   // facing income summary still shows the row for completeness.
-  const INTEREST_SOURCES = new Set(['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST']);
+  const INTEREST_SOURCES = new Set(['BANK_INTEREST', 'FD_INTEREST', 'RD_INTEREST', 'PF_INTEREST']);
   const interestPaisa = otherRows
     .filter((r) => INTEREST_SOURCES.has(r.source))
     .reduce((s, r) => s + (r.amountPaisa || 0), 0);

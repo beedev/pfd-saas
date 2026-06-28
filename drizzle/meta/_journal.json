@@ -344,6 +344,13 @@
       "when": 1782271537803,
       "tag": "0048_nebulous_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1782531763761,
+      "tag": "0049_fast_bastion",
+      "breakpoints": true
     }
   ]
 }

@@ -216,7 +216,7 @@ export async function computeItGapCheck(userId: string, fy: string): Promise<ItG
   const booksSaleConsideration = cgRows
     .filter((r) => SECURITIES_MF.has(r.assetType))
     .reduce((s, r) => s + (r.salePrice || 0), 0);
-  const INTEREST_SRC = new Set(['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST']);
+  const INTEREST_SRC = new Set(['BANK_INTEREST', 'FD_INTEREST', 'RD_INTEREST', 'PF_INTEREST']);
   const booksInterest = otherRows
     .filter((r) => INTEREST_SRC.has(r.source))
     .reduce((s, r) => s + (r.amountPaisa || 0), 0);

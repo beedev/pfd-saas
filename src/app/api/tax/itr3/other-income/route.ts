@@ -3,7 +3,7 @@ import { and, eq, desc } from 'drizzle-orm';
 import { db, otherSourcesIncome } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
-const VALID_SOURCES = ['BANK_INTEREST', 'FD_INTEREST', 'PF_INTEREST', 'DIVIDEND', 'OTHER'] as const;
+const VALID_SOURCES = ['BANK_INTEREST', 'FD_INTEREST', 'RD_INTEREST', 'PF_INTEREST', 'DIVIDEND', 'OTHER'] as const;
 
 export async function GET(request: NextRequest) {
   const userId = await getSessionUserId();
