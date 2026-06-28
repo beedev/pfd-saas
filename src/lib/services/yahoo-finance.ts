@@ -283,5 +283,47 @@ async function getDailyCloses(symbol: string, range = '1y'): Promise<DailyClose[
   }
 }
 
-export { getQuote, getQuotes, searchSymbol, getDailyCloses };
+export interface DailyBar { date: string; open: number; high: number; low: number; close: number }
+
+interface YahooChartOHLC {
+  chart: {
+    result: Array<{
+      timestamp?: number[];
+      indicators?: { quote?: Array<{ open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[] }> };
+    }> | null;
+    error: { code: string; description: string } | null;
+  };
+}
+
+const ohlcCache = new Map<string, { bars: DailyBar[]; timestamp: number }>();
+
+/** Daily OHLC bars for a symbol (for candlestick charts). Empty on failure. */
+async function getDailyOHLC(symbol: string, range = '1y'): Promise<DailyBar[]> {
+  const key = `${symbol}|${range}`;
+  const cached = ohlcCache.get(key);
+  if (cached && Date.now() - cached.timestamp < HISTORY_TTL_MS) return cached.bars;
+  try {
+    const url = `${CHART_ENDPOINT}/${encodeURIComponent(symbol)}?interval=1d&range=${encodeURIComponent(range)}`;
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, cache: 'no-store' });
+    if (!response.ok) return cached?.bars ?? [];
+    const data = (await response.json()) as YahooChartOHLC;
+    const result = data.chart?.result?.[0];
+    const ts = result?.timestamp;
+    const q = result?.indicators?.quote?.[0];
+    if (!ts || !q || data.chart.error) return cached?.bars ?? [];
+    const bars: DailyBar[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
+      if (o == null || h == null || l == null || c == null) continue;
+      bars.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), open: o, high: h, low: l, close: c });
+    }
+    ohlcCache.set(key, { bars, timestamp: Date.now() });
+    return bars;
+  } catch (err) {
+    console.error(`Failed to fetch OHLC for ${symbol}:`, err);
+    return cached?.bars ?? [];
+  }
+}
+
+export { getQuote, getQuotes, searchSymbol, getDailyCloses, getDailyOHLC };
 export type { YahooQuote, YahooSearchResult };
