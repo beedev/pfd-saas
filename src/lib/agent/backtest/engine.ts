@@ -7,6 +7,7 @@
 
 import type { AgentStrategy, AgentSleeve, AgentAssetClass, AgentSide } from '@/db';
 import { getStrategy } from '../strategies/registry';
+import { applyRiskControls } from '../engine/risk';
 import type { SleeveContext, InstrumentInput, OpenPositionLite } from '../strategies/types';
 import { posKey, daysBetween } from '../strategies/types';
 import type { PricePoint } from '../market-data';
@@ -30,6 +31,7 @@ export interface BacktestInput {
   instruments: BacktestInstrument[];
   warmupBars?: number;
   costModel?: CostModel;
+  regimeRiskOnByDate?: Map<string, boolean>; // #5 index-regime gate per date
 }
 
 export interface BacktestOutput {
@@ -57,6 +59,7 @@ export function runBacktest(input: BacktestInput): BacktestOutput {
   const ptr = input.instruments.map(() => -1);
   const positions = new Map<string, SimPos>();
   let cash = input.allocationPaisa;
+  let peak = input.allocationPaisa;
   let buyNotional = 0;
   const closedPnls: number[] = [];
   const curve: EquityPoint[] = [];
@@ -89,12 +92,20 @@ export function runBacktest(input: BacktestInput): BacktestOutput {
       side: p.side, quantity: p.quantity, avgPricePaisa: p.avgPricePaisa, contractMultiplier: p.contractMultiplier, openedDate: p.openedDate,
     }));
 
+    // Pre-trade equity (for kill-switch) + peak tracking.
+    let preVal = 0;
+    for (const [k, p] of positions) preVal += Math.round((lastClose.get(k) ?? p.avgPricePaisa) * p.quantity * p.contractMultiplier);
+    const preEquity = cash + preVal;
+    if (preEquity > peak) peak = preEquity;
+
     const ctx: SleeveContext = {
-      sleeve: { allocationPaisa: input.allocationPaisa, cashBalancePaisa: cash } as unknown as AgentSleeve,
+      sleeve: { allocationPaisa: input.allocationPaisa, cashBalancePaisa: cash, strategy: input.strategy } as unknown as AgentSleeve,
       cashPaisa: cash, positions: positionsLite, instruments: built, params: input.params, runDate: t,
+      regimeRiskOn: input.regimeRiskOnByDate ? (input.regimeRiskOnByDate.get(t) ?? true) : true,
+      currentEquityPaisa: preEquity, peakEquityPaisa: peak,
     };
 
-    for (const it of strat.run(ctx)) {
+    for (const it of applyRiskControls(ctx, strat.run(ctx))) {
       if (it.action !== 'BUY' && it.action !== 'SELL') continue;
       const key = posKey(it.assetClass, it.symbol, it.schemeCode);
       if (it.action === 'BUY') {

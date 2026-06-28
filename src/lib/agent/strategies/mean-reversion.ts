@@ -23,6 +23,7 @@ export const meanReversionStrategy: Strategy = {
     const alloc = ctx.sleeve.allocationPaisa;
     const buffer = Math.round((bufferPct / 100) * alloc);
     const perSlot = Math.round((perPct / 100) * alloc);
+    const regimeOk = ctx.regimeRiskOn !== false; // #5 only dip-buy when index regime is risk-on
 
     const held = new Map<string, OpenPositionLite>();
     for (const pos of ctx.positions) held.set(posKey(pos.assetClass, pos.symbol, pos.schemeCode), pos);
@@ -77,7 +78,7 @@ export const meanReversionStrategy: Strategy = {
       }
 
       // ENTRY: oversold dip in an uptrend.
-      const canBuy = rsi2 != null && sma200 != null && last > sma200 && rsi2 < rsiBuy;
+      const canBuy = rsi2 != null && sma200 != null && last > sma200 && rsi2 < rsiBuy && regimeOk;
       if (canBuy && openCount < maxPos) {
         const budget = Math.min(perSlot, spendable(cash, buffer));
         const qty = equalWeightQty(budget, last, inst.contractMultiplier, { fractional: false });

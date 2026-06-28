@@ -9,7 +9,7 @@ import { returnBetween, annualisedVolatilityPct } from '../signals/indicators';
 import { scoreToConfidence } from '../signals/score';
 import { spendable, equalWeightQty } from '../engine/sizing';
 import type { Strategy, SleeveContext, StrategyIntent, OpenPositionLite, InstrumentInput } from './types';
-import { posKey } from './types';
+import { posKey, daysBetween } from './types';
 
 interface Ranked { inst: InstrumentInput; mom: number; vol: number; norm: number; last: number; }
 
@@ -32,9 +32,12 @@ export const rsRotationStrategy: Strategy = {
       ranked.push({ inst, mom, vol, norm: mom / (vol || 1), last: inst.quote.lastPricePaisa });
     }
     ranked.sort((a, b) => b.norm - a.norm);
-    const topKeys = new Set(
-      ranked.filter((r) => r.mom > 0).slice(0, holdK).map((r) => posKey(r.inst.assetClass, r.inst.symbol, r.inst.schemeCode)),
-    );
+    const rankBuffer = p.rankBuffer ?? 2;   // #2 hysteresis
+    const minHold = p.minHoldDays ?? 90;    // #2 low churn; also dodges <365d exit-load thrash
+    const eligible = ranked.filter((r) => r.mom > 0);
+    const keyOf = (r: Ranked) => posKey(r.inst.assetClass, r.inst.symbol, r.inst.schemeCode);
+    const buyKeys = new Set(eligible.slice(0, holdK).map(keyOf));
+    const keepKeys = new Set(eligible.slice(0, holdK + rankBuffer).map(keyOf));
 
     const held = new Map<string, OpenPositionLite>();
     for (const pos of ctx.positions) held.set(posKey(pos.assetClass, pos.symbol, pos.schemeCode), pos);
@@ -46,7 +49,6 @@ export const rsRotationStrategy: Strategy = {
       const inst = r.inst;
       const key = posKey(inst.assetClass, inst.symbol, inst.schemeCode);
       const last = r.last;
-      const inTop = topKeys.has(key);
       const pos = held.get(key);
       const inputs: Record<string, number | string> = { momentum12_1Pct: r.mom, volPct: r.vol, rank: i + 1, navPaisa: last };
       const signals = { momentum12_1Pct: r.mom, volatilityPct: r.vol, rank: i + 1 };
@@ -54,13 +56,16 @@ export const rsRotationStrategy: Strategy = {
       const common = { watchlistId: inst.watchlistId, assetClass: inst.assetClass, symbol: inst.symbol, schemeCode: inst.schemeCode, name: inst.name, contractMultiplier: inst.contractMultiplier, side: 'LONG' as const, pricePaisa: last, signals };
       const asOf = inst.history.at(-1)?.date;
 
-      if (pos && !inTop) {
-        const amount = Math.round(last * pos.quantity * inst.contractMultiplier);
-        out.push({ ...common, action: 'SELL', score, recommendation: 'SELL', confidence: 'MEDIUM', quantity: pos.quantity, amountPaisa: amount,
-          evidence: { rule: `rank ${i + 1} fell out of top ${holdK}`, inputs, source: inst.source, dataAsOf: asOf } });
-        cash += amount; openCount -= 1; return;
+      if (pos && !keepKeys.has(key)) {
+        const heldDays = daysBetween(ctx.runDate, pos.openedDate);
+        if (heldDays >= minHold) {
+          const amount = Math.round(last * pos.quantity * inst.contractMultiplier);
+          out.push({ ...common, action: 'SELL', score, recommendation: 'SELL', confidence: 'MEDIUM', quantity: pos.quantity, amountPaisa: amount,
+            evidence: { rule: `rank ${i + 1} > keep-band ${holdK}+${rankBuffer}, held ${heldDays}d`, inputs, source: inst.source, dataAsOf: asOf } });
+          cash += amount; openCount -= 1; return;
+        }
       }
-      if (!pos && inTop && openCount < holdK) {
+      if (!pos && buyKeys.has(key) && openCount < holdK) {
         const budget = Math.min(perSlot, spendable(cash, buffer));
         const qty = equalWeightQty(budget, last, inst.contractMultiplier, { fractional: true });
         if (qty > 0) {
@@ -70,8 +75,8 @@ export const rsRotationStrategy: Strategy = {
           cash -= amount; openCount += 1; return;
         }
       }
-      out.push({ ...common, action: pos ? 'HOLD' : 'WATCH', score, recommendation: inTop ? 'BUY' : 'HOLD', confidence: 'LOW', quantity: 0, amountPaisa: 0,
-        evidence: { rule: pos ? `held, still top ${holdK}` : (inTop ? 'top fund but no room/cash' : `rank ${i + 1}, not top ${holdK}`), inputs, source: inst.source, dataAsOf: asOf } });
+      out.push({ ...common, action: pos ? 'HOLD' : 'WATCH', score, recommendation: buyKeys.has(key) ? 'BUY' : 'HOLD', confidence: 'LOW', quantity: 0, amountPaisa: 0,
+        evidence: { rule: pos ? `held (rank ${i + 1})` : (buyKeys.has(key) ? 'top fund but no room/cash' : `rank ${i + 1}, not top ${holdK}`), inputs, source: inst.source, dataAsOf: asOf } });
     });
     return out;
   },

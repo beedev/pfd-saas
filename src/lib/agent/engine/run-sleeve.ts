@@ -7,7 +7,7 @@
  * SAFETY: touches only agent_* tables. Paper money only. Money in paisa.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   db,
   agentWatchlist,
@@ -16,11 +16,16 @@ import {
   agentTrades,
   agentPositions,
   agentSleeves,
+  priceSnapshots,
   type AgentSleeve,
 } from '@/db';
 import { getInstrumentQuote, getInstrumentHistory, type InstrumentRef } from '../market-data';
+import { getDailyCloses } from '@/lib/services/yahoo-finance';
+import { sma } from '../signals/indicators';
 import { getStrategy } from '../strategies/registry';
 import { buildRationale } from './rationale';
+import { applyRiskControls } from './risk';
+import { agentSleeveEquitySymbol } from './equity-curve';
 import type { InstrumentInput, OpenPositionLite, SleeveContext } from '../strategies/types';
 
 export interface SleeveRunResult {
@@ -79,7 +84,23 @@ export async function runSleeve(
     side: p.side, quantity: p.quantity, avgPricePaisa: p.avgPricePaisa, contractMultiplier: p.contractMultiplier, openedDate: p.openedDate,
   }));
 
-  // 4. Run the strategy.
+  // #5 regime gate: risk-on when Nifty 50 is above its 200-DMA.
+  let regimeRiskOn = true;
+  try {
+    const idx = (await getDailyCloses('^NSEI', '1y')).map((x) => x.close);
+    const s200 = sma(idx, 200);
+    regimeRiskOn = s200 == null || (idx.at(-1) ?? 0) > s200;
+  } catch { /* default risk-on if index unavailable */ }
+
+  // #1 kill-switch inputs: current sleeve equity + historical peak.
+  const positionsValue = posRows.reduce((s, p) => s + (p.marketValuePaisa ?? Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier)), 0);
+  const currentEquity = sleeve.cashBalancePaisa + positionsValue;
+  const peakRow = (await db.select({ price: priceSnapshots.price }).from(priceSnapshots)
+    .where(and(eq(priceSnapshots.userId, userId), eq(priceSnapshots.assetSymbol, agentSleeveEquitySymbol(sleeve.id))))
+    .orderBy(desc(priceSnapshots.price)).limit(1))[0];
+  const peakEquity = Math.max(currentEquity, peakRow?.price ?? sleeve.allocationPaisa);
+
+  // 4. Run the strategy, then apply portfolio-level risk controls.
   const ctx: SleeveContext = {
     sleeve,
     cashPaisa: sleeve.cashBalancePaisa,
@@ -87,8 +108,11 @@ export async function runSleeve(
     instruments,
     params: (sleeve.paramsJson as Record<string, number>) ?? {},
     runDate,
+    regimeRiskOn,
+    currentEquityPaisa: currentEquity,
+    peakEquityPaisa: peakEquity,
   };
-  const intents = getStrategy(sleeve.strategy).run(ctx);
+  const intents = applyRiskControls(ctx, getStrategy(sleeve.strategy).run(ctx));
 
   // 5. Persist signals + decisions (+evidence/rationale) and execute trades.
   let cash = sleeve.cashBalancePaisa;

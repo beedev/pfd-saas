@@ -9,6 +9,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db, agentSleeves, agentWatchlist, agentBacktests } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getInstrumentHistory, type InstrumentRef } from '@/lib/agent/market-data';
+import { getDailyCloses } from '@/lib/services/yahoo-finance';
 import { runBacktest, type BacktestInstrument } from '@/lib/agent/backtest/engine';
 import { DEFAULT_COST_MODEL } from '@/lib/agent/backtest/costs';
 
@@ -53,11 +54,23 @@ export async function POST(request: NextRequest) {
     }
     if (!instruments.length) return NextResponse.json({ error: 'no usable history' }, { status: 400 });
 
+    // #5 regime series: Nifty 50 above its trailing 200-DMA = risk-on (per date, no look-ahead).
+    const regimeRiskOnByDate = new Map<string, boolean>();
+    try {
+      const idx = await getDailyCloses('^NSEI', '5y');
+      const c = idx.map((x) => x.close);
+      for (let i = 0; i < idx.length; i++) {
+        const s200 = i >= 199 ? c.slice(i - 199, i + 1).reduce((a, b) => a + b, 0) / 200 : null;
+        regimeRiskOnByDate.set(idx[i].date, s200 == null || c[i] > s200);
+      }
+    } catch { /* leave empty → engine defaults risk-on */ }
+
     const result = runBacktest({
       strategy: sleeve.strategy,
       allocationPaisa: sleeve.allocationPaisa,
       params: (sleeve.paramsJson as Record<string, number>) ?? {},
       instruments,
+      regimeRiskOnByDate,
     });
 
     const curve = downsample(result.equityCurve);

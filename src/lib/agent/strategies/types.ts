@@ -48,6 +48,10 @@ export interface SleeveContext {
   instruments: InstrumentInput[];
   params: Record<string, number>;
   runDate: string; // IST YYYY-MM-DD
+  // v3 enhancements (default risk-on / no throttle when unset):
+  regimeRiskOn?: boolean;      // #5 index regime gate (^NSEI > 200DMA)
+  peakEquityPaisa?: number;    // #1 for drawdown kill-switch
+  currentEquityPaisa?: number; // #1 current sleeve equity (cash + MV)
 }
 
 export interface StrategyIntent {
