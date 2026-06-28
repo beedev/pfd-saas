@@ -26,22 +26,30 @@ async function buildAliasMap(): Promise<Map<string, string[]>> {
   if (symbols.length) {
     const quotes = await getQuotes(symbols);
     for (const q of quotes) {
-      const name = (q.longName || q.shortName || '').replace(/\b(Limited|Ltd\.?|Inc\.?|Corp\.?|Industries)\b/gi, '').replace(/\s+/g, ' ').trim();
-      if (name.length < 3) continue;
-      const aliases = [name];
-      const first = name.split(' ')[0];
-      if (first.length >= 5 && first.toLowerCase() !== name.toLowerCase()) aliases.push(first);
-      map.set(q.symbol, aliases);
+      // Strip legal suffixes + punctuation; keep the distinctive name words.
+      const raw = (q.longName || q.shortName || '')
+        .replace(/\b(Limited|Ltd\.?|Inc\.?|Corp\.?|Pvt\.?|PLC|Co\.?)\b/gi, '')
+        .replace(/[^A-Za-z0-9& ]/g, ' ').replace(/\s+/g, ' ').trim();
+      const words = raw.split(' ').filter(Boolean);
+      // Multi-word → the first two words as a distinctive phrase ("Reliance
+      // Industries", "State Bank", "HDFC Bank") so we don't match a sibling
+      // company ("Reliance Infra") or a generic word ("State"). Single-word →
+      // the word itself (matched on a boundary, so \bITC\b ≠ "bitcoin").
+      const aliases = words.length >= 2 ? [words.slice(0, 2).join(' ')] : (words[0]?.length >= 3 ? [words[0]] : []);
+      if (aliases.length) map.set(q.symbol, aliases);
     }
   }
   aliasCache = { map, ts: Date.now() };
   return map;
 }
 
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function tagSymbols(text: string, aliasMap: Map<string, string[]>): string[] {
-  const t = text.toLowerCase();
   const out: string[] = [];
-  for (const [sym, aliases] of aliasMap) if (aliases.some((a) => t.includes(a.toLowerCase()))) out.push(sym);
+  for (const [sym, aliases] of aliasMap) {
+    // Word-boundary match (not substring) → no "bitcoin"→ITC, no "estate"→State.
+    if (aliases.some((a) => new RegExp(`\\b${esc(a)}\\b`, 'i').test(text))) out.push(sym);
+  }
   return out;
 }
 
