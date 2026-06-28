@@ -3738,7 +3738,7 @@ export const agentBacktests = pgTable('agent_backtests', {
   universeJson: jsonb('universe_json').$type<string[]>(),
   costModelJson: jsonb('cost_model_json').$type<Record<string, number>>(),
   metricsJson: jsonb('metrics_json').$type<Record<string, number>>(),
-  equityCurveJson: jsonb('equity_curve_json').$type<Array<{ date: string; equityPaisa: number }>>(),
+  equityCurveJson: jsonb('equity_curve_json').$type<Array<{ date: string; equityPaisa: number; benchmarkClose?: number }>>(),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [

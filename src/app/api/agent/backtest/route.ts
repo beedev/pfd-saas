@@ -23,6 +23,35 @@ function downsample<T>(arr: T[], max = 400): T[] {
   return out;
 }
 
+/**
+ * Nifty buy-and-hold aligned to a strategy's equity-curve dates. Forward-fills
+ * the index close onto each strategy date (so weekends/holidays line up), then
+ * computes total + annualised return over the same window. Returns the per-date
+ * index level for the chart overlay (the chart rebases both series to 100).
+ */
+function benchmarkOverCurve(
+  curve: Array<{ date: string }>,
+  idx: Array<{ date: string; close: number }>,
+): { totalPct: number; cagrPct: number; closeByDate: Map<string, number> } | null {
+  if (!curve.length || !idx.length) return null;
+  const sorted = [...idx].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const closeByDate = new Map<string, number>();
+  let j = 0; let last: number | null = null;
+  for (const pt of curve) {
+    while (j < sorted.length && sorted[j].date <= pt.date) { last = sorted[j].close; j++; }
+    if (last != null) closeByDate.set(pt.date, last);
+  }
+  const dated = curve.filter((p) => closeByDate.has(p.date));
+  if (dated.length < 2) return null;
+  const first = closeByDate.get(dated[0].date)!;
+  const lastC = closeByDate.get(dated[dated.length - 1].date)!;
+  if (!first) return null;
+  const totalPct = ((lastC - first) / first) * 100;
+  const years = (new Date(dated[dated.length - 1].date).getTime() - new Date(dated[0].date).getTime()) / (365.25 * 864e5);
+  const cagrPct = years > 0 ? (Math.pow(lastC / first, 1 / years) - 1) * 100 : 0;
+  return { totalPct, cagrPct, closeByDate };
+}
+
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) return unauthenticated();
@@ -73,16 +102,17 @@ export async function POST(request: NextRequest) {
     instruments.length = 0;
     instruments.push(...aligned);
 
+    // Nifty 50 over a 10y range — wide enough to cover the full (≤8y) backtest
+    // window. Reused for BOTH the regime gate AND the buy-and-hold benchmark.
+    const idx = await getDailyCloses('^NSEI', '10y').catch(() => [] as Array<{ date: string; close: number }>);
+
     // #5 regime series: Nifty 50 above its trailing 200-DMA = risk-on (per date, no look-ahead).
     const regimeRiskOnByDate = new Map<string, boolean>();
-    try {
-      const idx = await getDailyCloses('^NSEI', '5y');
-      const c = idx.map((x) => x.close);
-      for (let i = 0; i < idx.length; i++) {
-        const s200 = i >= 199 ? c.slice(i - 199, i + 1).reduce((a, b) => a + b, 0) / 200 : null;
-        regimeRiskOnByDate.set(idx[i].date, s200 == null || c[i] > s200);
-      }
-    } catch { /* leave empty → engine defaults risk-on */ }
+    const c = idx.map((x) => x.close);
+    for (let i = 0; i < idx.length; i++) {
+      const s200 = i >= 199 ? c.slice(i - 199, i + 1).reduce((a, b) => a + b, 0) / 200 : null;
+      regimeRiskOnByDate.set(idx[i].date, s200 == null || c[i] > s200);
+    }
 
     const result = runBacktest({
       strategy: sleeve.strategy,
@@ -92,7 +122,14 @@ export async function POST(request: NextRequest) {
       regimeRiskOnByDate,
     });
 
-    const curve = downsample(result.equityCurve);
+    // Benchmark: Nifty 50 buy-and-hold, aligned to the strategy's dates
+    // (forward-filled), so the chart and CAGR are an apples-to-apples
+    // "what if I just held the index" comparison over the same window.
+    const bench = benchmarkOverCurve(result.equityCurve, idx);
+    const metrics: Record<string, number> = { ...(result.metrics as unknown as Record<string, number>) };
+    if (bench) { metrics.benchmarkTotalPct = bench.totalPct; metrics.benchmarkCagrPct = bench.cagrPct; }
+
+    const curve = downsample(result.equityCurve.map((p) => ({ ...p, benchmarkClose: bench?.closeByDate.get(p.date) })));
     const fromDate = result.equityCurve[0]?.date;
     const toDate = result.equityCurve[result.equityCurve.length - 1]?.date;
     const [saved] = await db.insert(agentBacktests).values({
@@ -101,7 +138,7 @@ export async function POST(request: NextRequest) {
       paramsJson: (sleeve.paramsJson as Record<string, number>) ?? {},
       universeJson: instruments.map((i) => i.symbol || i.schemeCode),
       costModelJson: DEFAULT_COST_MODEL as unknown as Record<string, number>,
-      metricsJson: result.metrics as unknown as Record<string, number>,
+      metricsJson: metrics,
       equityCurveJson: curve,
     }).returning();
 

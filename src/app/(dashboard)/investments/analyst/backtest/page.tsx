@@ -19,10 +19,11 @@ interface Metrics {
   totalReturnPct: number; cagrPct: number; sharpe: number; sortino: number; maxDrawdownPct: number;
   calmar: number; hitRatePct: number; profitFactor: number; turnoverPct: number; trades: number; psr: number; bars: number;
   finalEquityPaisa: number; startEquityPaisa: number;
+  benchmarkTotalPct?: number; benchmarkCagrPct?: number;
 }
 interface Backtest {
   id: number; sleeveId: number; strategy: string; label: string | null; fromDate: string | null; toDate: string | null;
-  metricsJson: Metrics; equityCurveJson: Array<{ date: string; equityPaisa: number }>;
+  metricsJson: Metrics; equityCurveJson: Array<{ date: string; equityPaisa: number; benchmarkClose?: number }>;
 }
 
 const inr = (p: number) => '₹' + Math.round(p / 100).toLocaleString('en-IN');
@@ -55,6 +56,11 @@ export default function BacktestPage() {
 
   const m = result?.metricsJson;
   const curve = (result?.equityCurveJson ?? []).map((p) => ({ date: p.date, price: p.equityPaisa }));
+  const benchCurve = (result?.equityCurveJson ?? [])
+    .filter((p) => p.benchmarkClose != null)
+    .map((p) => ({ date: p.date, price: p.benchmarkClose as number }));
+  const hasBench = m?.benchmarkCagrPct != null;
+  const alphaCagr = hasBench ? (m!.cagrPct - (m!.benchmarkCagrPct ?? 0)) : null;
 
   return (
     <div className="space-y-6">
@@ -90,7 +96,9 @@ export default function BacktestPage() {
             <CardContent>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Metric label="Total return" value={`${num(m.totalReturnPct)}%`} good={m.totalReturnPct >= 0} />
-                <Metric label="CAGR" value={`${num(m.cagrPct)}%`} good={m.cagrPct >= 0} />
+                <Metric label="CAGR (per year)" value={`${num(m.cagrPct)}%`} good={m.cagrPct >= 0} />
+                {hasBench && <Metric label="Nifty 50 CAGR" value={`${num(m.benchmarkCagrPct)}%`} />}
+                {hasBench && <Metric label="Alpha vs Nifty (CAGR)" value={`${alphaCagr! >= 0 ? '+' : ''}${num(alphaCagr!)}%`} good={alphaCagr! >= 0} />}
                 <Metric label="Sharpe" value={num(m.sharpe)} good={m.sharpe >= 1} />
                 <Metric label="Sortino" value={num(m.sortino)} />
                 <Metric label="Max drawdown" value={`${num(m.maxDrawdownPct)}%`} good={m.maxDrawdownPct < 25} />
@@ -105,8 +113,11 @@ export default function BacktestPage() {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Equity curve (rebased to 100)</h3></CardHeader>
-            <CardContent><EquityCurveChart equity={curve} benchmark={[]} /></CardContent>
+            <CardHeader>
+              <h3 className="text-base font-bold text-[var(--dxp-text)]">Equity curve vs Nifty 50 (rebased to 100)</h3>
+              <p className="text-xs text-[var(--dxp-text-muted)]">Strategy net of costs/STCG vs simply buying &amp; holding the index over the same window.</p>
+            </CardHeader>
+            <CardContent><EquityCurveChart equity={curve} benchmark={benchCurve} /></CardContent>
           </Card>
         </>
       )}
