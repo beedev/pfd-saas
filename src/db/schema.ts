@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {
@@ -3748,3 +3748,30 @@ export const agentBacktests = pgTable('agent_backtests', {
 
 export type AgentBacktest = typeof agentBacktests.$inferSelect;
 export type NewAgentBacktest = typeof agentBacktests.$inferInsert;
+
+// #5 RSS news + LLM sentiment. Global (shared across users); tagged to tracked
+// instrument symbols. High relevance + fresh + strong sentiment = "in play" —
+// the signal that feeds the live intraday paper experiment's universe.
+export type AgentNewsSentiment = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+
+export const agentNews = pgTable('agent_news', {
+  id: serial('id').primaryKey(),
+  source: text('source').notNull(),                 // Moneycontrol | NSE | BSE | ET | Mint | BS
+  guid: text('guid').notNull(),                     // dedup key (rss guid or link)
+  title: text('title').notNull(),
+  url: text('url'),
+  summary: text('summary'),
+  publishedAt: timestamp('published_at', { mode: 'date' }),
+  symbols: jsonb('symbols').$type<string[]>(),       // tagged tracked symbols (Yahoo form)
+  sentiment: text('sentiment').$type<AgentNewsSentiment>(),
+  sentimentScore: real('sentiment_score'),           // -1..1
+  relevance: real('relevance'),                      // 0..1 (LLM: how material to the stock)
+  llmDone: boolean('llm_done').notNull().default(false),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('agent_news_guid_idx').on(table.guid),
+  index('agent_news_published_idx').on(table.publishedAt),
+]);
+
+export type AgentNews = typeof agentNews.$inferSelect;
+export type NewAgentNews = typeof agentNews.$inferInsert;

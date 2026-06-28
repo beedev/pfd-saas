@@ -15,6 +15,7 @@ import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, Flas
 
 import { Disclaimer } from './_components/Disclaimer';
 import { EquityCurveChart } from './_components/EquityCurveChart';
+import { NewsPanel } from './_components/NewsPanel';
 
 interface Sleeve {
   id: number; key: string; name: string; strategy: string; cadence: string;
@@ -140,6 +141,8 @@ export default function AnalystPage() {
         <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Total equity vs benchmark (rebased to 100)</h3></CardHeader>
         <CardContent><EquityCurveChart equity={equity} benchmark={benchmark} /></CardContent>
       </Card>
+
+      <NewsPanel />
 
       {/* Decision feed with real-data evidence */}
       <Card>

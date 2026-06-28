@@ -25,6 +25,7 @@ import { sma } from '../signals/indicators';
 import { getStrategy } from '../strategies/registry';
 import { buildRationale } from './rationale';
 import { applyRiskControls } from './risk';
+import { hasFreshNegativeNews } from '../news/ingest';
 import { agentSleeveEquitySymbol } from './equity-curve';
 import type { InstrumentInput, OpenPositionLite, SleeveContext } from '../strategies/types';
 
@@ -113,6 +114,14 @@ export async function runSleeve(
     peakEquityPaisa: peakEquity,
   };
   const intents = applyRiskControls(ctx, getStrategy(sleeve.strategy).run(ctx));
+  // #5 live news guard — never buy into a fresh, material negative headline.
+  for (let k = 0; k < intents.length; k++) {
+    const it = intents[k];
+    if (it.action === 'BUY' && it.symbol && (await hasFreshNegativeNews(it.symbol))) {
+      intents[k] = { ...it, action: 'WATCH', quantity: 0, amountPaisa: 0,
+        evidence: { ...it.evidence, rule: 'news guard: fresh material negative headline' } };
+    }
+  }
 
   // 5. Persist signals + decisions (+evidence/rationale) and execute trades.
   let cash = sleeve.cashBalancePaisa;
