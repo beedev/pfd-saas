@@ -36,7 +36,9 @@ export async function runSleeve(
   sleeve: AgentSleeve,
   runId: number,
   runDate: string,
+  opts: { execute?: boolean } = {},
 ): Promise<SleeveRunResult> {
+  const execute = opts.execute !== false; // when false (market closed), record decisions but don't fill
   // 1. Watchlist for this sleeve.
   const wl = await db
     .select()
@@ -66,7 +68,7 @@ export async function runSleeve(
       contractMultiplier: w.contractMultiplier,
       quote,
       history,
-      source: w.assetClass === 'MF' ? 'AMFI' : 'YAHOO', // NSE provider lands in v2.3
+      source: quote.source ?? (w.assetClass === 'MF' ? 'AMFI' : 'YAHOO'),
     });
   }
 
@@ -108,7 +110,7 @@ export async function runSleeve(
       })
       .returning();
 
-    const executed = it.action === 'BUY' || it.action === 'SELL';
+    const executed = (it.action === 'BUY' || it.action === 'SELL') && execute;
     const [decision] = await db
       .insert(agentDecisions)
       .values({

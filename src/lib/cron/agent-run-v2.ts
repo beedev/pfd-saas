@@ -12,6 +12,7 @@ import {
   type AgentPortfolio, type AgentSleeve,
 } from '@/db';
 import { getQuote } from '@/lib/services/yahoo-finance';
+import { isMarketOpen } from '@/lib/agent/market-data';
 import { runSleeve } from '@/lib/agent/engine/run-sleeve';
 import { markSleeveToMarket } from '@/lib/agent/engine/mark-sleeve';
 import { snapshotEquity, snapshotSleeveEquity, agentBenchmarkSymbol } from '@/lib/agent/engine/equity-curve';
@@ -70,13 +71,16 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
 
   try {
     const sleeves = await ensureSleeves(userId, portfolio);
+    // Trades only fill when the market is open (no "monopoly-game" timing).
+    // A manual run-now may fill anytime so the user can test on demand.
+    const canExecute = (await isMarketOpen()) || !!opts.manual;
     let totalEquity = 0;
     let totalTrades = 0;
     const sleeveResults: Array<{ key: string; name: string; equityPaisa: number; trades: number; allocationPaisa: number }> = [];
 
     for (const sleeve of sleeves) {
       if (!sleeve.enabled) continue;
-      const r = await runSleeve(userId, sleeve, run.id, runDate);
+      const r = await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute });
       const equity = await markSleeveToMarket(userId, sleeve.id, r.cashBalancePaisa);
       await snapshotSleeveEquity(userId, portfolio.id, sleeve.id, sleeve.name, equity, runDate);
       totalEquity += equity;
@@ -102,6 +106,7 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
         const ret = s.allocationPaisa > 0 ? ((s.equityPaisa - s.allocationPaisa) / s.allocationPaisa) * 100 : 0;
         return `• ${s.name}: ${inr(s.equityPaisa)} (${pct(ret)}), ${s.trades} trade(s)`;
       }),
+      ...(canExecute ? [] : ['_Market closed — decisions recorded, no fills._']),
       `_Paper trading — not financial advice._`,
     ].join('\n');
 
@@ -114,6 +119,55 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
     const message = err instanceof Error ? err.message : String(err);
     await db.update(agentRuns).set({ status: 'FAILED', finishedAt: new Date(), error: message }).where(eq(agentRuns.id, run.id));
     console.error('agent-run-v2 failed:', err);
+    return { status: 'FAILED', reason: message, runDate };
+  }
+}
+
+/** IST timestamp 'YYYY-MM-DDTHH:MM' for uniquely keying intraday runs. */
+function istStamp(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}`;
+}
+
+/**
+ * Intraday run: only the INTRADAY-cadence sleeves (the 2-3d mean-reversion
+ * sleeve), only while the market is open. Runs several times a day; each tick is
+ * its own run row (timestamped) so it isn't blocked by the daily idempotency.
+ * Equity snapshots use the plain date (one point/day, upserted).
+ */
+export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
+  const runDate = istDate();
+  if (!(await isMarketOpen())) return { status: 'SKIPPED', reason: 'market-closed', runDate };
+  const portfolio = (await db.select().from(agentPortfolios).where(eq(agentPortfolios.userId, userId)).limit(1))[0];
+  if (!portfolio || !portfolio.enabled) return { status: 'SKIPPED', reason: 'disabled', runDate };
+  const all = await db.select().from(agentSleeves).where(eq(agentSleeves.portfolioId, portfolio.id));
+  const sleeves = all.filter((s) => s.enabled && s.cadence === 'INTRADAY');
+  if (!sleeves.length) return { status: 'SKIPPED', reason: 'no-intraday-sleeves', runDate };
+
+  const inserted = await db
+    .insert(agentRuns)
+    .values({ userId, portfolioId: portfolio.id, runDate: istStamp(), status: 'RUNNING' })
+    .onConflictDoNothing({ target: [agentRuns.userId, agentRuns.runDate] })
+    .returning();
+  if (!inserted.length) return { status: 'SKIPPED', reason: 'in-progress', runDate };
+  const run = inserted[0];
+
+  try {
+    let trades = 0;
+    const results: Array<{ key: string; equityPaisa: number; trades: number }> = [];
+    for (const sleeve of sleeves) {
+      const r = await runSleeve(userId, sleeve, run.id, runDate, { execute: true });
+      const equity = await markSleeveToMarket(userId, sleeve.id, r.cashBalancePaisa);
+      await snapshotSleeveEquity(userId, portfolio.id, sleeve.id, sleeve.name, equity, runDate);
+      trades += r.tradesExecuted;
+      results.push({ key: sleeve.key, equityPaisa: equity, trades: r.tradesExecuted });
+    }
+    await db.update(agentRuns).set({ status: 'COMPLETED', finishedAt: new Date(), tradesExecuted: trades }).where(eq(agentRuns.id, run.id));
+    return { status: 'COMPLETED', runDate, sleeves: results };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await db.update(agentRuns).set({ status: 'FAILED', finishedAt: new Date(), error: message }).where(eq(agentRuns.id, run.id));
     return { status: 'FAILED', reason: message, runDate };
   }
 }

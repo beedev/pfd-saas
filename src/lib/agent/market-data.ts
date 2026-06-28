@@ -7,6 +7,7 @@
 import { getQuote, getQuotes } from '@/lib/services/yahoo-finance';
 import { getByIsin, getBySchemeCode, getNavHistory } from '@/lib/services/amfi';
 import { getFuturesProvider } from './providers/futures-provider';
+import { nseSymbolFor, nseEquityQuotePaisa } from './providers/nse';
 import type { AgentAssetClass } from '@/db/schema';
 
 export interface InstrumentRef {
@@ -24,6 +25,7 @@ export interface InstrumentQuote {
   fiftyTwoWkHighPaisa?: number;
   fiftyTwoWkLowPaisa?: number;
   asOf: number; // unix seconds
+  source?: string; // NSE | YAHOO | AMFI
 }
 
 export interface PricePoint {
@@ -48,15 +50,21 @@ export async function getInstrumentQuote(ref: InstrumentRef): Promise<Instrument
         : null;
     if (!fund || !Number.isFinite(fund.nav)) return null;
     const p = Math.round(fund.nav * 100);
-    return { lastPricePaisa: p, asOf: Math.floor(Date.parse(fund.navDate + 'T00:00:00Z') / 1000) || 0 };
+    return { lastPricePaisa: p, asOf: Math.floor(Date.parse(fund.navDate + 'T00:00:00Z') / 1000) || 0, source: 'AMFI' };
   }
   if (ref.assetClass === 'FUTURE') {
     if (!ref.symbol) return null;
     const provider = await getFuturesProvider();
-    return provider.quote(ref.symbol);
+    const fq = await provider.quote(ref.symbol);
+    return fq ? { lastPricePaisa: fq.lastPricePaisa, asOf: fq.asOf, source: 'YAHOO' } : null;
   }
-  // STOCK
+  // STOCK — NSE primary, Yahoo fallback.
   if (!ref.symbol) return null;
+  const nsym = nseSymbolFor(ref.symbol);
+  if (nsym) {
+    const nse = await nseEquityQuotePaisa(nsym);
+    if (nse) return { lastPricePaisa: nse, asOf: Math.floor(Date.now() / 1000), source: 'NSE' };
+  }
   const q = await getQuote(ref.symbol);
   if (!q || !Number.isFinite(q.regularMarketPrice)) return null;
   return {
@@ -66,7 +74,18 @@ export async function getInstrumentQuote(ref: InstrumentRef): Promise<Instrument
     fiftyTwoWkHighPaisa: toPaisa(q.fiftyTwoWeekHigh),
     fiftyTwoWkLowPaisa: toPaisa(q.fiftyTwoWeekLow),
     asOf: q.regularMarketTime,
+    source: 'YAHOO',
   };
+}
+
+/** Is the NSE cash market currently open? (via the ^NSEI live market state.) */
+export async function isMarketOpen(): Promise<boolean> {
+  try {
+    const q = await getQuote('^NSEI');
+    return q?.marketState === 'REGULAR';
+  } catch {
+    return false;
+  }
 }
 
 /** Batched quotes; missing instruments are simply omitted from the map. */
