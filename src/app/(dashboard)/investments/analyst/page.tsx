@@ -16,6 +16,7 @@ import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, Flas
 import { Disclaimer } from './_components/Disclaimer';
 import { EquityCurveChart } from './_components/EquityCurveChart';
 import { NewsPanel } from './_components/NewsPanel';
+import { HoldingsTable, type Position } from './_components/HoldingsTable';
 
 interface Sleeve {
   id: number; key: string; name: string; strategy: string; cadence: string;
@@ -42,6 +43,7 @@ const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'Mean reversion
 
 export default function AnalystPage() {
   const [sleeves, setSleeves] = useState<Sleeve[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [equity, setEquity] = useState<CurvePoint[]>([]);
   const [benchmark, setBenchmark] = useState<CurvePoint[]>([]);
@@ -52,13 +54,15 @@ export default function AnalystPage() {
 
   const load = useCallback(async () => {
     try {
-      const [sl, dec, curve] = await Promise.all([
+      const [sl, pos, dec, curve] = await Promise.all([
         fetch('/api/agent/sleeves').then((r) => r.json()),
+        fetch('/api/agent/positions').then((r) => r.json()),
         fetch('/api/agent/decisions').then((r) => r.json()),
         fetch('/api/agent/portfolio/equity-curve').then((r) => r.json()),
       ]);
       setSleeves(sl.sleeves ?? []);
       setStarting(sl.portfolio?.startingCapitalPaisa ?? 0);
+      setPositions(pos.positions ?? []);
       setDecisions(dec.decisions ?? []);
       setEquity(curve.equity ?? []);
       setBenchmark(curve.benchmark ?? []);
@@ -136,6 +140,8 @@ export default function AnalystPage() {
           </Card>
         ))}
       </div>
+
+      <HoldingsTable sleeves={sleeves} positions={positions} />
 
       <Card>
         <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Total equity vs benchmark (rebased to 100)</h3></CardHeader>

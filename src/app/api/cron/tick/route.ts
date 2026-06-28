@@ -49,6 +49,16 @@ const ADVANCE_MS: Record<JobType, number> = {
   agent_news_ingest: 30 * 60 * 1000,  // poll RSS feeds every 30 min
 };
 
+// agent_daily_run fires at the NSE open — 09:20 IST, a 5-min buffer past the
+// 09:15 bell so `marketState` is reliably REGULAR and the first ticks have
+// printed — NOT a drifting NOW()+24h. Computed in the DB's UTC frame via the
+// Asia/Kolkata zone, so it lands at the open regardless of when it last ran.
+const NEXT_DAILY_OPEN_IST = sql`(
+  CASE WHEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '9 hours 20 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' > now()
+  THEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '9 hours 20 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
+  ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '9 hours 20 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
+)`;
+
 interface JobReport {
   userId: string;
   jobType: JobType;
@@ -161,7 +171,9 @@ export async function POST(request: NextRequest) {
         lastRunStatus: report.status,
         lastRunError: report.error ?? null,
         runCount: (job.runCount ?? 0) + 1,
-        nextRunAt: sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
+        nextRunAt: job.jobType === 'agent_daily_run'
+          ? NEXT_DAILY_OPEN_IST
+          : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
         updatedAt: sql`NOW()`,
       })
       .where(eq(scheduledJobs.id, job.id));
