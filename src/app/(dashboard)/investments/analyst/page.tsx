@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 
 import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay } from '@dxp/ui';
-import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight } from 'lucide-react';
+import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, FlaskConical } from 'lucide-react';
 
 import { Disclaimer } from './_components/Disclaimer';
 import { EquityCurveChart } from './_components/EquityCurveChart';
@@ -101,6 +101,7 @@ export default function AnalystPage() {
         </div>
         <div className="flex gap-2">
           <Link href="/investments/analyst/watchlist"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Watchlist</Button></Link>
+          <Link href="/investments/analyst/backtest"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Backtest</Button></Link>
           <Link href="/investments/analyst/settings"><Button variant="secondary"><Settings className="mr-2 h-4 w-4" />Settings</Button></Link>
           <Button variant="primary" onClick={runNow} disabled={isRunning}>
             {isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}Run now

@@ -3724,3 +3724,27 @@ export const agentPositions = pgTable('agent_positions', {
 
 export type AgentPosition = typeof agentPositions.$inferSelect;
 export type NewAgentPosition = typeof agentPositions.$inferInsert;
+
+// Stored backtest results (per sleeve / strategy) for the "does it have an edge" view.
+export const agentBacktests = pgTable('agent_backtests', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').references(() => agentSleeves.id, { onDelete: 'cascade' }),
+  strategy: text('strategy').$type<AgentStrategy>().notNull(),
+  label: text('label'),
+  fromDate: text('from_date'),
+  toDate: text('to_date'),
+  paramsJson: jsonb('params_json').$type<Record<string, number>>(),
+  universeJson: jsonb('universe_json').$type<string[]>(),
+  costModelJson: jsonb('cost_model_json').$type<Record<string, number>>(),
+  metricsJson: jsonb('metrics_json').$type<Record<string, number>>(),
+  equityCurveJson: jsonb('equity_curve_json').$type<Array<{ date: string; equityPaisa: number }>>(),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_backtests_user_id_idx').on(table.userId),
+  index('agent_backtests_sleeve_idx').on(table.sleeveId),
+]);
+
+export type AgentBacktest = typeof agentBacktests.$inferSelect;
+export type NewAgentBacktest = typeof agentBacktests.$inferInsert;
