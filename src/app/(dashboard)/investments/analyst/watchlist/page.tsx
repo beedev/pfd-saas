@@ -33,18 +33,39 @@ const CLASS_OPTIONS = [
   { value: 'FUTURE', label: 'Future' },
 ];
 
+interface Sleeve { id: number; key: string; name: string }
+
+// Which sleeves can hold which asset class.
+const SLEEVE_FOR_CLASS: Record<AssetClass, string[]> = {
+  STOCK: ['STK_FAST', 'STK_SHORT'],
+  FUTURE: ['FUT'],
+  MF: ['MF'],
+};
+
 export default function WatchlistPage() {
   const [items, setItems] = useState<WatchItem[]>([]);
+  const [sleeves, setSleeves] = useState<Sleeve[]>([]);
   const [assetClass, setAssetClass] = useState<AssetClass>('STOCK');
+  const [sleeveId, setSleeveId] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   const load = useCallback(async () => {
-    const r = await fetch('/api/agent/watchlist').then((r) => r.json());
-    setItems(r.watchlist ?? []);
+    const [w, sl] = await Promise.all([
+      fetch('/api/agent/watchlist').then((r) => r.json()),
+      fetch('/api/agent/sleeves').then((r) => r.json()),
+    ]);
+    setItems(w.watchlist ?? []);
+    setSleeves(sl.sleeves ?? []);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Keep the selected sleeve valid for the chosen asset class.
+  const eligible = sleeves.filter((s) => SLEEVE_FOR_CLASS[assetClass].includes(s.key));
+  useEffect(() => {
+    if (!eligible.some((s) => s.id === sleeveId)) setSleeveId(eligible[0]?.id ?? null);
+  }, [assetClass, sleeves]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const search = async () => {
     if (query.trim().length < 2) { toast.info('Type at least 2 characters'); return; }
@@ -57,14 +78,15 @@ export default function WatchlistPage() {
   };
 
   const add = async (hit: SearchHit) => {
+    if (!sleeveId) { toast.error('Pick a sleeve first'); return; }
     try {
       const r = await fetch('/api/agent/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(hit),
+        body: JSON.stringify({ ...hit, sleeveId }),
       });
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'failed'); }
-      toast.success(`Added ${hit.name}`);
+      toast.success(`Added ${hit.name} to ${eligible.find((s) => s.id === sleeveId)?.name ?? 'sleeve'}`);
       await load();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed to add'); }
   };
@@ -88,6 +110,14 @@ export default function WatchlistPage() {
             <div className="sm:w-40">
               <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Type</label>
               <Select value={assetClass} onChange={(v) => setAssetClass(v as AssetClass)} options={CLASS_OPTIONS} />
+            </div>
+            <div className="sm:w-52">
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Sleeve</label>
+              <Select
+                value={sleeveId != null ? String(sleeveId) : ''}
+                onChange={(v) => setSleeveId(Number(v))}
+                options={eligible.map((s) => ({ value: String(s.id), label: s.name }))}
+              />
             </div>
             <div className="flex-1">
               <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Search</label>

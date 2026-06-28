@@ -1,90 +1,63 @@
 'use client';
 
 /**
- * Analyst (Paper) — dashboard: portfolio value + equity curve vs benchmark,
- * open positions, recent agent decisions w/ rationale, and a manual "Run now".
+ * Analyst (Paper) — multi-sleeve dashboard. Shows the 4 strategy sleeves, the
+ * total equity curve vs benchmark, and a decision feed where each decision
+ * expands to the REAL DATA that produced it (rule, inputs, sizing, source).
  */
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
-import {
-  Button,
-  Card,
-  CardHeader,
-  CardContent,
-  Badge,
-  StatsDisplay,
-  DataTable,
-  type Column,
-} from '@dxp/ui';
-import { Bot, Play, Loader2, ListPlus, Settings } from 'lucide-react';
+import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay } from '@dxp/ui';
+import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 
 import { Disclaimer } from './_components/Disclaimer';
 import { EquityCurveChart } from './_components/EquityCurveChart';
 
-interface Summary {
-  equityPaisa: number;
-  cashPaisa: number;
-  positionsValuePaisa: number;
-  totalPnlPaisa: number;
-  unrealizedPnlPaisa: number;
-  returnPct: number;
-  openPositions: number;
+interface Sleeve {
+  id: number; key: string; name: string; strategy: string; cadence: string;
+  allocationPaisa: number; cashPaisa: number; equityPaisa: number;
+  returnPct: number; openPositions: number;
 }
-interface Position {
-  id: number;
-  assetClass: string;
-  symbol: string;
-  name: string;
-  side: string;
-  quantity: number;
-  avgPricePaisa: number;
-  lastPricePaisa: number | null;
-  marketValuePaisa: number | null;
-  unrealizedPnlPaisa: number | null;
+interface Evidence {
+  rule: string;
+  inputs: Record<string, number | string>;
+  thresholds?: Record<string, number>;
+  sizing?: Record<string, number>;
+  source?: string;
+  dataAsOf?: string;
 }
 interface Decision {
-  id: number;
-  action: string;
-  assetClass: string;
-  symbol: string;
-  name: string;
-  quantity: number | null;
-  amountPaisa: number | null;
-  rationale: string | null;
-  confidence: string | null;
+  id: number; sleeveId: number | null; action: string; assetClass: string; symbol: string; name: string;
+  amountPaisa: number | null; rationale: string | null; evidenceJson: Evidence | null;
 }
 interface CurvePoint { date: string; price: number }
 
-const inr = (paisa: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(paisa / 100);
-
-const actionVariant = (a: string): 'success' | 'warning' | 'info' =>
-  a === 'BUY' ? 'success' : a === 'SELL' ? 'warning' : 'info';
+const inr = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
+const actionVariant = (a: string): 'success' | 'warning' | 'info' => (a === 'BUY' ? 'success' : a === 'SELL' ? 'warning' : 'info');
+const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'Mean reversion', XS_MOMENTUM: 'Momentum 12-1', TREND: 'Trend / breakout', RS_ROTATION: 'RS rotation' };
 
 export default function AnalystPage() {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [hasPortfolio, setHasPortfolio] = useState(true);
-  const [positions, setPositions] = useState<Position[]>([]);
+  const [sleeves, setSleeves] = useState<Sleeve[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [equity, setEquity] = useState<CurvePoint[]>([]);
   const [benchmark, setBenchmark] = useState<CurvePoint[]>([]);
+  const [startingCapitalPaisa, setStarting] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [p, pos, dec, curve] = await Promise.all([
-        fetch('/api/agent/portfolio').then((r) => r.json()),
-        fetch('/api/agent/positions').then((r) => r.json()),
+      const [sl, dec, curve] = await Promise.all([
+        fetch('/api/agent/sleeves').then((r) => r.json()),
         fetch('/api/agent/decisions').then((r) => r.json()),
         fetch('/api/agent/portfolio/equity-curve').then((r) => r.json()),
       ]);
-      setHasPortfolio(!!p.portfolio);
-      setSummary(p.summary ?? null);
-      setPositions(pos.positions ?? []);
+      setSleeves(sl.sleeves ?? []);
+      setStarting(sl.portfolio?.startingCapitalPaisa ?? 0);
       setDecisions(dec.decisions ?? []);
       setEquity(curve.equity ?? []);
       setBenchmark(curve.benchmark ?? []);
@@ -102,35 +75,19 @@ export default function AnalystPage() {
     setIsRunning(true);
     try {
       const r = await fetch('/api/agent/run', { method: 'POST' }).then((r) => r.json());
-      if (r.status === 'COMPLETED') toast.success(`Run complete — ${r.tradesExecuted ?? 0} trade(s)`);
+      if (r.status === 'COMPLETED') toast.success(`Run complete — equity ${inr(r.totalEquityPaisa ?? 0)}`);
       else if (r.status === 'SKIPPED') toast.info(`Skipped: ${r.reason}`);
       else toast.error(`Run failed: ${r.reason ?? 'unknown'}`);
       await load();
-    } catch {
-      toast.error('Run failed');
-    } finally {
-      setIsRunning(false);
-    }
+    } catch { toast.error('Run failed'); }
+    finally { setIsRunning(false); }
   };
 
-  const positionCols: Column<Position>[] = [
-    { key: 'name', header: 'Instrument', render: (_v, p) => (
-      <div className="flex flex-col"><span className="font-semibold text-[var(--dxp-text)]">{p.name}</span>
-      <span className="text-xs text-[var(--dxp-text-muted)] font-mono">{p.symbol || p.assetClass}</span></div>
-    ) },
-    { key: 'quantity', header: 'Qty', render: (_v, p) => <span className="font-mono">{p.quantity}</span> },
-    { key: 'avgPricePaisa', header: 'Avg', render: (_v, p) => <span className="font-mono">{inr(p.avgPricePaisa)}</span> },
-    { key: 'lastPricePaisa', header: 'Last', render: (_v, p) => <span className="font-mono">{p.lastPricePaisa != null ? inr(p.lastPricePaisa) : '—'}</span> },
-    { key: 'marketValuePaisa', header: 'Value', render: (_v, p) => <span className="font-mono">{p.marketValuePaisa != null ? inr(p.marketValuePaisa) : '—'}</span> },
-    { key: 'unrealizedPnlPaisa', header: 'Unrealized', render: (_v, p) => {
-      const v = p.unrealizedPnlPaisa ?? 0;
-      return <span className={`font-mono ${v >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{inr(v)}</span>;
-    } },
-  ];
+  const totalEquity = sleeves.reduce((s, x) => s + x.equityPaisa, 0);
+  const totalReturn = startingCapitalPaisa > 0 ? ((totalEquity - startingCapitalPaisa) / startingCapitalPaisa) * 100 : 0;
+  const sleeveName = (id: number | null) => sleeves.find((s) => s.id === id)?.name ?? '—';
 
-  if (isLoading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dxp-text-muted)]" /></div>;
-  }
+  if (isLoading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dxp-text-muted)]" /></div>;
 
   return (
     <div className="space-y-6">
@@ -139,7 +96,7 @@ export default function AnalystPage() {
           <Bot className="h-7 w-7 text-[var(--dxp-brand)]" />
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Analyst (Paper)</h1>
-            <p className="text-[var(--dxp-text-secondary)]">Autonomous paper-trading advisor — stocks, mutual funds & futures</p>
+            <p className="text-[var(--dxp-text-secondary)]">Four quant sleeves trading virtual money — tracked vs benchmark</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -153,63 +110,94 @@ export default function AnalystPage() {
 
       <Disclaimer />
 
-      {!hasPortfolio ? (
-        <Card><CardContent>
-          <div className="flex flex-col items-center gap-3 py-12 text-center">
-            <Bot className="h-12 w-12 text-[var(--dxp-text-muted)]" />
-            <p className="text-[var(--dxp-text-muted)]">No paper portfolio yet. Add instruments to your watchlist, then run the agent.</p>
-            <Link href="/investments/analyst/watchlist"><Button variant="primary"><ListPlus className="mr-2 h-4 w-4" />Build watchlist</Button></Link>
-          </div>
-        </CardContent></Card>
-      ) : (
-        <>
-          <StatsDisplay currency="INR" locale="en-IN" columns={4} stats={[
-            { label: 'Portfolio value', value: (summary?.equityPaisa ?? 0) / 100, format: 'currency' },
-            { label: 'Total P&L', value: (summary?.totalPnlPaisa ?? 0) / 100, format: 'currency' },
-            { label: 'Return %', value: Number((summary?.returnPct ?? 0).toFixed(2)), format: 'number' },
-            { label: 'Cash', value: (summary?.cashPaisa ?? 0) / 100, format: 'currency' },
-            { label: 'Open positions', value: summary?.openPositions ?? 0, format: 'number' },
-          ]} />
+      <StatsDisplay currency="INR" locale="en-IN" columns={3} stats={[
+        { label: 'Total equity', value: totalEquity / 100, format: 'currency' },
+        { label: 'Total P&L', value: (totalEquity - startingCapitalPaisa) / 100, format: 'currency' },
+        { label: 'Return %', value: Number(totalReturn.toFixed(2)), format: 'number' },
+      ]} />
 
-          <Card>
-            <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Equity vs benchmark (rebased to 100)</h3></CardHeader>
-            <CardContent><EquityCurveChart equity={equity} benchmark={benchmark} /></CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Open positions ({positions.length})</h3></CardHeader>
+      {/* Sleeve cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {sleeves.map((s) => (
+          <Card key={s.id}>
             <CardContent>
-              {positions.length === 0
-                ? <p className="py-6 text-center text-[var(--dxp-text-muted)]">No open positions yet.</p>
-                : <DataTable<Position> columns={positionCols} data={positions} emptyMessage="No positions" />}
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-[var(--dxp-text)]">{s.name}</span>
+                <Badge variant="info" className="text-[10px]">{s.cadence === 'INTRADAY' ? 'intraday' : 'daily'}</Badge>
+              </div>
+              <p className="text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{STRATEGY_LABEL[s.strategy] ?? s.strategy}</p>
+              <p className="mt-2 font-mono text-lg font-bold text-[var(--dxp-text)]">{inr(s.equityPaisa)}</p>
+              <p className={`font-mono text-sm ${s.returnPct >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{s.returnPct >= 0 ? '+' : ''}{s.returnPct.toFixed(2)}%</p>
+              <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">{s.openPositions} pos · cash {inr(s.cashPaisa)}</p>
             </CardContent>
           </Card>
+        ))}
+      </div>
 
-          <Card>
-            <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Recent decisions</h3></CardHeader>
-            <CardContent>
-              {decisions.length === 0 ? (
-                <p className="py-6 text-center text-[var(--dxp-text-muted)]">No decisions yet — run the agent.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {decisions.slice(0, 20).map((d) => (
-                    <li key={d.id} className="flex items-start gap-3 rounded border border-[var(--dxp-border-light)] p-3">
+      <Card>
+        <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Total equity vs benchmark (rebased to 100)</h3></CardHeader>
+        <CardContent><EquityCurveChart equity={equity} benchmark={benchmark} /></CardContent>
+      </Card>
+
+      {/* Decision feed with real-data evidence */}
+      <Card>
+        <CardHeader>
+          <h3 className="text-base font-bold text-[var(--dxp-text)]">Decisions</h3>
+          <p className="text-xs text-[var(--dxp-text-muted)]">Every decision shows the real data behind it — click to expand.</p>
+        </CardHeader>
+        <CardContent>
+          {decisions.length === 0 ? (
+            <p className="py-6 text-center text-[var(--dxp-text-muted)]">No decisions yet — run the agent.</p>
+          ) : (
+            <ul className="space-y-2">
+              {decisions.slice(0, 40).map((d) => {
+                const open = expanded === d.id;
+                const ev = d.evidenceJson;
+                return (
+                  <li key={d.id} className="rounded border border-[var(--dxp-border-light)]">
+                    <button className="flex w-full items-start gap-3 p-3 text-left" onClick={() => setExpanded(open ? null : d.id)}>
+                      {open ? <ChevronDown className="mt-0.5 h-4 w-4 text-[var(--dxp-text-muted)]" /> : <ChevronRight className="mt-0.5 h-4 w-4 text-[var(--dxp-text-muted)]" />}
                       <Badge variant={actionVariant(d.action)}>{d.action}</Badge>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-[var(--dxp-text)]">
                           {d.name} <span className="font-mono text-xs text-[var(--dxp-text-muted)]">{d.symbol || d.assetClass}</span>
+                          <span className="ml-2 text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{sleeveName(d.sleeveId)}</span>
                           {d.amountPaisa ? <span className="ml-2 text-xs text-[var(--dxp-text-secondary)]">{inr(d.amountPaisa)}</span> : null}
                         </div>
                         {d.rationale && <p className="text-xs text-[var(--dxp-text-secondary)]">{d.rationale}</p>}
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
+                    </button>
+                    {open && ev && (
+                      <div className="border-t border-[var(--dxp-border-light)] bg-[var(--dxp-surface)] p-3 text-xs">
+                        <p className="mb-1 font-semibold text-[var(--dxp-text)]">Rule: <span className="font-normal">{ev.rule}</span></p>
+                        <EvidenceGrid title="Inputs (real data)" obj={ev.inputs} />
+                        {ev.thresholds && <EvidenceGrid title="Thresholds" obj={ev.thresholds} />}
+                        {ev.sizing && <EvidenceGrid title="Sizing" obj={ev.sizing} />}
+                        <p className="mt-1 text-[10px] text-[var(--dxp-text-muted)]">source: {ev.source ?? '—'}{ev.dataAsOf ? ` · as of ${ev.dataAsOf}` : ''}</p>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function EvidenceGrid({ title, obj }: { title: string; obj: Record<string, number | string> }) {
+  const fmt = (k: string, v: number | string) =>
+    typeof v === 'number' && /paisa$/i.test(k) ? inr(v) : typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(2) : String(v);
+  return (
+    <div className="mb-1">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">{title}</span>
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 font-mono">
+        {Object.entries(obj).map(([k, v]) => (
+          <span key={k} className="text-[var(--dxp-text)]">{k.replace(/Paisa$/, '')}: {fmt(k, v)}</span>
+        ))}
+      </div>
     </div>
   );
 }

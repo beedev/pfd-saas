@@ -54,6 +54,9 @@ export async function POST(request: NextRequest) {
     if (assetClass !== 'MF' && !symbol) {
       return NextResponse.json({ error: 'symbol required' }, { status: 400 });
     }
+    if (!Number.isInteger(body.sleeveId)) {
+      return NextResponse.json({ error: 'sleeveId required' }, { status: 400 });
+    }
 
     const portfolio = await ensurePortfolio(userId);
     const [created] = await db
@@ -61,6 +64,7 @@ export async function POST(request: NextRequest) {
       .values({
         userId,
         portfolioId: portfolio.id,
+        sleeveId: body.sleeveId,
         assetClass,
         symbol,
         schemeCode,
@@ -68,7 +72,7 @@ export async function POST(request: NextRequest) {
         name,
         contractMultiplier: typeof body.contractMultiplier === 'number' && body.contractMultiplier > 0 ? body.contractMultiplier : 1,
       })
-      .onConflictDoNothing({ target: [agentWatchlist.userId, agentWatchlist.assetClass, agentWatchlist.symbol, agentWatchlist.schemeCode] })
+      .onConflictDoNothing({ target: [agentWatchlist.userId, agentWatchlist.sleeveId, agentWatchlist.assetClass, agentWatchlist.symbol, agentWatchlist.schemeCode] })
       .returning();
     if (!created) return NextResponse.json({ error: 'Already in watchlist' }, { status: 409 });
     return NextResponse.json({ item: created }, { status: 201 });

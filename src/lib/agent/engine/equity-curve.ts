@@ -12,6 +12,28 @@ export const AGENT_BENCHMARK_SOURCE = 'AGENT_BENCHMARK';
 
 export const agentEquitySymbol = (portfolioId: number) => `AGENT:${portfolioId}`;
 export const agentBenchmarkSymbol = (portfolioId: number) => `AGENTBM:${portfolioId}`;
+export const agentSleeveEquitySymbol = (sleeveId: number) => `AGENT_SLV:${sleeveId}`;
+
+/** Per-sleeve equity snapshot (idempotent per day). */
+export async function snapshotSleeveEquity(
+  userId: string,
+  portfolioId: number,
+  sleeveId: number,
+  sleeveName: string,
+  equityValuePaisa: number,
+  runDate: string,
+): Promise<void> {
+  await db
+    .insert(priceSnapshots)
+    .values({
+      userId, assetType: 'AGENT', assetSymbol: agentSleeveEquitySymbol(sleeveId),
+      assetName: sleeveName, price: equityValuePaisa, priceDate: runDate, source: AGENT_EQUITY_SOURCE,
+    })
+    .onConflictDoUpdate({
+      target: [priceSnapshots.userId, priceSnapshots.assetSymbol, priceSnapshots.priceDate],
+      set: { price: equityValuePaisa },
+    });
+}
 
 export async function snapshotEquity(
   userId: string,

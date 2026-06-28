@@ -24,7 +24,7 @@ import { db, scheduledJobs, mfRedemptions, type JobType } from '@/db';
 import { runSipAutoExecute } from '@/lib/cron/sip-auto-execute';
 import { runAlertsCheck } from '@/lib/cron/alerts-check';
 import { runDailyDigestJob } from '@/lib/cron/daily-digest';
-import { runAgentDailyRun } from '@/lib/cron/agent-run';
+import { runAgentV2 } from '@/lib/cron/agent-run-v2';
 import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
           break;
         case 'agent_daily_run':
           // No-ops unless the user has an enabled paper portfolio.
-          report.result = await runAgentDailyRun(job.userId);
+          report.result = await runAgentV2(job.userId);
           break;
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);

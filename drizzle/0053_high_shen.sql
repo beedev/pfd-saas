@@ -1,0 +1,2 @@
+DROP INDEX "agent_watchlist_unique_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_watchlist_unique_idx" ON "agent_watchlist" USING btree ("user_id","sleeve_id","asset_class","symbol","scheme_code");

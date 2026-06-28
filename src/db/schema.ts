@@ -3464,6 +3464,27 @@ export type AgentTradeType = 'BUY' | 'SELL';
 export type AgentTradeStatus = 'FILLED' | 'PENDING';
 export type AgentSide = 'LONG' | 'SHORT';
 
+// v2 — strategy sleeves (each a slice of capital with its own quant strategy).
+export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION';
+export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF';
+export type AgentCadence = 'DAILY_OPEN' | 'INTRADAY';
+
+export interface AgentSleeveParams {
+  [k: string]: number | string | boolean | undefined;
+}
+
+// Auditable REAL-DATA record behind every decision (buy/sell/hold/watch) —
+// no mock data. Captures the rule fired, the actual inputs/thresholds, the
+// sizing math, and provenance (source + as-of) of the data used.
+export interface AgentDecisionEvidence {
+  rule: string;
+  inputs: Record<string, number | string>;
+  thresholds?: Record<string, number>;
+  sizing?: Record<string, number>;
+  source?: string;
+  dataAsOf?: string;
+}
+
 export interface AgentSignalsJson {
   momentum1mPct?: number;
   momentum3mPct?: number;
@@ -3476,6 +3497,14 @@ export interface AgentSignalsJson {
   trailing?: { m1?: number; m3?: number; m6?: number; m12?: number };
   trendPct?: number;
   volatilityPct?: number;
+  // v2 factor fields
+  rsi2?: number;
+  sma5Paisa?: number;
+  donchianHighPaisa?: number;
+  donchianLowPaisa?: number;
+  atrProxyPaisa?: number;
+  momentum12_1Pct?: number;
+  rank?: number;
 }
 
 // One virtual portfolio per user — also holds the agent's per-user settings.
@@ -3503,10 +3532,35 @@ export const agentPortfolios = pgTable('agent_portfolios', {
 export type AgentPortfolio = typeof agentPortfolios.$inferSelect;
 export type NewAgentPortfolio = typeof agentPortfolios.$inferInsert;
 
+// One strategy sleeve = a slice of the portfolio with its own capital + algo.
+export const agentSleeves = pgTable('agent_sleeves', {
+  id: serial('id').primaryKey(),
+  portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  key: text('key').$type<AgentSleeveKey>().notNull(),
+  name: text('name').notNull(),
+  strategy: text('strategy').$type<AgentStrategy>().notNull(),
+  allocationPaisa: bigint('allocation_paisa', { mode: 'number' }).notNull(),
+  cashBalancePaisa: bigint('cash_balance_paisa', { mode: 'number' }).notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  cadence: text('cadence').$type<AgentCadence>().notNull().default('DAILY_OPEN'),
+  paramsJson: jsonb('params_json').$type<AgentSleeveParams>(),
+  lastRunAt: timestamp('last_run_at', { mode: 'date' }),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_sleeves_user_id_idx').on(table.userId),
+  uniqueIndex('agent_sleeves_portfolio_key_idx').on(table.portfolioId, table.key),
+]);
+
+export type AgentSleeve = typeof agentSleeves.$inferSelect;
+export type NewAgentSleeve = typeof agentSleeves.$inferInsert;
+
 // Instruments the agent monitors.
 export const agentWatchlist = pgTable('agent_watchlist', {
   id: serial('id').primaryKey(),
   portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').references(() => agentSleeves.id, { onDelete: 'cascade' }),
   assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
   symbol: text('symbol').notNull().default(''),               // Yahoo symbol (STOCK/FUTURE)
   schemeCode: text('scheme_code').notNull().default(''),      // AMFI scheme code (MF)
@@ -3518,7 +3572,7 @@ export const agentWatchlist = pgTable('agent_watchlist', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('agent_watchlist_user_id_idx').on(table.userId),
-  uniqueIndex('agent_watchlist_unique_idx').on(table.userId, table.assetClass, table.symbol, table.schemeCode),
+  uniqueIndex('agent_watchlist_unique_idx').on(table.userId, table.sleeveId, table.assetClass, table.symbol, table.schemeCode),
 ]);
 
 export type AgentWatchlistItem = typeof agentWatchlist.$inferSelect;
@@ -3553,6 +3607,7 @@ export type NewAgentRun = typeof agentRuns.$inferInsert;
 export const agentSignals = pgTable('agent_signals', {
   id: serial('id').primaryKey(),
   portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').references(() => agentSleeves.id, { onDelete: 'cascade' }),
   runId: integer('run_id').notNull().references(() => agentRuns.id, { onDelete: 'cascade' }),
   runDate: text('run_date').notNull(),
   assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
@@ -3562,11 +3617,13 @@ export const agentSignals = pgTable('agent_signals', {
   score: real('score').notNull().default(0),
   recommendation: text('recommendation').$type<AgentRecommendation>().notNull().default('HOLD'),
   signalsJson: jsonb('signals_json').$type<AgentSignalsJson>(),
+  source: text('source'),                                     // NSE | YAHOO | AMFI
+  dataAsOf: timestamp('data_as_of', { mode: 'date' }),        // as-of of the underlying data
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('agent_signals_user_date_idx').on(table.userId, table.runDate),
-  uniqueIndex('agent_signals_run_symbol_idx').on(table.runId, table.symbol),
+  uniqueIndex('agent_signals_run_symbol_idx').on(table.runId, table.sleeveId, table.symbol),
 ]);
 
 export type AgentSignal = typeof agentSignals.$inferSelect;
@@ -3576,6 +3633,7 @@ export type NewAgentSignal = typeof agentSignals.$inferInsert;
 export const agentDecisions = pgTable('agent_decisions', {
   id: serial('id').primaryKey(),
   portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').references(() => agentSleeves.id, { onDelete: 'cascade' }),
   runId: integer('run_id').notNull().references(() => agentRuns.id, { onDelete: 'cascade' }),
   signalId: integer('signal_id'),
   action: text('action').$type<AgentAction>().notNull(),
@@ -3587,6 +3645,7 @@ export const agentDecisions = pgTable('agent_decisions', {
   amountPaisa: bigint('amount_paisa', { mode: 'number' }),
   confidence: text('confidence'),
   rationale: text('rationale'),
+  evidenceJson: jsonb('evidence_json').$type<AgentDecisionEvidence>(),
   executed: boolean('executed').notNull().default(false),
   tradeId: integer('trade_id'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
@@ -3602,6 +3661,7 @@ export type NewAgentDecision = typeof agentDecisions.$inferInsert;
 export const agentTrades = pgTable('agent_trades', {
   id: serial('id').primaryKey(),
   portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').references(() => agentSleeves.id, { onDelete: 'cascade' }),
   decisionId: integer('decision_id'),
   runId: integer('run_id'),
   type: text('type').$type<AgentTradeType>().notNull(),
@@ -3630,7 +3690,7 @@ export const agentTrades = pgTable('agent_trades', {
   index('agent_trades_date_idx').on(table.tradeDate),
   // One open deferred (PENDING) fill per instrument per portfolio.
   uniqueIndex('agent_trades_one_pending_idx')
-    .on(table.portfolioId, table.symbol, table.schemeCode)
+    .on(table.sleeveId, table.symbol, table.schemeCode)
     .where(sql`status = 'PENDING'`),
 ]);
 
@@ -3641,6 +3701,7 @@ export type NewAgentTrade = typeof agentTrades.$inferInsert;
 export const agentPositions = pgTable('agent_positions', {
   id: serial('id').primaryKey(),
   portfolioId: integer('portfolio_id').notNull().references(() => agentPortfolios.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').references(() => agentSleeves.id, { onDelete: 'cascade' }),
   watchlistId: integer('watchlist_id'),
   assetClass: text('asset_class').$type<AgentAssetClass>().notNull(),
   symbol: text('symbol').notNull().default(''),
@@ -3658,7 +3719,7 @@ export const agentPositions = pgTable('agent_positions', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [
   index('agent_positions_user_id_idx').on(table.userId),
-  uniqueIndex('agent_positions_unique_idx').on(table.portfolioId, table.assetClass, table.symbol),
+  uniqueIndex('agent_positions_unique_idx').on(table.sleeveId, table.assetClass, table.symbol, table.schemeCode),
 ]);
 
 export type AgentPosition = typeof agentPositions.$inferSelect;
