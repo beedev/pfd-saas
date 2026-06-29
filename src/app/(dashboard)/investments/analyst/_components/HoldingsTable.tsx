@@ -16,6 +16,7 @@ export interface Position {
   unrealizedPnlPaisa: number | null; openedDate: string;
 }
 interface SleeveLite { id: number; name: string }
+export interface DecisionLite { symbol: string; name: string; action: string; rationale: string | null }
 
 const inr = (p: number | null | undefined) =>
   p == null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
@@ -24,7 +25,7 @@ const inrPrice = (p: number | null | undefined) =>
 const qty = (q: number) => (Number.isInteger(q) ? String(q) : q.toFixed(3));
 const costOf = (p: Position) => p.avgPricePaisa * p.quantity * (p.contractMultiplier || 1);
 
-export function HoldingsTable({ sleeves, positions }: { sleeves: SleeveLite[]; positions: Position[] }) {
+export function HoldingsTable({ sleeves, positions, decisions = [] }: { sleeves: SleeveLite[]; positions: Position[]; decisions?: DecisionLite[] }) {
   const bySleeve = new Map<number, Position[]>();
   for (const p of positions) {
     const k = p.sleeveId ?? -1;
@@ -32,6 +33,11 @@ export function HoldingsTable({ sleeves, positions }: { sleeves: SleeveLite[]; p
     arr.push(p);
     bySleeve.set(k, arr);
   }
+  // The "why" behind each holding — its most recent BUY/SELL decision rationale.
+  const whyFor = (p: Position): string | null => {
+    const d = decisions.find((x) => (x.action === 'BUY' || x.action === 'SELL') && ((p.symbol && x.symbol === p.symbol) || (!!p.name && x.name === p.name)));
+    return d?.rationale ?? null;
+  };
 
   return (
     <Card>
@@ -85,7 +91,8 @@ export function HoldingsTable({ sleeves, positions }: { sleeves: SleeveLite[]; p
                               <td className="py-1.5 pr-3 font-sans">
                                 <span className="font-semibold text-[var(--dxp-text)]">{p.symbol || p.schemeCode}</span>
                                 {p.side === 'SHORT' && <Badge variant="warning" className="ml-1 text-[9px]">SHORT</Badge>}
-                                <span className="block max-w-[16rem] truncate text-[10px] text-[var(--dxp-text-muted)]">{p.name}</span>
+                                <span className="block max-w-[18rem] truncate text-[10px] text-[var(--dxp-text-muted)]">{p.name}</span>
+                                {whyFor(p) && <span className="mt-0.5 block max-w-[22rem] text-[10px] italic text-[var(--dxp-text-secondary)]" title={whyFor(p) as string}>why: {whyFor(p)}</span>}
                               </td>
                               <td className="py-1.5 px-2 text-right text-[var(--dxp-text-secondary)]">{qty(p.quantity)}</td>
                               <td className="py-1.5 px-2 text-right text-[var(--dxp-text-secondary)]">{inrPrice(p.avgPricePaisa)}</td>

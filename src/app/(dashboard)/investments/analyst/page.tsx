@@ -21,6 +21,7 @@ import { HoldingsTable, type Position } from './_components/HoldingsTable';
 interface Sleeve {
   id: number; key: string; name: string; strategy: string; cadence: string;
   allocationPaisa: number; cashPaisa: number; equityPaisa: number;
+  positionsValuePaisa: number; unrealizedPnlPaisa: number;
   returnPct: number; openPositions: number;
 }
 interface Evidence {
@@ -125,23 +126,37 @@ export default function AnalystPage() {
 
       {/* Sleeve cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {sleeves.map((s) => (
-          <Card key={s.id}>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-[var(--dxp-text)]">{s.name}</span>
-                <Badge variant="info" className="text-[10px]">{s.cadence === 'INTRADAY' ? 'intraday' : 'daily'}</Badge>
-              </div>
-              <p className="text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{STRATEGY_LABEL[s.strategy] ?? s.strategy}</p>
-              <p className="mt-2 font-mono text-lg font-bold text-[var(--dxp-text)]">{inr(s.equityPaisa)}</p>
-              <p className={`font-mono text-sm ${s.returnPct >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{s.returnPct >= 0 ? '+' : ''}{s.returnPct.toFixed(2)}%</p>
-              <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">{s.openPositions} pos · cash {inr(s.cashPaisa)}</p>
-            </CardContent>
-          </Card>
-        ))}
+        {sleeves.map((s) => {
+          const mv = s.positionsValuePaisa;
+          const pnl = s.unrealizedPnlPaisa;
+          const cost = mv - pnl;
+          const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+          const invested = mv > 0;
+          return (
+            <Card key={s.id}>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-[var(--dxp-text)]">{s.name}</span>
+                  <Badge variant="info" className="text-[10px]">{s.cadence === 'INTRADAY' ? 'intraday' : 'daily'}</Badge>
+                </div>
+                <p className="text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{STRATEGY_LABEL[s.strategy] ?? s.strategy}</p>
+                <p className="mt-2 text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">Market value</p>
+                <p className="font-mono text-lg font-bold text-[var(--dxp-text)]">{inr(mv)}</p>
+                {invested ? (
+                  <p className={`font-mono text-sm ${pnl >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                    {pnl >= 0 ? '+' : ''}{inr(pnl)} ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
+                  </p>
+                ) : (
+                  <p className="font-mono text-sm text-[var(--dxp-text-muted)]">not invested</p>
+                )}
+                <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">{s.openPositions} pos · cash {inr(s.cashPaisa)} of {inr(s.allocationPaisa)}</p>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      <HoldingsTable sleeves={sleeves} positions={positions} />
+      <HoldingsTable sleeves={sleeves} positions={positions} decisions={decisions} />
 
       <Card>
         <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Total equity vs benchmark (rebased to 100)</h3></CardHeader>

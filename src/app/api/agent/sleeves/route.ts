@@ -21,12 +21,13 @@ export async function GET() {
     const summary = sleeves.map((s) => {
       const pos = positions.filter((p) => p.sleeveId === s.id);
       const posValue = pos.reduce((acc, p) => acc + (p.marketValuePaisa ?? Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier)), 0);
+      const unrealizedPnl = pos.reduce((acc, p) => acc + (p.unrealizedPnlPaisa ?? 0), 0);
       const equity = s.cashBalancePaisa + posValue;
       const returnPct = s.allocationPaisa > 0 ? ((equity - s.allocationPaisa) / s.allocationPaisa) * 100 : 0;
       return {
         id: s.id, key: s.key, name: s.name, strategy: s.strategy, cadence: s.cadence, enabled: s.enabled,
         allocationPaisa: s.allocationPaisa, cashPaisa: s.cashBalancePaisa, equityPaisa: equity,
-        positionsValuePaisa: posValue, returnPct, openPositions: pos.length, lastRunAt: s.lastRunAt,
+        positionsValuePaisa: posValue, unrealizedPnlPaisa: unrealizedPnl, returnPct, openPositions: pos.length, lastRunAt: s.lastRunAt,
       };
     });
     return NextResponse.json({ portfolio, sleeves: summary });
