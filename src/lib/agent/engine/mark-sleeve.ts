@@ -4,8 +4,31 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db, agentPositions } from '@/db';
+import { db, agentPositions, type AgentPosition } from '@/db';
 import { getInstrumentQuote, type InstrumentRef } from '../market-data';
+
+/**
+ * Mark ALL of a user's open positions to live prices and return them with fresh
+ * marketValue / unrealized P&L (and persist the update). Called on dashboard
+ * reads so tiles + holdings show CURRENT worth between agent runs, not the price
+ * frozen at the last run. MF marks use the latest (EOD) NAV. Best-effort: a
+ * position whose quote can't be fetched keeps its last mark.
+ */
+export async function markUserPositions(userId: string): Promise<AgentPosition[]> {
+  const positions = await db.select().from(agentPositions).where(eq(agentPositions.userId, userId));
+  for (const pos of positions) {
+    const ref: InstrumentRef = { assetClass: pos.assetClass, symbol: pos.symbol || undefined, schemeCode: pos.schemeCode || undefined };
+    const quote = await getInstrumentQuote(ref);
+    if (!quote) continue;
+    const last = quote.lastPricePaisa;
+    const directional = pos.side === 'SHORT' ? -1 : 1;
+    pos.marketValuePaisa = Math.round(last * pos.quantity * pos.contractMultiplier);
+    pos.lastPricePaisa = last;
+    pos.unrealizedPnlPaisa = Math.round((last - pos.avgPricePaisa) * pos.quantity * pos.contractMultiplier) * directional;
+    await db.update(agentPositions).set({ lastPricePaisa: last, marketValuePaisa: pos.marketValuePaisa, unrealizedPnlPaisa: pos.unrealizedPnlPaisa, updatedAt: new Date() }).where(eq(agentPositions.id, pos.id));
+  }
+  return positions;
+}
 
 export async function markSleeveToMarket(
   userId: string,

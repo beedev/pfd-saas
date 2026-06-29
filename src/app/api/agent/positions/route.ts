@@ -1,18 +1,15 @@
-/** GET /api/agent/positions — open paper positions for the user's portfolio. */
+/** GET /api/agent/positions — open paper positions, marked to live prices. */
 import { NextResponse } from 'next/server';
-import { desc, eq } from 'drizzle-orm';
-import { db, agentPositions } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { markUserPositions } from '@/lib/agent/engine/mark-sleeve';
 
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) return unauthenticated();
   try {
-    const rows = await db
-      .select()
-      .from(agentPositions)
-      .where(eq(agentPositions.userId, userId))
-      .orderBy(desc(agentPositions.marketValuePaisa));
+    // Mark to live prices on read so holdings show current price + P&L.
+    const rows = await markUserPositions(userId);
+    rows.sort((a, b) => (b.marketValuePaisa ?? 0) - (a.marketValuePaisa ?? 0));
     return NextResponse.json({ positions: rows });
   } catch (err) {
     console.error('GET agent/positions:', err);

@@ -5,10 +5,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
-import { db, agentPositions } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { ensurePortfolio, ensureSleeves } from '@/lib/cron/agent-run-v2';
+import { markUserPositions } from '@/lib/agent/engine/mark-sleeve';
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -16,7 +15,8 @@ export async function GET() {
   try {
     const portfolio = await ensurePortfolio(userId);
     const sleeves = await ensureSleeves(userId, portfolio);
-    const positions = await db.select().from(agentPositions).where(eq(agentPositions.userId, userId));
+    // Mark to live prices on read so tile equity/return reflect CURRENT worth.
+    const positions = await markUserPositions(userId);
 
     const summary = sleeves.map((s) => {
       const pos = positions.filter((p) => p.sleeveId === s.id);
