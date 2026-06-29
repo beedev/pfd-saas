@@ -57,6 +57,11 @@ export async function runIntradayOrb(
   let cash = sleeve.cashBalancePaisa;
   let openCount = positions.length;
   let trades = 0, decisions = 0, quotes = 0;
+  // Gross exposure already deployed (longs + shorts, by notional). New entries
+  // are capped so total gross never exceeds the sleeve corpus, and no single
+  // name exceeds 30% of it — paper money has no leverage.
+  let grossDeployed = positions.reduce((a, p) => a + Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier), 0);
+  const perNameCapPaisa = Math.round(sleeve.allocationPaisa * 0.30);
 
   for (const w of wl) {
     if (!w.symbol) continue;
@@ -143,10 +148,13 @@ export async function runIntradayOrb(
     const stop = long ? orLow : orHigh;
     const riskUnit = Math.abs(entry - stop);
     if (riskUnit <= 0) continue;
+    // Capital room: never exceed the corpus in total, nor 30% in one name.
+    const room = Math.min(perNameCapPaisa, sleeve.allocationPaisa - grossDeployed);
+    if (room < entry) continue; // no room for even one unit
     const riskBudget = Math.round((sleeve.allocationPaisa * p.riskPctPerTrade) / 100);
     let qty = Math.floor(riskBudget / riskUnit);
-    if (long) qty = Math.min(qty, Math.floor(cash / entry));
-    else qty = Math.min(qty, Math.floor(sleeve.allocationPaisa / entry)); // cap short notional to allocation
+    qty = Math.min(qty, Math.floor(room / entry));               // gross + per-name cap
+    if (long) qty = Math.min(qty, Math.floor(cash / entry));     // longs also bounded by cash
     if (qty < 1) continue;
 
     const notional = entry * qty;
@@ -181,6 +189,7 @@ export async function runIntradayOrb(
     });
     await db.update(agentDecisions).set({ tradeId: trade.id }).where(eq(agentDecisions.id, dec.id));
     if (long) cash -= notional; // shorts tie up paper margin, not cash
+    grossDeployed += notional;
     openCount++; trades++;
   }
 

@@ -24,6 +24,10 @@ const inrPrice = (p: number | null | undefined) =>
   p == null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(p / 100);
 const qty = (q: number) => (Number.isInteger(q) ? String(q) : q.toFixed(3));
 const costOf = (p: Position) => p.avgPricePaisa * p.quantity * (p.contractMultiplier || 1);
+// A long is worth its market value; a short contributes only its P&L (its
+// notional is exposure, not owned value) — keeps totals reconciled to corpus.
+const valueOf = (p: Position) => (p.side === 'SHORT' ? (p.unrealizedPnlPaisa ?? 0) : (p.marketValuePaisa ?? 0));
+const notionalOf = (p: Position) => Math.round((p.lastPricePaisa ?? p.avgPricePaisa) * p.quantity * (p.contractMultiplier || 1));
 
 export function HoldingsTable({ sleeves, positions, decisions = [] }: { sleeves: SleeveLite[]; positions: Position[]; decisions?: DecisionLite[] }) {
   const bySleeve = new Map<number, Position[]>();
@@ -54,7 +58,7 @@ export function HoldingsTable({ sleeves, positions, decisions = [] }: { sleeves:
           <div className="space-y-5">
             {sleeves.filter((s) => (bySleeve.get(s.id)?.length ?? 0) > 0).map((s) => {
               const rows = bySleeve.get(s.id)!;
-              const mv = rows.reduce((a, r) => a + (r.marketValuePaisa ?? 0), 0);
+              const mv = rows.reduce((a, r) => a + valueOf(r), 0);
               const pnl = rows.reduce((a, r) => a + (r.unrealizedPnlPaisa ?? 0), 0);
               const cost = rows.reduce((a, r) => a + costOf(r), 0);
               const pct = cost ? (pnl / cost) * 100 : 0;
@@ -97,7 +101,10 @@ export function HoldingsTable({ sleeves, positions, decisions = [] }: { sleeves:
                               <td className="py-1.5 px-2 text-right text-[var(--dxp-text-secondary)]">{qty(p.quantity)}</td>
                               <td className="py-1.5 px-2 text-right text-[var(--dxp-text-secondary)]">{inrPrice(p.avgPricePaisa)}</td>
                               <td className="py-1.5 px-2 text-right text-[var(--dxp-text)]">{inrPrice(p.lastPricePaisa)}</td>
-                              <td className="py-1.5 px-2 text-right text-[var(--dxp-text)]">{inr(p.marketValuePaisa)}</td>
+                              <td className="py-1.5 px-2 text-right text-[var(--dxp-text)]">
+                                {inr(valueOf(p))}
+                                {p.side === 'SHORT' && <span className="block text-[10px] text-[var(--dxp-text-muted)]">short {inr(notionalOf(p))}</span>}
+                              </td>
                               <td className={`py-1.5 pl-2 text-right ${up ? 'text-emerald-700' : 'text-rose-600'}`}>
                                 {up ? '+' : ''}{inr(p.unrealizedPnlPaisa)}
                                 {ppct != null && <span className="block text-[10px]">{up ? '+' : ''}{ppct.toFixed(2)}%</span>}

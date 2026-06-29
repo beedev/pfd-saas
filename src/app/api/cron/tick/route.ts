@@ -89,15 +89,21 @@ export async function POST(request: NextRequest) {
   // NOW() do the comparison keeps both sides in the same frame.
   // TODO: migrate every timestamp column to `timestamptz` to remove
   // this entire class of bug (~80 columns, deferred to a later sprint).
+  // Atomically CLAIM due jobs by leasing next_run_at 10 min forward in the SAME
+  // statement that selects them. A concurrent tick (the scheduler fires every
+  // 60s, but a job can run for minutes) won't re-select a leased job — this
+  // prevents the double-run that caused lost cash updates. The real next_run_at
+  // is set per job after it completes below.
   const due = await db
-    .select()
-    .from(scheduledJobs)
+    .update(scheduledJobs)
+    .set({ nextRunAt: sql`NOW() + interval '10 minutes'` })
     .where(
       and(
         eq(scheduledJobs.enabled, true),
         sql`${scheduledJobs.nextRunAt} <= NOW()`,
       ),
-    );
+    )
+    .returning();
 
   const tickStartedAt = new Date().toISOString();
 

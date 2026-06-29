@@ -20,7 +20,12 @@ export async function GET() {
 
     const summary = sleeves.map((s) => {
       const pos = positions.filter((p) => p.sleeveId === s.id);
-      const posValue = pos.reduce((acc, p) => acc + (p.marketValuePaisa ?? Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier)), 0);
+      // Equity contribution: a long is worth its market value; a short ties up
+      // no cash, so it contributes only its P&L (its notional is exposure, not
+      // owned value). This keeps value + cash reconciled to the corpus.
+      const posValue = pos.reduce((acc, p) => acc + (p.side === 'SHORT'
+        ? (p.unrealizedPnlPaisa ?? 0)
+        : (p.marketValuePaisa ?? Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier))), 0);
       const unrealizedPnl = pos.reduce((acc, p) => acc + (p.unrealizedPnlPaisa ?? 0), 0);
       const equity = s.cashBalancePaisa + posValue;
       const returnPct = s.allocationPaisa > 0 ? ((equity - s.allocationPaisa) / s.allocationPaisa) * 100 : 0;

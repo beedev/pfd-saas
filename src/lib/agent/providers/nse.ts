@@ -17,18 +17,27 @@ let cookieCache: { cookie: string; ts: number } | null = null;
 const COOKIE_TTL_MS = 10 * 60 * 1000;
 const quoteCache = new Map<string, { paisa: number; ts: number }>();
 const QUOTE_TTL_MS = 60 * 1000; // throttle: at most one live fetch per symbol per minute
+const NSE_TIMEOUT_MS = 8000;     // bound every NSE call so a hang can't stall a run
+// NSE hard-blocks some IPs (403). When bootstrap fails, back off for a while so
+// we don't retry a blocked host on every quote (that caused multi-minute runs).
+let blockedUntil = 0;
+const BLOCK_COOLDOWN_MS = 10 * 60 * 1000;
 
 async function getCookies(): Promise<string | null> {
+  if (Date.now() < blockedUntil) return null;
   if (cookieCache && Date.now() - cookieCache.ts < COOKIE_TTL_MS) return cookieCache.cookie;
   try {
     const res = await fetch(`${NSE_BASE}/`, {
       headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.9' },
-      cache: 'no-store',
+      cache: 'no-store', signal: AbortSignal.timeout(NSE_TIMEOUT_MS),
     });
+    if (!res.ok) { blockedUntil = Date.now() + BLOCK_COOLDOWN_MS; return null; } // 403 etc → back off
     const sc = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie') as string] : []);
     const cookie = sc.map((c) => c.split(';')[0]).join('; ');
     if (cookie) { cookieCache = { cookie, ts: Date.now() }; return cookie; }
+    blockedUntil = Date.now() + BLOCK_COOLDOWN_MS; // responded but no cookie → treat as blocked
   } catch (err) {
+    blockedUntil = Date.now() + BLOCK_COOLDOWN_MS;
     console.warn('NSE cookie bootstrap failed:', err instanceof Error ? err.message : err);
   }
   return null;
@@ -51,7 +60,7 @@ export async function nseEquityQuotePaisa(nseSymbol: string): Promise<number | n
     const url = `${NSE_BASE}/api/quote-equity?symbol=${encodeURIComponent(nseSymbol)}`;
     const res = await fetch(url, {
       headers: { ...COMMON_HEADERS, Referer: `${NSE_BASE}/get-quotes/equity?symbol=${encodeURIComponent(nseSymbol)}`, Cookie: cookie },
-      cache: 'no-store',
+      cache: 'no-store', signal: AbortSignal.timeout(NSE_TIMEOUT_MS),
     });
     if (!res.ok) return cached?.paisa ?? null;
     const j = (await res.json()) as { priceInfo?: { lastPrice?: number } };
@@ -89,7 +98,7 @@ export async function nseEquityDepth(nseSymbol: string): Promise<NseDepth | null
     const url = `${NSE_BASE}/api/quote-equity?symbol=${encodeURIComponent(nseSymbol)}`;
     const res = await fetch(url, {
       headers: { ...COMMON_HEADERS, Referer: `${NSE_BASE}/get-quotes/equity?symbol=${encodeURIComponent(nseSymbol)}`, Cookie: cookie },
-      cache: 'no-store',
+      cache: 'no-store', signal: AbortSignal.timeout(NSE_TIMEOUT_MS),
     });
     if (!res.ok) return cached?.depth ?? null;
     const j = (await res.json()) as {
