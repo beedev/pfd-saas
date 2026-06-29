@@ -19,12 +19,19 @@ export function CandleChart({ bars, intraday = false }: { bars: Bar[]; intraday?
     (async () => {
       const { createChart, CandlestickSeries } = await import('lightweight-charts');
       if (disposed || !ref.current) return;
+      // lightweight-charts renders intraday time in UTC; format ticks + crosshair in IST.
+      const istTime = (t: unknown) => new Date((t as number) * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
+      const istFull = (t: unknown) => new Date((t as number) * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
       const c = createChart(ref.current, {
         height: 380,
         layout: { background: { color: 'transparent' }, textColor: '#6b7280' },
         grid: { vertLines: { color: 'rgba(0,0,0,0.06)' }, horzLines: { color: 'rgba(0,0,0,0.06)' } },
-        timeScale: { timeVisible: intraday, secondsVisible: false, borderColor: 'rgba(0,0,0,0.1)' },
+        timeScale: {
+          timeVisible: intraday, secondsVisible: false, borderColor: 'rgba(0,0,0,0.1)',
+          ...(intraday ? { tickMarkFormatter: (t: unknown) => istTime(t) } : {}),
+        },
         rightPriceScale: { borderColor: 'rgba(0,0,0,0.1)' },
+        ...(intraday ? { localization: { timeFormatter: (t: unknown) => istFull(t) } } : {}),
       });
       chart = c;
       const series = c.addSeries(CandlestickSeries, {
