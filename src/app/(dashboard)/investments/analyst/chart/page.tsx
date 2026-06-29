@@ -1,76 +1,103 @@
 'use client';
 
 /**
- * Instrument candlestick chart — type a company name OR a ticker and pick from
- * live search (Yahoo), or enter an exact Yahoo symbol (RELIANCE.NS, ^NSEI, GC=F)
- * and hit Load. Bare Indian tickers auto-retry with a .NS suffix.
+ * Instrument candlestick chart. Type a company name OR ticker and pick from live
+ * search, or enter an exact Yahoo symbol. Two modes:
+ *   • Daily — historical daily candles over a range.
+ *   • Live (intraday) — today's 5-min candles + a polled live price banner and,
+ *     for NSE stocks in market hours, a Depth-of-Market (order book) panel.
+ * Feeds are polled (NSE ~10s, Yahoo delayed) — not a true tick stream.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
-import { Button, Card, CardHeader, CardContent, Input, Select } from '@dxp/ui';
-import { ArrowLeft, Loader2, Search } from 'lucide-react';
+import { Button, Card, CardHeader, CardContent, Input, Select, Badge } from '@dxp/ui';
+import { ArrowLeft, Loader2, Search, Radio } from 'lucide-react';
 import { CandleChart, type Bar } from '../_components/CandleChart';
+import { DepthPanel, type Depth } from '../_components/DepthPanel';
 
 const RANGE_OPTIONS = [
-  { value: '3mo', label: '3 months' },
-  { value: '6mo', label: '6 months' },
-  { value: '1y', label: '1 year' },
-  { value: '2y', label: '2 years' },
-  { value: '5y', label: '5 years' },
+  { value: '3mo', label: '3 months' }, { value: '6mo', label: '6 months' },
+  { value: '1y', label: '1 year' }, { value: '2y', label: '2 years' }, { value: '5y', label: '5 years' },
 ];
 
 interface Hit { symbol: string; name: string; exchange?: string; type?: string }
-const isExactSymbol = (s: string) => /[.=^]/.test(s); // already a Yahoo symbol form
+interface Live { marketOpen: boolean; source?: string; asOf?: number | null; ltpPaisa: number | null; changePct?: number | null; depth?: Depth | null; depthNote?: string }
+const isExactSymbol = (s: string) => /[.=^]/.test(s);
+const rupee = (p: number) => '₹' + (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const clock = (sec?: number | null) => (sec ? new Date(sec * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—');
 
 export default function ChartPage() {
   const [symbol, setSymbol] = useState('RELIANCE.NS');
   const [range, setRange] = useState('1y');
+  const [live, setLive] = useState(false);
   const [bars, setBars] = useState<Bar[]>([]);
   const [loaded, setLoaded] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hits, setHits] = useState<Hit[]>([]);
   const [showHits, setShowHits] = useState(false);
+  const [liveData, setLiveData] = useState<Live | null>(null);
+  const loadedRef = useRef('');
 
-  // Type-ahead: search by name/ticker (skip when it's already an exact symbol).
+  // Type-ahead search (skip exact symbols).
   useEffect(() => {
     const q = symbol.trim();
     if (q.length < 2 || isExactSymbol(q)) { setHits([]); return; }
     const t = setTimeout(async () => {
       try {
         const r = await fetch(`/api/agent/watchlist/search?q=${encodeURIComponent(q)}&class=STOCK`).then((r) => r.json());
-        setHits(r.results ?? []);
-        setShowHits(true);
+        setHits(r.results ?? []); setShowHits(true);
       } catch { setHits([]); }
     }, 300);
     return () => clearTimeout(t);
   }, [symbol]);
 
+  const loadCandles = useCallback(async (sym: string, useLive: boolean) => {
+    const qs = useLive ? `symbol=${encodeURIComponent(sym)}&interval=5m` : `symbol=${encodeURIComponent(sym)}&range=${range}`;
+    let r = await fetch(`/api/agent/instrument/ohlc?${qs}`).then((r) => r.json());
+    let out: Bar[] = r.bars ?? [];
+    if (!out.length && !isExactSymbol(sym)) { // bare Indian ticker → retry .NS
+      const alt = `${sym.toUpperCase()}.NS`;
+      const r2 = await fetch(`/api/agent/instrument/ohlc?${useLive ? `symbol=${encodeURIComponent(alt)}&interval=5m` : `symbol=${encodeURIComponent(alt)}&range=${range}`}`).then((r) => r.json());
+      if ((r2.bars ?? []).length) { out = r2.bars; return { bars: out, sym: alt }; }
+    }
+    return { bars: out, sym };
+  }, [range]);
+
   const load = useCallback(async (override?: string) => {
-    let sym = (override ?? symbol).trim();
-    if (!sym) { toast.info('Enter a symbol or company name'); return; }
-    setShowHits(false);
-    setIsLoading(true);
+    const want = (override ?? symbol).trim();
+    if (!want) { toast.info('Enter a symbol or company name'); return; }
+    setShowHits(false); setIsLoading(true);
     try {
-      let r = await fetch(`/api/agent/instrument/ohlc?symbol=${encodeURIComponent(sym)}&range=${range}`).then((r) => r.json());
-      if (r.error) throw new Error(r.error);
-      let resultBars: Bar[] = r.bars ?? [];
-      // Bare Indian ticker with no data → retry on the NSE suffix.
-      if (!resultBars.length && !isExactSymbol(sym)) {
-        const alt = `${sym.toUpperCase()}.NS`;
-        const r2 = await fetch(`/api/agent/instrument/ohlc?symbol=${encodeURIComponent(alt)}&range=${range}`).then((r) => r.json());
-        if ((r2.bars ?? []).length) { resultBars = r2.bars; sym = alt; }
-      }
-      setBars(resultBars);
-      setLoaded(sym.toUpperCase());
-      if (!resultBars.length) toast.info('No data for that symbol — try the search suggestions');
+      const { bars: out, sym } = await loadCandles(want, live);
+      setBars(out); setLoaded(sym.toUpperCase()); loadedRef.current = sym.toUpperCase();
+      if (!out.length) toast.info(live ? 'No intraday data (market may be closed)' : 'No data — try the search suggestions');
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed to load'); }
     finally { setIsLoading(false); }
-  }, [symbol, range]);
+  }, [symbol, live, loadCandles]);
+
+  // Live polling: price banner + DOM + refreshing 5-min candles, every 15s.
+  useEffect(() => {
+    if (!live || !loaded) { setLiveData(null); return; }
+    let stop = false;
+    const tick = async () => {
+      try {
+        const d = await fetch(`/api/agent/instrument/live?symbol=${encodeURIComponent(loaded)}`).then((r) => r.json());
+        if (!stop) setLiveData(d);
+        const { bars: out } = await loadCandles(loaded, true);
+        if (!stop && out.length) setBars(out);
+      } catch { /* keep last */ }
+    };
+    tick();
+    const id = setInterval(tick, 15000);
+    return () => { stop = true; clearInterval(id); };
+  }, [live, loaded, loadCandles]);
 
   const pick = (h: Hit) => { setSymbol(h.symbol); setShowHits(false); setHits([]); load(h.symbol); };
+
+  const up = (liveData?.changePct ?? 0) >= 0;
 
   return (
     <div className="space-y-6">
@@ -84,27 +111,15 @@ export default function ChartPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="relative flex-1">
               <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Company name or symbol</label>
-              <Input
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
-                onFocus={() => hits.length && setShowHits(true)}
-                onBlur={() => setTimeout(() => setShowHits(false), 150)}
-                placeholder="Type a name (Reliance, Tata Motors) or a symbol (^NSEI, GC=F)"
-                onKeyDown={(e) => e.key === 'Enter' && load()}
-              />
+              <Input value={symbol} onChange={(e) => setSymbol(e.target.value)}
+                onFocus={() => hits.length && setShowHits(true)} onBlur={() => setTimeout(() => setShowHits(false), 150)}
+                placeholder="Reliance, Tata Motors, ^NSEI, GC=F" onKeyDown={(e) => e.key === 'Enter' && load()} />
               {showHits && hits.length > 0 && (
                 <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded border border-[var(--dxp-border-light)] bg-[var(--dxp-surface)] shadow-lg">
                   {hits.map((h) => (
                     <li key={h.symbol}>
-                      <button
-                        type="button"
-                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-[var(--dxp-bg)]"
-                        onMouseDown={(e) => { e.preventDefault(); pick(h); }}
-                      >
-                        <span className="min-w-0">
-                          <span className="font-mono font-semibold text-[var(--dxp-text)]">{h.symbol}</span>
-                          <span className="ml-2 truncate text-xs text-[var(--dxp-text-muted)]">{h.name}</span>
-                        </span>
+                      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-[var(--dxp-bg)]" onMouseDown={(e) => { e.preventDefault(); pick(h); }}>
+                        <span className="min-w-0"><span className="font-mono font-semibold text-[var(--dxp-text)]">{h.symbol}</span><span className="ml-2 truncate text-xs text-[var(--dxp-text-muted)]">{h.name}</span></span>
                         <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{h.type || h.exchange}</span>
                       </button>
                     </li>
@@ -116,6 +131,9 @@ export default function ChartPage() {
               <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Range</label>
               <Select value={range} onChange={setRange} options={RANGE_OPTIONS} />
             </div>
+            <Button variant={live ? 'primary' : 'secondary'} onClick={() => setLive((v) => !v)} title="Live intraday (5-min candles + order book)">
+              <Radio className={`mr-2 h-4 w-4 ${live ? 'animate-pulse' : ''}`} />{live ? 'Live: on' : 'Live'}
+            </Button>
             <Button variant="primary" onClick={() => load()} disabled={isLoading}>
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}Load
             </Button>
@@ -123,10 +141,34 @@ export default function ChartPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">{loaded || 'Chart'}</h3></CardHeader>
-        <CardContent><CandleChart bars={bars} /></CardContent>
-      </Card>
+      {/* Live price banner */}
+      {live && liveData && liveData.ltpPaisa != null && (
+        <Card>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div>
+                <span className="font-mono text-2xl font-bold text-[var(--dxp-text)]">{rupee(liveData.ltpPaisa)}</span>
+                {liveData.changePct != null && <span className={`ml-2 font-mono text-sm font-semibold ${up ? 'text-emerald-700' : 'text-rose-600'}`}>{up ? '▲' : '▼'} {Math.abs(liveData.changePct).toFixed(2)}%</span>}
+              </div>
+              <Badge variant={liveData.marketOpen ? 'success' : 'warning'}>{liveData.marketOpen ? 'Market open' : 'Market closed'}</Badge>
+              <span className="text-xs text-[var(--dxp-text-muted)]">source {liveData.source ?? '—'} · {clock(liveData.asOf)} · polled ~15s {liveData.source === 'YAHOO' ? '(delayed)' : ''}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className={live ? 'grid gap-4 lg:grid-cols-3' : ''}>
+        <Card className={live ? 'lg:col-span-2' : ''}>
+          <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">{loaded || 'Chart'}{live ? ' · 5-min' : ''}</h3></CardHeader>
+          <CardContent><CandleChart bars={bars} intraday={live} /></CardContent>
+        </Card>
+        {live && (
+          <Card>
+            <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Depth of market</h3></CardHeader>
+            <CardContent><DepthPanel depth={liveData?.depth ?? null} note={liveData?.depthNote} /></CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

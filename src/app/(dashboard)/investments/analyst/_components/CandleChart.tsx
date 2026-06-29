@@ -5,9 +5,10 @@
 
 import { useEffect, useRef } from 'react';
 
-export interface Bar { date: string; open: number; high: number; low: number; close: number }
+// Daily bars carry `date` (YYYY-MM-DD); intraday bars carry `time` (epoch sec).
+export interface Bar { date?: string; time?: number; open: number; high: number; low: number; close: number }
 
-export function CandleChart({ bars }: { bars: Bar[] }) {
+export function CandleChart({ bars, intraday = false }: { bars: Bar[]; intraday?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -22,7 +23,7 @@ export function CandleChart({ bars }: { bars: Bar[] }) {
         height: 380,
         layout: { background: { color: 'transparent' }, textColor: '#6b7280' },
         grid: { vertLines: { color: 'rgba(0,0,0,0.06)' }, horzLines: { color: 'rgba(0,0,0,0.06)' } },
-        timeScale: { timeVisible: false, borderColor: 'rgba(0,0,0,0.1)' },
+        timeScale: { timeVisible: intraday, secondsVisible: false, borderColor: 'rgba(0,0,0,0.1)' },
         rightPriceScale: { borderColor: 'rgba(0,0,0,0.1)' },
       });
       chart = c;
@@ -30,12 +31,12 @@ export function CandleChart({ bars }: { bars: Bar[] }) {
         upColor: '#059669', downColor: '#e11d48', borderVisible: false,
         wickUpColor: '#059669', wickDownColor: '#e11d48',
       });
-      series.setData(bars.map((b) => ({ time: b.date, open: b.open, high: b.high, low: b.low, close: b.close })));
+      series.setData(bars.map((b) => ({ time: (b.time ?? b.date) as never, open: b.open, high: b.high, low: b.low, close: b.close })));
       c.timeScale().fitContent();
     })();
 
     return () => { disposed = true; if (chart) chart.remove(); };
-  }, [bars]);
+  }, [bars, intraday]);
 
   if (!bars.length) {
     return <div className="flex h-64 items-center justify-center text-sm text-[var(--dxp-text-muted)]">No data — load a symbol.</div>;
