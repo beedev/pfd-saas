@@ -28,8 +28,8 @@ const IST_OFFSET = 19800; // 5.5h in seconds
 const minOfDay = (epoch: number) => Math.floor(((epoch + IST_OFFSET) % 86400) / 60);
 const nowIstMin = () => minOfDay(Math.floor(Date.now() / 1000));
 const hhmm = (epoch: number) => {
-  const m = (epoch + IST_OFFSET) % 86400;
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const m = (epoch + IST_OFFSET) % 86400; // seconds-of-day in IST
+  return `${String(Math.floor(m / 3600)).padStart(2, '0')}:${String(Math.floor((m % 3600) / 60)).padStart(2, '0')}`;
 };
 
 const OR_START = 9 * 60 + 15;   // 09:15
