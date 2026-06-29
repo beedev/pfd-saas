@@ -78,14 +78,30 @@ export async function getInstrumentQuote(ref: InstrumentRef): Promise<Instrument
   };
 }
 
-/** Is the NSE cash market currently open? (via the ^NSEI live market state.) */
+/**
+ * Is the NSE open right now? Deterministic IST trading window (Mon–Fri,
+ * 09:15–15:30) — Yahoo's `marketState` is unreliable (often undefined, lags the
+ * real open by minutes), so it must NOT be the gate. A best-effort stale-quote
+ * check guards exchange holidays; on any Yahoo error we fail OPEN (trust the
+ * clock) so a flaky feed never blocks legitimate market-hours execution.
+ */
 export async function isMarketOpen(): Promise<boolean> {
+  const istSec = Math.floor(Date.now() / 1000) + 19800; // IST = UTC+5:30, no DST
+  const dow = (Math.floor(istSec / 86400) + 4) % 7;     // 0=Sun … 6=Sat (epoch day0 = Thu)
+  const minutes = Math.floor((istSec % 86400) / 60);
+  const weekday = dow >= 1 && dow <= 5;
+  const inWindow = minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 30;
+  if (!weekday || !inWindow) return false;
+  // Holiday guard: if the index quote is clearly stale (no trade in 45+ min),
+  // the market is likely shut despite the weekday/time. Fail open on error.
   try {
     const q = await getQuote('^NSEI');
-    return q?.marketState === 'REGULAR';
-  } catch {
-    return false;
-  }
+    if (q?.regularMarketTime) {
+      const ageMin = (Date.now() / 1000 - q.regularMarketTime) / 60;
+      if (ageMin > 45) return false;
+    }
+  } catch { /* trust the clock */ }
+  return true;
 }
 
 /** Batched quotes; missing instruments are simply omitted from the map. */
