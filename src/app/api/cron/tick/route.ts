@@ -45,7 +45,7 @@ const ADVANCE_MS: Record<JobType, number> = {
   alerts_check: 5 * 60 * 1000,
   sip_auto_execute: 24 * 60 * 60 * 1000,
   agent_daily_run: 24 * 60 * 60 * 1000,
-  agent_intraday_run: 30 * 60 * 1000, // every 30 min (no-ops outside market hours)
+  agent_intraday_run: 10 * 60 * 1000, // every 10 min (catches more ORB breakouts; no-ops outside market hours)
   agent_news_ingest: 30 * 60 * 1000,  // poll RSS feeds every 30 min
 };
 
