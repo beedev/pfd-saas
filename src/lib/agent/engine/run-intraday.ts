@@ -22,6 +22,8 @@ import {
 import { getIntradayBars } from '@/lib/services/yahoo-finance';
 import { DEFAULT_COST_MODEL, tradeCostPaisa, cgTaxPaisa } from '../backtest/costs';
 import { getInPlay } from '../news/ingest';
+import { getBriefBias } from '../news/brief';
+import type { AgentBriefBias } from '@/db';
 import type { SleeveRunResult } from './run-sleeve';
 
 // IST is a fixed UTC+5:30 offset (no DST) → minutes-of-day from epoch directly.
@@ -55,17 +57,24 @@ export async function runIntradayOrb(
   const positions = await db.select().from(agentPositions)
     .where(and(eq(agentPositions.userId, userId), eq(agentPositions.sleeveId, sleeve.id)));
 
-  // Universe = the fixed liquid watchlist PLUS today's RSS "in-play" names
-  // (fresh, high-relevance — incl. mid/small caps surfaced by the news feeds),
-  // so the intraday sleeve trades what's actually in play, not just the anchors.
+  // Today's pre-market brief → directional gate (BULLISH = long-only, BEARISH =
+  // short-only) + its names join the watch universe.
+  const briefMap = await getBriefBias().catch(() => new Map<string, { bias: AgentBriefBias; impact: number | null }>());
+  const briefNames = [...briefMap.entries()]
+    .filter(([, v]) => v.bias !== 'NEUTRAL')
+    .sort((a, b) => (b[1].impact ?? 0) - (a[1].impact ?? 0))
+    .map(([s]) => s);
+  // Universe = fixed liquid watchlist PLUS news-driven names (brief first, then
+  // any other fresh in-play) — so it trades what's in play, both mid/small caps.
   const known = new Set(wl.map((w) => w.symbol));
-  const inPlayExtras = (await getInPlay().catch(() => []))
-    .filter((x) => x.symbol.endsWith('.NS') && !known.has(x.symbol)) // equities only; not already tracked
+  const inPlay = (await getInPlay().catch(() => [])).map((x) => x.symbol);
+  const extras = [...new Set([...briefNames, ...inPlay])]
+    .filter((s) => s.endsWith('.NS') && !known.has(s))
     .slice(0, 6)                                                     // bound the extra fetches
-    .map((x) => ({ id: undefined as number | undefined, symbol: x.symbol, name: x.symbol }));
+    .map((s) => ({ id: undefined as number | undefined, symbol: s, name: s }));
   const universe = [
     ...wl.map((w) => ({ id: w.id as number | undefined, symbol: w.symbol, name: w.name })),
-    ...inPlayExtras,
+    ...extras,
   ];
 
   let cash = sleeve.cashBalancePaisa;
@@ -157,6 +166,11 @@ export async function runIntradayOrb(
     const long = lastPx > orHigh;
     const short = lastPx < orLow;
     if (!long && !short) continue;
+    // Pre-market brief gate: don't fight the news. BULLISH name → take only
+    // long breakouts; BEARISH → only shorts. NEUTRAL / no view → either side.
+    const bias = briefMap.get(w.symbol)?.bias;
+    if (bias === 'BULLISH' && short) continue;
+    if (bias === 'BEARISH' && long) continue;
 
     const entry = lastPx;
     const stop = long ? orLow : orHigh;

@@ -26,6 +26,7 @@ import { runAlertsCheck } from '@/lib/cron/alerts-check';
 import { runDailyDigestJob } from '@/lib/cron/daily-digest';
 import { runAgentV2, runAgentIntraday } from '@/lib/cron/agent-run-v2';
 import { runNewsIngest } from '@/lib/agent/news/ingest';
+import { runPremarketBrief } from '@/lib/agent/news/brief';
 import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
@@ -47,7 +48,16 @@ const ADVANCE_MS: Record<JobType, number> = {
   agent_daily_run: 24 * 60 * 60 * 1000,
   agent_intraday_run: 10 * 60 * 1000, // every 10 min (catches more ORB breakouts; no-ops outside market hours)
   agent_news_ingest: 30 * 60 * 1000,  // poll RSS feeds every 30 min
+  agent_premarket_brief: 24 * 60 * 60 * 1000, // daily (anchored to 07:30 IST below)
 };
+
+// agent_premarket_brief fires at 07:30 IST — overnight/morning news digested
+// into a directional buy/short list before the 09:15 open. Same UTC-frame trick.
+const NEXT_PREMARKET_IST = sql`(
+  CASE WHEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' > now()
+  THEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
+  ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
+)`;
 
 // agent_daily_run fires at the NSE open — 09:20 IST, a 5-min buffer past the
 // 09:15 bell so `marketState` is reliably REGULAR and the first ticks have
@@ -154,6 +164,10 @@ export async function POST(request: NextRequest) {
           // Global RSS poll + tag + sentiment (idempotent; dedup by guid).
           report.result = await runNewsIngest();
           break;
+        case 'agent_premarket_brief':
+          // Global pre-market directional brief (07:30 IST) → drives intraday.
+          report.result = await runPremarketBrief();
+          break;
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);
       }
@@ -179,7 +193,9 @@ export async function POST(request: NextRequest) {
         runCount: (job.runCount ?? 0) + 1,
         nextRunAt: job.jobType === 'agent_daily_run'
           ? NEXT_DAILY_OPEN_IST
-          : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
+          : job.jobType === 'agent_premarket_brief'
+            ? NEXT_PREMARKET_IST
+            : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
         updatedAt: sql`NOW()`,
       })
       .where(eq(scheduledJobs.id, job.id));
@@ -205,7 +221,7 @@ async function ensureDefaultJobsForAllUsers(): Promise<void> {
     INSERT INTO scheduled_jobs (user_id, job_type, enabled, next_run_at)
     SELECT u.id, j.jt, true, NOW()
     FROM "user" u
-    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run'), ('agent_intraday_run'), ('agent_news_ingest')) AS j(jt)
+    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run'), ('agent_intraday_run'), ('agent_news_ingest'), ('agent_premarket_brief')) AS j(jt)
     WHERE NOT EXISTS (
       SELECT 1 FROM scheduled_jobs s WHERE s.user_id = u.id AND s.job_type = j.jt
     )

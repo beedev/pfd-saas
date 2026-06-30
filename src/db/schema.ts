@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {
@@ -3775,3 +3775,25 @@ export const agentNews = pgTable('agent_news', {
 
 export type AgentNews = typeof agentNews.$inferSelect;
 export type NewAgentNews = typeof agentNews.$inferInsert;
+
+// Pre-market brief: one LLM-assessed directional stance per stock per day, built
+// ~07:30 IST from overnight/morning news. Drives the intraday sleeve — BULLISH
+// names are long-only candidates, BEARISH short-only. Global (shared).
+export type AgentBriefBias = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+
+export const agentDailyBrief = pgTable('agent_daily_brief', {
+  id: serial('id').primaryKey(),
+  briefDate: text('brief_date').notNull(),              // IST YYYY-MM-DD
+  symbol: text('symbol').notNull(),
+  bias: text('bias').$type<AgentBriefBias>().notNull(),
+  impact: real('impact'),                              // 0..1 expected intraday magnitude
+  rationale: text('rationale'),
+  headlineCount: integer('headline_count').notNull().default(0),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('agent_brief_date_symbol_idx').on(table.briefDate, table.symbol),
+  index('agent_brief_date_idx').on(table.briefDate),
+]);
+
+export type AgentDailyBrief = typeof agentDailyBrief.$inferSelect;
+export type NewAgentDailyBrief = typeof agentDailyBrief.$inferInsert;
