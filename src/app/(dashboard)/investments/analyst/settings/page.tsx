@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, Input, Select } from '@dxp/ui';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { Disclaimer } from '../_components/Disclaimer';
+import { SelfTuningCard } from '../_components/SelfTuningCard';
 
 const RISK_OPTIONS = [
   { value: 'CONSERVATIVE', label: 'Conservative' },
@@ -127,6 +128,8 @@ export default function AnalystSettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <SelfTuningCard />
     </div>
   );
 }
