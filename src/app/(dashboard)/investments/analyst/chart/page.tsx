@@ -22,6 +22,10 @@ const RANGE_OPTIONS = [
   { value: '3mo', label: '3 months' }, { value: '6mo', label: '6 months' },
   { value: '1y', label: '1 year' }, { value: '2y', label: '2 years' }, { value: '5y', label: '5 years' },
 ];
+// Intraday granularity for live mode — today, minute-by-minute and coarser.
+const INTERVAL_OPTIONS = [
+  { value: '1m', label: '1 minute' }, { value: '5m', label: '5 minutes' }, { value: '15m', label: '15 minutes' },
+];
 
 interface Hit { symbol: string; name: string; exchange?: string; type?: string }
 interface Live { marketOpen: boolean; source?: string; asOf?: number | null; ltpPaisa: number | null; changePct?: number | null; depth?: Depth | null; depthNote?: string }
@@ -39,6 +43,9 @@ export default function ChartPage() {
   const [hits, setHits] = useState<Hit[]>([]);
   const [showHits, setShowHits] = useState(false);
   const [liveData, setLiveData] = useState<Live | null>(null);
+  const [liveTick, setLiveTick] = useState<{ price: number } | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [liveInterval, setLiveInterval] = useState('1m');
   const loadedRef = useRef('');
 
   // Type-ahead search (skip exact symbols).
@@ -55,16 +62,18 @@ export default function ChartPage() {
   }, [symbol]);
 
   const loadCandles = useCallback(async (sym: string, useLive: boolean) => {
-    const qs = useLive ? `symbol=${encodeURIComponent(sym)}&interval=5m` : `symbol=${encodeURIComponent(sym)}&range=${range}`;
-    let r = await fetch(`/api/agent/instrument/ohlc?${qs}`).then((r) => r.json());
+    const liveQs = (s: string) => `symbol=${encodeURIComponent(s)}&interval=${liveInterval}`;
+    const histQs = (s: string) => `symbol=${encodeURIComponent(s)}&range=${range}`;
+    const qs = useLive ? liveQs(sym) : histQs(sym);
+    const r = await fetch(`/api/agent/instrument/ohlc?${qs}`).then((r) => r.json());
     let out: Bar[] = r.bars ?? [];
     if (!out.length && !isExactSymbol(sym)) { // bare Indian ticker → retry .NS
       const alt = `${sym.toUpperCase()}.NS`;
-      const r2 = await fetch(`/api/agent/instrument/ohlc?${useLive ? `symbol=${encodeURIComponent(alt)}&interval=5m` : `symbol=${encodeURIComponent(alt)}&range=${range}`}`).then((r) => r.json());
+      const r2 = await fetch(`/api/agent/instrument/ohlc?${useLive ? liveQs(alt) : histQs(alt)}`).then((r) => r.json());
       if ((r2.bars ?? []).length) { out = r2.bars; return { bars: out, sym: alt }; }
     }
     return { bars: out, sym };
-  }, [range]);
+  }, [range, liveInterval]);
 
   const load = useCallback(async (override?: string) => {
     const want = (override ?? symbol).trim();
@@ -94,6 +103,25 @@ export default function ChartPage() {
     const id = setInterval(tick, 15000);
     return () => { stop = true; clearInterval(id); };
   }, [live, loaded, loadCandles]);
+
+  // Live STREAM (Yahoo websocket via server SSE): push ticks → price banner +
+  // the forming candle update in real time (no waiting for the 15s poll).
+  useEffect(() => {
+    if (!live || !loaded) { setStreaming(false); setLiveTick(null); return; }
+    const es = new EventSource(`/api/agent/instrument/stream?symbol=${encodeURIComponent(loaded)}`);
+    es.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data) as { pricePaisa?: number; changePct?: number | null; type?: string };
+        if (d.type === 'open') { setStreaming(true); return; }
+        if (typeof d.pricePaisa === 'number') {
+          setLiveTick({ price: d.pricePaisa / 100 });
+          setLiveData((prev) => ({ ...(prev ?? { marketOpen: true }), ltpPaisa: d.pricePaisa!, changePct: d.changePct ?? prev?.changePct ?? null, source: 'YAHOO·stream', asOf: Math.floor(Date.now() / 1000) }));
+        }
+      } catch { /* ignore */ }
+    };
+    es.onerror = () => setStreaming(false);
+    return () => { es.close(); setStreaming(false); };
+  }, [live, loaded]);
 
   const pick = (h: Hit) => { setSymbol(h.symbol); setShowHits(false); setHits([]); load(h.symbol); };
 
@@ -128,10 +156,12 @@ export default function ChartPage() {
               )}
             </div>
             <div className="sm:w-40">
-              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Range</label>
-              <Select value={range} onChange={setRange} options={RANGE_OPTIONS} />
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">{live ? 'Interval' : 'Range'}</label>
+              {live
+                ? <Select value={liveInterval} onChange={setLiveInterval} options={INTERVAL_OPTIONS} />
+                : <Select value={range} onChange={setRange} options={RANGE_OPTIONS} />}
             </div>
-            <Button variant={live ? 'primary' : 'secondary'} onClick={() => setLive((v) => !v)} title="Live intraday (5-min candles + order book)">
+            <Button variant={live ? 'primary' : 'secondary'} onClick={() => setLive((v) => !v)} title="Live intraday (streaming candles + order book)">
               <Radio className={`mr-2 h-4 w-4 ${live ? 'animate-pulse' : ''}`} />{live ? 'Live: on' : 'Live'}
             </Button>
             <Button variant="primary" onClick={() => load()} disabled={isLoading}>
@@ -151,7 +181,8 @@ export default function ChartPage() {
                 {liveData.changePct != null && <span className={`ml-2 font-mono text-sm font-semibold ${up ? 'text-emerald-700' : 'text-rose-600'}`}>{up ? '▲' : '▼'} {Math.abs(liveData.changePct).toFixed(2)}%</span>}
               </div>
               <Badge variant={liveData.marketOpen ? 'success' : 'warning'}>{liveData.marketOpen ? 'Market open' : 'Market closed'}</Badge>
-              <span className="text-xs text-[var(--dxp-text-muted)]">source {liveData.source ?? '—'} · {clock(liveData.asOf)} · polled ~15s {liveData.source === 'YAHOO' ? '(delayed)' : ''}</span>
+              {streaming && <Badge variant="info" className="animate-pulse">● streaming</Badge>}
+              <span className="text-xs text-[var(--dxp-text-muted)]">source {liveData.source ?? '—'} · {clock(liveData.asOf)} · {streaming ? 'live ticks' : 'polled ~15s'}</span>
             </div>
           </CardContent>
         </Card>
@@ -159,8 +190,11 @@ export default function ChartPage() {
 
       <div className={live ? 'grid gap-4 lg:grid-cols-3' : ''}>
         <Card className={live ? 'lg:col-span-2' : ''}>
-          <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">{loaded || 'Chart'}{live ? ' · 5-min' : ''}</h3></CardHeader>
-          <CardContent><CandleChart bars={bars} intraday={live} /></CardContent>
+          <CardHeader>
+            <h3 className="text-base font-bold text-[var(--dxp-text)]">{loaded || 'Chart'}{live ? ` · ${INTERVAL_OPTIONS.find((o) => o.value === liveInterval)?.label}` : ''}</h3>
+            <p className="text-xs text-[var(--dxp-text-muted)]">Scroll to zoom · drag to pan{live ? ' · candle updates live' : ''}</p>
+          </CardHeader>
+          <CardContent><CandleChart bars={bars} intraday={live} liveTick={liveTick} resetKey={`${loaded}|${live ? liveInterval : range}`} /></CardContent>
         </Card>
         {live && (
           <Card>
