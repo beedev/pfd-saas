@@ -46,7 +46,7 @@ export const NEWS_EQUITY_UNIVERSE: Array<{ symbol: string; name: string }> = [
   { symbol: 'BHEL.NS', name: 'Bharat Heavy Electricals' },
   { symbol: 'SUZLON.NS', name: 'Suzlon Energy' },
   { symbol: 'CDSL.NS', name: 'Central Depository Services' },
-  { symbol: 'BSE.NS', name: 'BSE Limited' },
+  // (BSE Ltd omitted: "BSE" collides with the exchange name in most headlines.)
   { symbol: 'YESBANK.NS', name: 'Yes Bank' },
   { symbol: 'IDEA.NS', name: 'Vodafone Idea' },
 ];
