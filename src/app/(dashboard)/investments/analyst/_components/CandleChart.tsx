@@ -17,8 +17,8 @@ type ChartLike = { remove: () => void; timeScale: () => { fitContent: () => void
 
 const toPoint = (b: Bar) => ({ time: (b.time ?? b.date) as never, open: b.open, high: b.high, low: b.low, close: b.close });
 
-export function CandleChart({ bars, intraday = false, liveTick, resetKey }: {
-  bars: Bar[]; intraday?: boolean; liveTick?: { price: number } | null; resetKey?: string;
+export function CandleChart({ bars, intraday = false, liveTick, resetKey, intervalSec }: {
+  bars: Bar[]; intraday?: boolean; liveTick?: { price: number } | null; resetKey?: string; intervalSec?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartLike | null>(null);
@@ -67,19 +67,38 @@ export function CandleChart({ bars, intraday = false, liveTick, resetKey }: {
     const s = seriesRef.current;
     if (!s || !bars.length) return;
     s.setData(bars.map(toPoint));
-    lastBarRef.current = { ...bars[bars.length - 1] };
+    const polledLast = bars[bars.length - 1];
+    const live = lastBarRef.current;
+    // If the live stream is ahead of the poll (already started a newer candle),
+    // re-apply it so setData doesn't momentarily drop it (the "vanishing" bar).
+    if (live && typeof live.time === 'number' && typeof polledLast.time === 'number' && live.time > polledLast.time) {
+      try { s.update(toPoint(live)); } catch { /* out-of-order */ }
+    } else {
+      lastBarRef.current = { ...polledLast };
+    }
     if (!fittedRef.current) { chartRef.current?.timeScale().fitContent(); fittedRef.current = true; }
   }, [bars]);
 
-  // Live tick → update the forming (last) candle in place, no redraw.
+  // Live tick → roll the candle by INTERVAL: at a boundary start a fresh candle,
+  // otherwise extend the current one. Prevents the old candle being stretched
+  // past its time (which caused the flicker/vanish at minute boundaries).
   useEffect(() => {
     const s = seriesRef.current, lb = lastBarRef.current;
     if (!liveTick || !s || !lb) return;
-    lb.close = liveTick.price;
-    if (liveTick.price > lb.high) lb.high = liveTick.price;
-    if (liveTick.price < lb.low) lb.low = liveTick.price;
-    s.update(toPoint(lb));
-  }, [liveTick]);
+    const p = liveTick.price;
+    const lbTime = typeof lb.time === 'number' ? lb.time : 0;
+    if (intraday && intervalSec && lbTime) {
+      const bucket = Math.floor(Date.now() / 1000 / intervalSec) * intervalSec;
+      if (bucket > lbTime) {                                    // new interval → new candle
+        const nb: Bar = { time: bucket, open: p, high: p, low: p, close: p };
+        lastBarRef.current = nb;
+        try { s.update(toPoint(nb)); } catch { /* ignore */ }
+        return;
+      }
+    }
+    lb.close = p; if (p > lb.high) lb.high = p; if (p < lb.low) lb.low = p;
+    try { s.update(toPoint(lb)); } catch { /* out-of-order */ }
+  }, [liveTick, intraday, intervalSec]);
 
   return (
     <div className="relative w-full" style={{ minHeight: 380 }}>

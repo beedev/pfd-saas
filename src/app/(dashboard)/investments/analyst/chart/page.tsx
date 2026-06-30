@@ -194,7 +194,7 @@ export default function ChartPage() {
             <h3 className="text-base font-bold text-[var(--dxp-text)]">{loaded || 'Chart'}{live ? ` · ${INTERVAL_OPTIONS.find((o) => o.value === liveInterval)?.label}` : ''}</h3>
             <p className="text-xs text-[var(--dxp-text-muted)]">Scroll to zoom · drag to pan{live ? ' · candle updates live' : ''}</p>
           </CardHeader>
-          <CardContent><CandleChart bars={bars} intraday={live} liveTick={liveTick} resetKey={`${loaded}|${live ? liveInterval : range}`} /></CardContent>
+          <CardContent><CandleChart bars={bars} intraday={live} liveTick={liveTick} resetKey={`${loaded}|${live ? liveInterval : range}`} intervalSec={{ '1m': 60, '5m': 300, '15m': 900 }[liveInterval] ?? 60} /></CardContent>
         </Card>
         {live && (
           <Card>
