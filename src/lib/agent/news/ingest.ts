@@ -10,6 +10,7 @@ import { db, agentNews, agentWatchlist, type AgentNews } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
 import { FEEDS } from './feeds';
 import { parseFeed } from './rss';
+import { NEWS_EQUITY_UNIVERSE, aliasesFromName } from './universe';
 
 const UA = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -17,7 +18,13 @@ const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 let aliasCache: { map: Map<string, string[]>; ts: number } | null = null;
 const ALIAS_TTL = 60 * 60 * 1000;
 
-/** symbol → name aliases, from Yahoo longName of tracked stock/future symbols. */
+/**
+ * symbol → name aliases. Tagged universe = the tracked stock/future watchlists
+ * (Yahoo longName) PLUS a curated mid/small-cap NEWS_EQUITY_UNIVERSE, so the
+ * in-play signal can surface non-large-cap movers for the intraday sleeve.
+ * Multi-word names → first two words (distinctive); single-word → the word,
+ * matched on a boundary — keeps tagging precise.
+ */
 async function buildAliasMap(): Promise<Map<string, string[]>> {
   if (aliasCache && Date.now() - aliasCache.ts < ALIAS_TTL) return aliasCache.map;
   const rows = await db.selectDistinct({ symbol: agentWatchlist.symbol, assetClass: agentWatchlist.assetClass }).from(agentWatchlist);
@@ -26,18 +33,15 @@ async function buildAliasMap(): Promise<Map<string, string[]>> {
   if (symbols.length) {
     const quotes = await getQuotes(symbols);
     for (const q of quotes) {
-      // Strip legal suffixes + punctuation; keep the distinctive name words.
-      const raw = (q.longName || q.shortName || '')
-        .replace(/\b(Limited|Ltd\.?|Inc\.?|Corp\.?|Pvt\.?|PLC|Co\.?)\b/gi, '')
-        .replace(/[^A-Za-z0-9& ]/g, ' ').replace(/\s+/g, ' ').trim();
-      const words = raw.split(' ').filter(Boolean);
-      // Multi-word → the first two words as a distinctive phrase ("Reliance
-      // Industries", "State Bank", "HDFC Bank") so we don't match a sibling
-      // company ("Reliance Infra") or a generic word ("State"). Single-word →
-      // the word itself (matched on a boundary, so \bITC\b ≠ "bitcoin").
-      const aliases = words.length >= 2 ? [words.slice(0, 2).join(' ')] : (words[0]?.length >= 3 ? [words[0]] : []);
+      const aliases = aliasesFromName(q.longName || q.shortName || '');
       if (aliases.length) map.set(q.symbol, aliases);
     }
+  }
+  // Curated mid/small-cap universe (news-only; names provided so no extra quote fetches).
+  for (const { symbol, name } of NEWS_EQUITY_UNIVERSE) {
+    if (map.has(symbol)) continue;
+    const aliases = aliasesFromName(name);
+    if (aliases.length) map.set(symbol, aliases);
   }
   aliasCache = { map, ts: Date.now() };
   return map;

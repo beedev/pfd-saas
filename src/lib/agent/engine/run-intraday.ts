@@ -19,8 +19,9 @@ import {
   db, agentWatchlist, agentSignals, agentDecisions, agentTrades, agentPositions,
   agentSleeves, type AgentSleeve, type AgentDecisionEvidence,
 } from '@/db';
-import { getIntradayBars, type IntradayBar } from '@/lib/services/yahoo-finance';
+import { getIntradayBars } from '@/lib/services/yahoo-finance';
 import { DEFAULT_COST_MODEL, tradeCostPaisa, cgTaxPaisa } from '../backtest/costs';
+import { getInPlay } from '../news/ingest';
 import type { SleeveRunResult } from './run-sleeve';
 
 // IST is a fixed UTC+5:30 offset (no DST) → minutes-of-day from epoch directly.
@@ -54,6 +55,19 @@ export async function runIntradayOrb(
   const positions = await db.select().from(agentPositions)
     .where(and(eq(agentPositions.userId, userId), eq(agentPositions.sleeveId, sleeve.id)));
 
+  // Universe = the fixed liquid watchlist PLUS today's RSS "in-play" names
+  // (fresh, high-relevance — incl. mid/small caps surfaced by the news feeds),
+  // so the intraday sleeve trades what's actually in play, not just the anchors.
+  const known = new Set(wl.map((w) => w.symbol));
+  const inPlayExtras = (await getInPlay().catch(() => []))
+    .filter((x) => x.symbol.endsWith('.NS') && !known.has(x.symbol)) // equities only; not already tracked
+    .slice(0, 6)                                                     // bound the extra fetches
+    .map((x) => ({ id: undefined as number | undefined, symbol: x.symbol, name: x.symbol }));
+  const universe = [
+    ...wl.map((w) => ({ id: w.id as number | undefined, symbol: w.symbol, name: w.name })),
+    ...inPlayExtras,
+  ];
+
   let cash = sleeve.cashBalancePaisa;
   let openCount = positions.length;
   let trades = 0, decisions = 0, quotes = 0;
@@ -63,7 +77,7 @@ export async function runIntradayOrb(
   let grossDeployed = positions.reduce((a, p) => a + Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier), 0);
   const perNameCapPaisa = Math.round(sleeve.allocationPaisa * 0.30);
 
-  for (const w of wl) {
+  for (const w of universe) {
     if (!w.symbol) continue;
     const bars = (await getIntradayBars(w.symbol)).filter((b) => minOfDay(b.epoch) >= OR_START && minOfDay(b.epoch) <= 15 * 60 + 30);
     if (!bars.length) continue;
