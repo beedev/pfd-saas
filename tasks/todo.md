@@ -39,12 +39,16 @@ search decides + LLM explains. Persist plan + design doc (done).
 - SQL: drizzle/0057_typical_silver_sable.sql · hash a7b21502e2b8ed69c92aa747bf85716d5770707256c6baf7f1d92cc3651372ea · journal when 1782812672433
 - Apply inside vaspar-pfd: psql -f the SQL, then INSERT the journal row (same pattern as dev). NOTE: archiving + tuning only run once the new IMAGE is deployed (cron job is new code).
 
-## Phase 4 — Promotion gate (L3b auto-tune)
-- [ ] `agent/tuning/promote.ts` — guardrails (sample floor, margin, bounds, one-step, cool-down)
-- [ ] Auto-write paramsJson on pass; record `agent_param_history`
-- [ ] Auto-rollback on post-promotion degradation
-- [ ] Kill-switch portfolio flag
-- [ ] Verify end-to-end on replayed history; confirm guardrails block premature promotion
+## Phase 4 — Promotion gate (L3b auto-tune)  ✅ DONE
+- [x] `agent/tuning/promote.ts` — guardrails: lenient sample floor (≥5 sessions, ≥10 trades) + positive + avgR margin (0.05) + bootstrap significance (0.95) + 5-session cool-down
+- [x] Auto-write paramsJson on pass; record `agent_param_history` (from/to + baseline)
+- [x] Auto-rollback: revert when live edge since promotion < baseline after cool-down
+- [x] Kill-switch = the two opt-in gates (tuningEnabled / tuningAutoPromote, both default false)
+- [x] E2E verified on dev: PROMOTE (10 sessions→write+history), BLOCK (3 sessions→withheld, no write), ROLLBACK (live avgR 0.05<2.0→reverted). tsc 0 errors.
 
 ## Review
-- (added at completion)
+- L3 self-tuning loop complete (Phases 0–4) on `feat/analyst-agent`, local commits da2f2d7→(P4). Paper only.
+- Dormant by default: nothing runs until vaspar-pfd is redeployed with the new image AND a sleeve's tuningEnabled (+ tuningAutoPromote for writes) are flipped on.
+- Guardrails chosen lenient + bootstrap + auto-rollback + 5-session cool-down (user-set). The bootstrap protects the lenient floor from small-sample luck.
+- L4 (capital allocation / regime strategy selection / real execution) deliberately deferred — monitor L3 first.
+- Prod-apply for migration 0057: see Phase 3 section above.
