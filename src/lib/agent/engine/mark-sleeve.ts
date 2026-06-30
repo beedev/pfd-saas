@@ -5,7 +5,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { db, agentPositions, type AgentPosition } from '@/db';
-import { getInstrumentQuote, type InstrumentRef } from '../market-data';
+import { getInstrumentQuote, getInstrumentQuotes, refKey, type InstrumentRef } from '../market-data';
 
 /**
  * Mark ALL of a user's open positions to live prices and return them with fresh
@@ -16,10 +16,15 @@ import { getInstrumentQuote, type InstrumentRef } from '../market-data';
  */
 export async function markUserPositions(userId: string): Promise<AgentPosition[]> {
   const positions = await db.select().from(agentPositions).where(eq(agentPositions.userId, userId));
+  if (!positions.length) return positions;
+  // Batch ALL quotes in one shot — getInstrumentQuotes pulls every stock through a
+  // single Yahoo getQuotes() call (no per-symbol NSE-first hop, which hangs from
+  // the container). Replaces the old N-sequential loop that made the page crawl.
+  const refOf = (pos: AgentPosition): InstrumentRef => ({ assetClass: pos.assetClass, symbol: pos.symbol || undefined, schemeCode: pos.schemeCode || undefined });
+  const quotes = await getInstrumentQuotes(positions.map(refOf));
   for (const pos of positions) {
-    const ref: InstrumentRef = { assetClass: pos.assetClass, symbol: pos.symbol || undefined, schemeCode: pos.schemeCode || undefined };
-    const quote = await getInstrumentQuote(ref);
-    if (!quote) continue;
+    const quote = quotes.get(refKey(refOf(pos)));
+    if (!quote) continue; // best-effort: a position whose quote is missing keeps its last mark
     const last = quote.lastPricePaisa;
     const directional = pos.side === 'SHORT' ? -1 : 1;
     pos.marketValuePaisa = Math.round(last * pos.quantity * pos.contractMultiplier);

@@ -28,6 +28,10 @@ export const LAST_ENTRY = 14 * 60 + 30; // 14:30 — no new entries after this
 export const SQUARE_OFF = 15 * 60 + 15; // 15:15 — force flat
 export const SESSION_END = 15 * 60 + 30; // 15:30 — last bar of interest
 
+// Minimum viable position = 5% of the sleeve. Below this a trade just pays the
+// round-trip cost for ~zero exposure (the useless 1-2 share scraps), so skip it.
+export const MIN_NOTIONAL_PCT = 5;
+
 export interface OrbParams {
   openingRangeMins: number;
   riskPctPerTrade: number;
@@ -116,6 +120,7 @@ export function planIntradayTick(snap: TickSnapshot): TickPlan {
   let openCount = snap.openCount;
   let grossDeployed = snap.grossDeployedPaisa;
   const perNameCapPaisa = Math.round(snap.allocationPaisa * 0.30);
+  const minNotionalPaisa = Math.round((snap.allocationPaisa * MIN_NOTIONAL_PCT) / 100);
   const intents: Intent[] = [];
   let quotes = 0;
 
@@ -204,6 +209,9 @@ export function planIntradayTick(snap: TickSnapshot): TickPlan {
     if (qty < 1) continue;
 
     const notional = entry * qty;
+    // Minimum-viable-position gate: a position below 5% of the sleeve just pays
+    // the round-trip cost for ~zero exposure — skip it rather than take a scrap.
+    if (notional < minNotionalPaisa) continue;
     const target = long ? entry + Math.round(riskUnit * p.targetR) : entry - Math.round(riskUnit * p.targetR);
     const action: 'BUY' | 'SELL' = long ? 'BUY' : 'SELL';
     const ev: AgentDecisionEvidence = {
