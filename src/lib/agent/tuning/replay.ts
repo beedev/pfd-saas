@@ -96,3 +96,30 @@ export function replayDay(input: ReplayInput): ReplayResult {
 
   return { metrics: computeEdge(closed), closedTrades: closed, finalCashPaisa: cash };
 }
+
+export interface ReplaySession {
+  runDate: string;
+  symbols: ReplaySymbol[];
+}
+
+export interface WindowResult {
+  metrics: EdgeMetrics;       // aggregate edge across all sessions under `params`
+  closedTrades: ClosedTrade[];
+  sessions: number;
+}
+
+/**
+ * Replay a window of sessions under one param set and aggregate the edge. Each
+ * day starts flat with the full allocation (intraday never holds overnight), so
+ * trades concatenate cleanly across days into one edge picture — the score the
+ * tuner ranks champion vs challenger on.
+ */
+export function replayWindow(
+  sessions: ReplaySession[], allocationPaisa: number, params: OrbParams, cadenceMin?: number,
+): WindowResult {
+  const all: ClosedTrade[] = [];
+  for (const s of sessions) {
+    all.push(...replayDay({ runDate: s.runDate, allocationPaisa, symbols: s.symbols, params, cadenceMin }).closedTrades);
+  }
+  return { metrics: computeEdge(all), closedTrades: all, sessions: sessions.length };
+}

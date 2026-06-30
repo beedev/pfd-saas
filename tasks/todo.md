@@ -25,13 +25,19 @@ search decides + LLM explains. Persist plan + design doc (done).
 - [x] Verified: lifecycle correctness (realized 75252/18611 hand-checked) + param-sensitivity (targetR 1.5 vs 3.0)
 - NOTE: bars-archive persistence moved to Phase 3 (lands with migration 0057). Replay is pure; tested on synthetic bars.
 
-## Phase 3 — Candidates + experiments (L3a propose-only)
-- [ ] Migration 0057: `agent_param_experiments`, `agent_param_history`, bars archive, `agent_self_tune` job
-- [ ] `agent/tuning/candidates.ts` — bounded grid/hill-climb around champion
-- [ ] `agent/tuning/explain.ts` — LLM "why" for the chosen candidate
-- [ ] `cron/agent-self-tune.ts` — nightly: archive → evaluate candidates → log experiments → digest line
-- [ ] Wire `agent_self_tune` into cron tick (~16:00 IST anchor)
-- [ ] Verify: experiments logged, digest shows "challenger X vs live Y", NO live param writes
+## Phase 3 — Candidates + experiments (L3a propose-only)  ✅ DONE
+- [x] Migration 0057: agent_session_bars, agent_param_experiments, agent_param_history + sleeve tuning gates. Applied to DEV (psql + manual journal). Prod-apply steps prepared.
+- [x] `agent/tuning/candidates.ts` — bounded one-step hill-climb (targetR/riskPct/maxConcurrent within hard box)
+- [x] `agent/tuning/bars-archive.ts` — archiveSession (grow corpus) + loadWindow (replay input)
+- [x] `agent/tuning/replay.ts` — replayWindow multi-session aggregator added
+- [x] `agent/tuning/explain.ts` — gpt-4.1 "why" + deterministic fallback (decision never depends on LLM)
+- [x] `cron/agent-self-tune.ts` — propose-only orchestrator (Phase 4 promote hook marked)
+- [x] Wire `agent_self_tune` into cron tick (16:00 IST anchor, JobType, ADVANCE_MS, defaults list, handler)
+- [x] Verified: tuner picks targetR 1.5→1.75 on trending history; DB-glue E2E logs PROPOSED experiment, NO param write, cleanup OK. tsc 0 errors.
+
+### Prod-apply for migration 0057 (user runs when ready to redeploy)
+- SQL: drizzle/0057_typical_silver_sable.sql · hash a7b21502e2b8ed69c92aa747bf85716d5770707256c6baf7f1d92cc3651372ea · journal when 1782812672433
+- Apply inside vaspar-pfd: psql -f the SQL, then INSERT the journal row (same pattern as dev). NOTE: archiving + tuning only run once the new IMAGE is deployed (cron job is new code).
 
 ## Phase 4 — Promotion gate (L3b auto-tune)
 - [ ] `agent/tuning/promote.ts` — guardrails (sample floor, margin, bounds, one-step, cool-down)

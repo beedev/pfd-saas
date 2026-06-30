@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {
@@ -3544,6 +3544,11 @@ export const agentSleeves = pgTable('agent_sleeves', {
   enabled: boolean('enabled').notNull().default(true),
   cadence: text('cadence').$type<AgentCadence>().notNull().default('DAILY_OPEN'),
   paramsJson: jsonb('params_json').$type<AgentSleeveParams>(),
+  // L3 self-tuning opt-in gates. Both default false → the loop never touches a
+  // sleeve until explicitly enabled. tuningEnabled = generate experiments +
+  // propose; tuningAutoPromote = actually write paramsJson behind guardrails.
+  tuningEnabled: boolean('tuning_enabled').notNull().default(false),
+  tuningAutoPromote: boolean('tuning_auto_promote').notNull().default(false),
   lastRunAt: timestamp('last_run_at', { mode: 'date' }),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
@@ -3797,3 +3802,72 @@ export const agentDailyBrief = pgTable('agent_daily_brief', {
 
 export type AgentDailyBrief = typeof agentDailyBrief.$inferSelect;
 export type NewAgentDailyBrief = typeof agentDailyBrief.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// L3 self-tuning loop (intraday ORB) — paper only. See docs/agent-l3-self-tuning.md
+// ---------------------------------------------------------------------------
+
+export type AgentParamDecision = 'PROPOSED' | 'HELD' | 'PROMOTED' | 'REJECTED';
+
+// Archived intraday session bars — the replay corpus the tuner scores candidate
+// params against. One row per (sleeve, date, symbol); bars in native rupees.
+export const agentSessionBars = pgTable('agent_session_bars', {
+  id: serial('id').primaryKey(),
+  sleeveId: integer('sleeve_id').notNull().references(() => agentSleeves.id, { onDelete: 'cascade' }),
+  runDate: text('run_date').notNull(),                  // IST YYYY-MM-DD
+  symbol: text('symbol').notNull(),
+  barsJson: jsonb('bars_json').$type<Array<{ epoch: number; open: number; high: number; low: number; close: number }>>().notNull(),
+  bias: text('bias').$type<AgentBriefBias>(),            // brief stance used that day (for faithful replay)
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_session_bars_user_id_idx').on(table.userId),
+  index('agent_session_bars_sleeve_date_idx').on(table.sleeveId, table.runDate),
+  uniqueIndex('agent_session_bars_unique_idx').on(table.sleeveId, table.runDate, table.symbol),
+]);
+export type AgentSessionBars = typeof agentSessionBars.$inferSelect;
+export type NewAgentSessionBars = typeof agentSessionBars.$inferInsert;
+
+// One row per nightly challenger evaluation — the audit of every proposal.
+export const agentParamExperiments = pgTable('agent_param_experiments', {
+  id: serial('id').primaryKey(),
+  sleeveId: integer('sleeve_id').notNull().references(() => agentSleeves.id, { onDelete: 'cascade' }),
+  runDate: text('run_date').notNull(),                  // IST YYYY-MM-DD of the evaluation
+  windowFrom: text('window_from'),                      // first session in the replay window
+  windowTo: text('window_to'),                          // last session in the replay window
+  sessions: integer('sessions').notNull().default(0),   // # sessions replayed
+  championParams: jsonb('champion_params').$type<AgentSleeveParams>(),
+  championMetrics: jsonb('champion_metrics').$type<Record<string, unknown>>(),
+  challengerParams: jsonb('challenger_params').$type<AgentSleeveParams>(),
+  challengerMetrics: jsonb('challenger_metrics').$type<Record<string, unknown>>(),
+  decision: text('decision').$type<AgentParamDecision>().notNull().default('PROPOSED'),
+  reason: text('reason'),                               // machine reason for the decision
+  llmRationale: text('llm_rationale'),                  // human "why" (gpt-4.1)
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_param_experiments_user_id_idx').on(table.userId),
+  index('agent_param_experiments_sleeve_date_idx').on(table.sleeveId, table.runDate),
+]);
+export type AgentParamExperiment = typeof agentParamExperiments.$inferSelect;
+export type NewAgentParamExperiment = typeof agentParamExperiments.$inferInsert;
+
+// Every promotion — accountability ledger + rollback source.
+export const agentParamHistory = pgTable('agent_param_history', {
+  id: serial('id').primaryKey(),
+  sleeveId: integer('sleeve_id').notNull().references(() => agentSleeves.id, { onDelete: 'cascade' }),
+  experimentId: integer('experiment_id').references(() => agentParamExperiments.id, { onDelete: 'set null' }),
+  fromParams: jsonb('from_params').$type<AgentSleeveParams>(),
+  toParams: jsonb('to_params').$type<AgentSleeveParams>(),
+  triggerMetrics: jsonb('trigger_metrics').$type<Record<string, unknown>>(),  // challenger metrics that justified it
+  baselineMetrics: jsonb('baseline_metrics').$type<Record<string, unknown>>(), // champion at promotion (for rollback check)
+  promotedAt: timestamp('promoted_at', { mode: 'date' }).defaultNow(),
+  rolledBack: boolean('rolled_back').notNull().default(false),
+  rolledBackAt: timestamp('rolled_back_at', { mode: 'date' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (table) => [
+  index('agent_param_history_user_id_idx').on(table.userId),
+  index('agent_param_history_sleeve_idx').on(table.sleeveId),
+]);
+export type AgentParamHistory = typeof agentParamHistory.$inferSelect;
+export type NewAgentParamHistory = typeof agentParamHistory.$inferInsert;
