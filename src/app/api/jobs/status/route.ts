@@ -7,7 +7,8 @@
 
 import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
-import { db, type JobType } from '@/db';
+import { db, agentEodReviews, type JobType } from '@/db';
+import { eq } from 'drizzle-orm';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
 const JOB_META: Record<JobType, { label: string; cadence: string; group: 'Analyst' | 'General' }> = {
@@ -19,6 +20,7 @@ const JOB_META: Record<JobType, { label: string; cadence: string; group: 'Analys
   agent_intraday_run: { label: 'Intraday (ORB)', cadence: 'every 10 min', group: 'Analyst' },
   agent_news_ingest: { label: 'News ingest', cadence: 'every 30 min', group: 'Analyst' },
   agent_self_tune: { label: 'Self-tune', cadence: '16:00 IST', group: 'Analyst' },
+  agent_eod_review: { label: 'EOD signal review', cadence: '16:30 IST', group: 'Analyst' },
 };
 
 interface JobRow {
@@ -90,6 +92,9 @@ async function todaysResults(userId: string, today: string): Promise<Partial<Rec
 
   const news = await one(sql`SELECT count(*) n FROM agent_news WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date`);
   if (news[0]) out.agent_news_ingest = `${Number(news[0].n)} item(s) ingested`;
+
+  const review = (await db.select({ summary: agentEodReviews.summary }).from(agentEodReviews).where(eq(agentEodReviews.reviewDate, today)).limit(1))[0];
+  if (review?.summary) out.agent_eod_review = review.summary;
 
   return out;
 }

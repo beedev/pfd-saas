@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune' | 'agent_eod_review';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {

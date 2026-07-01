@@ -28,6 +28,7 @@ import { runAgentV2, runAgentIntraday } from '@/lib/cron/agent-run-v2';
 import { runNewsIngest } from '@/lib/agent/news/ingest';
 import { runPremarketBrief } from '@/lib/agent/news/brief';
 import { runAgentSelfTune } from '@/lib/cron/agent-self-tune';
+import { runEodReview } from '@/lib/agent/signal/eod-review';
 import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
 
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
@@ -51,6 +52,7 @@ const ADVANCE_MS: Record<JobType, number> = {
   agent_news_ingest: 30 * 60 * 1000,  // poll RSS feeds every 30 min
   agent_premarket_brief: 24 * 60 * 60 * 1000, // daily (anchored to 07:30 IST below)
   agent_self_tune: 24 * 60 * 60 * 1000,       // daily (anchored to 16:00 IST below)
+  agent_eod_review: 24 * 60 * 60 * 1000,      // daily (anchored to 16:30 IST below)
 };
 
 // agent_premarket_brief fires at 07:30 IST — overnight/morning news digested
@@ -78,6 +80,14 @@ const NEXT_SELFTUNE_IST = sql`(
   CASE WHEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' > now()
   THEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
   ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
+)`;
+
+// agent_eod_review fires at 16:30 IST — after self-tune (16:00), the day's news
+// tags + closes are final for movers vs non-movers credit assignment.
+const NEXT_EODREVIEW_IST = sql`(
+  CASE WHEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' > now()
+  THEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
+  ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
 )`;
 
 interface JobReport {
@@ -184,6 +194,12 @@ export async function POST(request: NextRequest) {
           // No-ops unless a sleeve has tuning enabled. Propose-only in Phase 3.
           report.result = await runAgentSelfTune(job.userId);
           break;
+        case 'agent_eod_review':
+          // Global post-close (16:30 IST): score news-signal tags vs the day's
+          // Nifty 500 movers, update phrase weights, flag coverage gaps.
+          // Self-guards to run once/day even though scheduled per user.
+          report.result = await runEodReview();
+          break;
         default:
           throw new Error(`Unknown job type: ${job.jobType}`);
       }
@@ -213,7 +229,9 @@ export async function POST(request: NextRequest) {
             ? NEXT_PREMARKET_IST
             : job.jobType === 'agent_self_tune'
               ? NEXT_SELFTUNE_IST
-              : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
+              : job.jobType === 'agent_eod_review'
+                ? NEXT_EODREVIEW_IST
+                : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
         updatedAt: sql`NOW()`,
       })
       .where(eq(scheduledJobs.id, job.id));
@@ -239,7 +257,7 @@ async function ensureDefaultJobsForAllUsers(): Promise<void> {
     INSERT INTO scheduled_jobs (user_id, job_type, enabled, next_run_at)
     SELECT u.id, j.jt, true, NOW()
     FROM "user" u
-    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run'), ('agent_intraday_run'), ('agent_news_ingest'), ('agent_premarket_brief'), ('agent_self_tune')) AS j(jt)
+    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run'), ('agent_intraday_run'), ('agent_news_ingest'), ('agent_premarket_brief'), ('agent_self_tune'), ('agent_eod_review')) AS j(jt)
     WHERE NOT EXISTS (
       SELECT 1 FROM scheduled_jobs s WHERE s.user_id = u.id AND s.job_type = j.jt
     )
