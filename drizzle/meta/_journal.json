@@ -407,6 +407,13 @@
       "when": 1782812672433,
       "tag": "0057_typical_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1782926563013,
+      "tag": "0058_wet_retro_girl",
+      "breakpoints": true
     }
   ]
 }

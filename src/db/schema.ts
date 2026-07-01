@@ -3772,6 +3772,7 @@ export const agentNews = pgTable('agent_news', {
   sentimentScore: real('sentiment_score'),           // -1..1
   relevance: real('relevance'),                      // 0..1 (LLM: how material to the stock)
   llmDone: boolean('llm_done').notNull().default(false),
+  signalTagged: boolean('signal_tagged').notNull().default(false), // signal-dictionary pass done
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('agent_news_guid_idx').on(table.guid),
@@ -3871,3 +3872,71 @@ export const agentParamHistory = pgTable('agent_param_history', {
 ]);
 export type AgentParamHistory = typeof agentParamHistory.$inferSelect;
 export type NewAgentParamHistory = typeof agentParamHistory.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// News-signal learning loop — a self-curating dictionary of news→move signal
+// phrases, weighted by Bayesian hit-rate. GLOBAL (market knowledge, like
+// agent_news / agent_daily_brief — no user_id). See docs. Paper only.
+// ---------------------------------------------------------------------------
+
+export type AgentSignalStatus = 'MONITORING' | 'TRUSTED' | 'DEMOTED';
+export type AgentSignalOutcome = 'PENDING' | 'HIT' | 'MISS' | 'NEUTRAL';
+
+// The dictionary. Each phrase is a canonical news pattern; weight = Beta hit-rate.
+export const agentSignalPhrases = pgTable('agent_signal_phrases', {
+  id: serial('id').primaryKey(),
+  phrase: text('phrase').notNull(),                          // canonical signal phrase (LLM-curated)
+  direction: text('direction').$type<AgentBriefBias>().notNull().default('BULLISH'),
+  description: text('description'),                          // the inferred "why/mechanism"
+  status: text('status').$type<AgentSignalStatus>().notNull().default('MONITORING'),
+  alpha: real('alpha').notNull().default(1),                // Beta(alpha, beta) — hits
+  beta: real('beta').notNull().default(1),                  //                   — misses
+  observedDays: integer('observed_days').notNull().default(0), // distinct days seen (5-day floor)
+  hitCount: integer('hit_count').notNull().default(0),
+  appearCount: integer('appear_count').notNull().default(0),   // base-rate denominator
+  examplesJson: jsonb('examples_json').$type<string[]>(),   // sample headlines
+  active: boolean('active').notNull().default(true),
+  firstSeen: text('first_seen'),                            // IST YYYY-MM-DD
+  lastUpdated: timestamp('last_updated', { mode: 'date' }).defaultNow(),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('agent_signal_phrases_phrase_idx').on(table.phrase),
+  index('agent_signal_phrases_status_idx').on(table.status),
+]);
+export type AgentSignalPhrase = typeof agentSignalPhrases.$inferSelect;
+export type NewAgentSignalPhrase = typeof agentSignalPhrases.$inferInsert;
+
+// Credit-assignment ledger: every (news, symbol) → phrase tag, its outcome set at EOD.
+export const agentNewsSignalTags = pgTable('agent_news_signal_tags', {
+  id: serial('id').primaryKey(),
+  newsId: integer('news_id').notNull().references(() => agentNews.id, { onDelete: 'cascade' }),
+  phraseId: integer('phrase_id').notNull().references(() => agentSignalPhrases.id, { onDelete: 'cascade' }),
+  symbol: text('symbol').notNull(),
+  direction: text('direction').$type<AgentBriefBias>().notNull(),
+  taggedDate: text('tagged_date').notNull(),                // IST YYYY-MM-DD
+  outcome: text('outcome').$type<AgentSignalOutcome>().notNull().default('PENDING'),
+  movePct: real('move_pct'),                                // measured move at eval time
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('agent_news_signal_tags_date_idx').on(table.taggedDate),
+  index('agent_news_signal_tags_phrase_idx').on(table.phraseId),
+  uniqueIndex('agent_news_signal_tags_unique_idx').on(table.newsId, table.phraseId, table.symbol),
+]);
+export type AgentNewsSignalTag = typeof agentNewsSignalTags.$inferSelect;
+export type NewAgentNewsSignalTag = typeof agentNewsSignalTags.$inferInsert;
+
+// Daily EOD postmortem: movers, phrases minted/updated, coverage gaps.
+export const agentEodReviews = pgTable('agent_eod_reviews', {
+  id: serial('id').primaryKey(),
+  reviewDate: text('review_date').notNull(),                // IST YYYY-MM-DD
+  moversJson: jsonb('movers_json'),                         // top gainers/losers + capture status
+  phrasesMinted: integer('phrases_minted').notNull().default(0),
+  phrasesUpdated: integer('phrases_updated').notNull().default(0),
+  coverageGapsJson: jsonb('coverage_gaps_json').$type<string[]>(),
+  summary: text('summary'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('agent_eod_reviews_date_idx').on(table.reviewDate),
+]);
+export type AgentEodReview = typeof agentEodReviews.$inferSelect;
+export type NewAgentEodReview = typeof agentEodReviews.$inferInsert;

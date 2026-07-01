@@ -11,6 +11,7 @@ import { getQuotes } from '@/lib/services/yahoo-finance';
 import { FEEDS } from './feeds';
 import { parseFeed } from './rss';
 import { NEWS_EQUITY_UNIVERSE, aliasesFromName } from './universe';
+import { tagRecentNews } from '../signal/tag-news';
 
 const UA = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -57,7 +58,7 @@ function tagSymbols(text: string, aliasMap: Map<string, string[]>): string[] {
   return out;
 }
 
-export async function runNewsIngest(): Promise<{ fetched: number; inserted: number; tagged: number; scored: number }> {
+export async function runNewsIngest(): Promise<{ fetched: number; inserted: number; tagged: number; scored: number; signalTagged?: number; phrasesMinted?: number }> {
   const aliasMap = await buildAliasMap();
   let fetched = 0, inserted = 0, tagged = 0;
   for (const feed of FEEDS) {
@@ -80,7 +81,10 @@ export async function runNewsIngest(): Promise<{ fetched: number; inserted: numb
     }
   }
   const scored = await scoreSentiment();
-  return { fetched, inserted, tagged, scored };
+  // Signal-dictionary pass: map fresh equity news to signal phrases (map-or-mint)
+  // so the EOD loop has a weighted, honest base-rate catalog. Best-effort.
+  const signal = await tagRecentNews().catch(() => ({ tagged: 0, minted: 0 }));
+  return { fetched, inserted, tagged, scored, signalTagged: signal.tagged, phrasesMinted: signal.minted };
 }
 
 /** LLM sentiment + relevance for freshly-tagged items (batched, bounded). */
