@@ -51,6 +51,7 @@ import {
   Newspaper,
   Bell,
   CalendarCheck,
+  CalendarClock,
   Activity,
   Sparkles,
   ClipboardCheck,
@@ -76,6 +77,7 @@ const navigation: NavSection[] = [
       { name: 'Net Worth', href: '/', icon: LayoutDashboard },
       { name: 'Daily Digest', href: '/daily-digest', icon: Newspaper },
       { name: 'Alerts', href: '/alerts', icon: Bell },
+      { name: 'Scheduled Jobs', href: '/jobs', icon: CalendarClock },
     ],
   },
   {
