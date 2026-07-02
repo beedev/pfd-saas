@@ -23,7 +23,7 @@ interface Sleeve {
   id: number; key: string; name: string; strategy: string; cadence: string;
   allocationPaisa: number; cashPaisa: number; equityPaisa: number;
   positionsValuePaisa: number; unrealizedPnlPaisa: number;
-  returnPct: number; openPositions: number;
+  returnPct: number; openPositions: number; enabled: boolean;
 }
 interface Evidence {
   rule: string;
@@ -41,7 +41,7 @@ interface CurvePoint { date: string; price: number }
 
 const inr = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
 const actionVariant = (a: string): 'success' | 'warning' | 'info' => (a === 'BUY' ? 'success' : a === 'SELL' ? 'warning' : 'info');
-const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'Mean reversion', XS_MOMENTUM: 'Momentum 12-1', TREND: 'Trend / breakout', RS_ROTATION: 'RS rotation', INTRADAY_ORB: 'Intraday ORB (same-day)' };
+const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'Mean reversion', XS_MOMENTUM: 'Momentum 12-1', TREND: 'Trend / breakout', RS_ROTATION: 'RS rotation', INTRADAY_ORB: 'Intraday ORB (same-day)', VWAP_REVERSION: 'VWAP reversion', GAP_AND_GO: 'Gap-and-go', NEWS_SIGNAL: 'News signal' };
 
 export default function AnalystPage() {
   const [sleeves, setSleeves] = useState<Sleeve[]>([]);
@@ -90,8 +90,12 @@ export default function AnalystPage() {
     finally { setIsRunning(false); }
   };
 
-  const totalEquity = sleeves.reduce((s, x) => s + x.equityPaisa, 0);
-  const totalReturn = startingCapitalPaisa > 0 ? ((totalEquity - startingCapitalPaisa) / startingCapitalPaisa) * 100 : 0;
+  // Only ACTIVE buckets count — retired (disabled) sleeves drop off the dashboard
+  // and out of the totals, so equity/return reflect the live portfolio.
+  const active = sleeves.filter((s) => s.enabled);
+  const totalEquity = active.reduce((s, x) => s + x.equityPaisa, 0);
+  const totalAllocation = active.reduce((s, x) => s + x.allocationPaisa, 0);
+  const totalReturn = totalAllocation > 0 ? ((totalEquity - totalAllocation) / totalAllocation) * 100 : 0;
   const sleeveName = (id: number | null) => sleeves.find((s) => s.id === id)?.name ?? '—';
 
   if (isLoading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dxp-text-muted)]" /></div>;
@@ -103,7 +107,7 @@ export default function AnalystPage() {
           <Bot className="h-7 w-7 text-[var(--dxp-brand)]" />
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-[var(--dxp-text)]">Analyst (Paper)</h1>
-            <p className="text-[var(--dxp-text-secondary)]">Four quant sleeves trading virtual money — tracked vs benchmark</p>
+            <p className="text-[var(--dxp-text-secondary)]">Strategy buckets trading virtual money — tracked vs benchmark</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -122,13 +126,13 @@ export default function AnalystPage() {
 
       <StatsDisplay currency="INR" locale="en-IN" columns={3} stats={[
         { label: 'Total equity', value: totalEquity / 100, format: 'currency' },
-        { label: 'Total P&L', value: (totalEquity - startingCapitalPaisa) / 100, format: 'currency' },
+        { label: 'Total P&L', value: (totalEquity - totalAllocation) / 100, format: 'currency' },
         { label: 'Return %', value: Number(totalReturn.toFixed(2)), format: 'number' },
       ]} />
 
       {/* Sleeve cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {sleeves.map((s) => {
+        {active.map((s) => {
           // Bucket equity (cash + positions) and P&L vs its allocation — one
           // consistent base across ALL buckets, so the numbers compare cleanly.
           const equity = s.equityPaisa;
