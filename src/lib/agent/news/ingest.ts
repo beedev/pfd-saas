@@ -12,6 +12,7 @@ import { FEEDS } from './feeds';
 import { parseFeed } from './rss';
 import { NEWS_EQUITY_UNIVERSE, aliasesFromName } from './universe';
 import { tagRecentNews } from '../signal/tag-news';
+import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
 
 const UA = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -109,7 +110,8 @@ async function scoreSentiment(): Promise<number> {
       }),
     });
     if (!res.ok) return 0;
-    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
+    await recordLlmUsage('news_sentiment', 'gpt-4.1', j.usage);
     const parsed = JSON.parse(j.choices?.[0]?.message?.content ?? '{}') as { items?: Array<{ i: number; sentiment: string; score: number; relevance: number }> };
     let n = 0;
     for (const it of parsed.items ?? []) {

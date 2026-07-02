@@ -3944,3 +3944,20 @@ export const agentEodReviews = pgTable('agent_eod_reviews', {
 ]);
 export type AgentEodReview = typeof agentEodReviews.$inferSelect;
 export type NewAgentEodReview = typeof agentEodReviews.$inferInsert;
+
+// Per-call LLM usage + cost ledger (gpt-4.1 news/brief/tagging/tuning). Global.
+// Cost stored in micro-USD (integer) computed from a per-model price table.
+export const agentLlmUsage = pgTable('agent_llm_usage', {
+  id: serial('id').primaryKey(),
+  task: text('task').notNull(),                     // news_sentiment | premarket_brief | signal_tagging | tuning_explain | advisory
+  model: text('model').notNull(),
+  promptTokens: integer('prompt_tokens').notNull().default(0),
+  completionTokens: integer('completion_tokens').notNull().default(0),
+  costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0), // USD × 1e6
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('agent_llm_usage_created_idx').on(table.createdAt),
+  index('agent_llm_usage_task_idx').on(table.task),
+]);
+export type AgentLlmUsage = typeof agentLlmUsage.$inferSelect;
+export type NewAgentLlmUsage = typeof agentLlmUsage.$inferInsert;

@@ -11,6 +11,7 @@
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { db, agentNews, type AgentBriefBias, type AgentSignalPhrase } from '@/db';
 import { getActiveDictionary, ensurePhrase, recordTag } from './dictionary';
+import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4.1';
@@ -53,7 +54,8 @@ export async function tagNewsBatch(items: TagItem[], dictionary: AgentSignalPhra
       }),
     });
     if (!res.ok) return [];
-    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
+    await recordLlmUsage('signal_tagging', MODEL, j.usage);
     const parsed = JSON.parse(j.choices?.[0]?.message?.content ?? '{}').tags ?? [];
     return (parsed as TagResult[]).filter((t) =>
       t && Number.isFinite(t.newsId) && t.symbol && t.phrase && (t.direction === 'BULLISH' || t.direction === 'BEARISH'));

@@ -9,6 +9,8 @@
  * formatted ₹ out. This is PAPER TRADING — not financial advice.
  */
 
+import { recordLlmUsage, type OpenAiUsage } from './usage';
+
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
 export interface DigestDecision {
@@ -84,7 +86,8 @@ export async function composeAdvisory(input: DigestInput): Promise<string | null
       }),
     });
     if (!res.ok) return null;
-    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
+    await recordLlmUsage('advisory', 'gpt-4.1', j.usage);
     return j.choices?.[0]?.message?.content?.trim() || null;
   } catch {
     return null;

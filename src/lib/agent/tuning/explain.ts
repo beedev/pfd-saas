@@ -10,6 +10,7 @@
 import type { OrbParams } from '../engine/orb-step';
 import type { EdgeMetrics } from './metrics';
 import { describeDelta } from './candidates';
+import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const rupee = (p: number | null | undefined) => p == null ? 'n/a' : '₹' + Math.round(p / 100).toLocaleString('en-IN');
@@ -55,7 +56,8 @@ export async function explainCandidate(i: ExplainInput): Promise<string> {
       }),
     });
     if (!res.ok) return fallback;
-    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
+    await recordLlmUsage('tuning_explain', 'gpt-4.1', j.usage);
     const text = j.choices?.[0]?.message?.content?.trim();
     return text && text.length > 0 ? text : fallback;
   } catch {

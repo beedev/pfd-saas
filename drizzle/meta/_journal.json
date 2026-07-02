@@ -421,6 +421,13 @@
       "when": 1782957410140,
       "tag": "0059_violet_thunderball",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1782962316525,
+      "tag": "0060_perpetual_wild_pack",
+      "breakpoints": true
     }
   ]
 }

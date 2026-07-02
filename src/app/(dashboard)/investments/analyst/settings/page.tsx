@@ -11,6 +11,7 @@ import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { Disclaimer } from '../_components/Disclaimer';
 import { SelfTuningCard } from '../_components/SelfTuningCard';
 import { SignalLearningCard } from '../_components/SignalLearningCard';
+import { LlmUsageCard } from '../_components/LlmUsageCard';
 
 const RISK_OPTIONS = [
   { value: 'CONSERVATIVE', label: 'Conservative' },
@@ -132,6 +133,7 @@ export default function AnalystSettingsPage() {
 
       <SelfTuningCard />
       <SignalLearningCard />
+      <LlmUsageCard />
     </div>
   );
 }

@@ -10,6 +10,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { db, agentNews, agentDailyBrief, type AgentBriefBias, type AgentDailyBrief } from '@/db';
 import { runNewsIngest } from './ingest';
+import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -54,7 +55,8 @@ export async function runPremarketBrief(): Promise<{ analyzed: number; date: str
       }),
     });
     if (res.ok) {
-      const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
+      await recordLlmUsage('premarket_brief', 'gpt-4.1', j.usage);
       stances = (JSON.parse(j.choices?.[0]?.message?.content ?? '{}').items ?? []) as typeof stances;
     }
   } catch { /* leave stances empty → all NEUTRAL */ }
