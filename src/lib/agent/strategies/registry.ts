@@ -24,8 +24,8 @@ export function getStrategy(key: AgentStrategy): Strategy {
 
 /** Default sleeve definitions for the equal-split seeding. */
 export const DEFAULT_SLEEVES: Array<{ key: import('@/db').AgentSleeveKey; name: string; strategy: AgentStrategy; cadence: import('@/db').AgentCadence }> = [
-  { key: 'STK_FAST', name: 'Stocks · very short (2-3d)', strategy: 'MEAN_REVERSION', cadence: 'INTRADAY' },
-  { key: 'STK_SHORT', name: 'Stocks · short term (3mo)', strategy: 'XS_MOMENTUM', cadence: 'DAILY_OPEN' },
+  { key: 'STK_FAST', name: 'My Picks · 2-3 day', strategy: 'MEAN_REVERSION', cadence: 'INTRADAY' },
+  { key: 'STK_SHORT', name: 'My Picks · 2-3 month', strategy: 'XS_MOMENTUM', cadence: 'DAILY_OPEN' },
   { key: 'FUT', name: 'Futures', strategy: 'TREND', cadence: 'DAILY_OPEN' },
   // Mutual funds retired as an active bucket (2026-07-02) — MFs are long-term
   // holdings, not day-trading alpha (NAV is EOD-only, 1% <1yr exit load). Existing
@@ -34,4 +34,7 @@ export const DEFAULT_SLEEVES: Array<{ key: import('@/db').AgentSleeveKey; name: 
   { key: 'STK_VWAP', name: 'Intraday · VWAP reversion', strategy: 'VWAP_REVERSION', cadence: 'INTRADAY' },
   { key: 'STK_GAP', name: 'Intraday · gap-and-go', strategy: 'GAP_AND_GO', cadence: 'INTRADAY' },
   { key: 'STK_NEWS', name: 'Intraday · news signals', strategy: 'NEWS_SIGNAL', cadence: 'INTRADAY' },
+  // "My Picks" intraday bucket — trades the user's INTRADAY-tagged watchlist
+  // names on the combined trigger, squared off same day (run-swing INTRADAY).
+  { key: 'STK_WATCH', name: 'My Picks · intraday', strategy: 'WATCHLIST', cadence: 'INTRADAY' },
 ];

@@ -17,11 +17,10 @@
 
 import { and, eq } from 'drizzle-orm';
 import {
-  db, agentWatchlist, agentSignals, agentDecisions, agentTrades, agentPositions,
+  db, agentSignals, agentDecisions, agentTrades, agentPositions,
   agentSleeves, type AgentSleeve, type AgentDecisionEvidence,
 } from '@/db';
 import { getIntradayBars } from '@/lib/services/yahoo-finance';
-import { getInPlay } from '../news/ingest';
 import { getBriefBias } from '../news/brief';
 import type { AgentBriefBias } from '@/db';
 import type { SleeveRunResult } from './run-sleeve';
@@ -37,34 +36,21 @@ export async function runIntradayOrb(
   sleeve: AgentSleeve,
   runId: number,
   runDate: string,
-  opts: { marketOpen: boolean },
+  opts: { marketOpen: boolean; universe?: Array<{ symbol: string; name: string }> },
 ): Promise<SleeveRunResult> {
   const p = resolveOrbParams(sleeve.paramsJson as Record<string, unknown> | null);
-  const wl = await db.select().from(agentWatchlist)
-    .where(and(eq(agentWatchlist.userId, userId), eq(agentWatchlist.sleeveId, sleeve.id), eq(agentWatchlist.enabled, true)));
   const positions = await db.select().from(agentPositions)
     .where(and(eq(agentPositions.userId, userId), eq(agentPositions.sleeveId, sleeve.id)));
   const posBySymbol = new Map(positions.map((x) => [x.symbol, x]));
 
-  // Today's pre-market brief → directional gate (BULLISH = long-only, BEARISH =
-  // short-only) + its names join the watch universe.
+  // Today's pre-market brief → directional gate (BULLISH = long-only, BEARISH = short-only).
   const briefMap = await getBriefBias().catch(() => new Map<string, { bias: AgentBriefBias; impact: number | null }>());
-  const briefNames = [...briefMap.entries()]
-    .filter(([, v]) => v.bias !== 'NEUTRAL')
-    .sort((a, b) => (b[1].impact ?? 0) - (a[1].impact ?? 0))
-    .map(([s]) => s);
-  // Universe = fixed liquid watchlist PLUS news-driven names (brief first, then
-  // any other fresh in-play) — so it trades what's in play, both mid/small caps.
-  const known = new Set(wl.map((w) => w.symbol));
-  const inPlay = (await getInPlay().catch(() => [])).map((x) => x.symbol);
-  const extras = [...new Set([...briefNames, ...inPlay])]
-    .filter((s) => s.endsWith('.NS') && !known.has(s))
-    .slice(0, 6)                                                     // bound the extra fetches
-    .map((s) => ({ id: undefined as number | undefined, symbol: s, name: s }));
-  const refs = [
-    ...wl.map((w) => ({ id: w.id as number | undefined, symbol: w.symbol, name: w.name })),
-    ...extras,
-  ];
+  // Universe = the shared Nifty-500 in-play movers (injected) ∪ held names, so we
+  // trade what's actually moving and can always square off existing positions.
+  const refMap = new Map<string, { id: number | undefined; symbol: string; name: string }>();
+  for (const u of opts.universe ?? []) if (u.symbol.endsWith('.NS')) refMap.set(u.symbol, { id: undefined, symbol: u.symbol, name: u.name });
+  for (const pos of positions) if (!refMap.has(pos.symbol)) refMap.set(pos.symbol, { id: undefined, symbol: pos.symbol, name: pos.name });
+  const refs = [...refMap.values()];
 
   // Names already traded today (no re-entry — one shot per name per day).
   const tradedRows = await db.select({ symbol: agentTrades.symbol }).from(agentTrades)

@@ -1,0 +1,1 @@
+ALTER TABLE "agent_watchlist" ADD COLUMN "horizon" text DEFAULT 'MULTIDAY' NOT NULL;

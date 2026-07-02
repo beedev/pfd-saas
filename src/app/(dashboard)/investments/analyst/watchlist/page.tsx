@@ -11,12 +11,14 @@ import { ArrowLeft, Search, Trash2, Plus, Loader2 } from 'lucide-react';
 
 type AssetClass = 'STOCK' | 'MF' | 'FUTURE';
 
+type Horizon = 'INTRADAY' | 'MULTIDAY';
 interface WatchItem {
   id: number;
   assetClass: AssetClass;
   symbol: string;
   schemeCode: string;
   name: string;
+  horizon: Horizon;
 }
 interface SearchHit {
   assetClass: AssetClass;
@@ -33,11 +35,18 @@ const CLASS_OPTIONS = [
   { value: 'FUTURE', label: 'Future' },
 ];
 
+// "My Picks" hold horizon — the user picks the stock, the agent times the entry.
+const HORIZON_OPTIONS = [
+  { value: 'MULTIDAY', label: 'Multi-day (2-3d + 2-3mo hold)' },
+  { value: 'INTRADAY', label: 'Intraday (square off same day)' },
+];
+
 interface Sleeve { id: number; key: string; name: string }
 
-// Which sleeves can hold which asset class.
+// Non-stock classes still map to a specific sleeve. STOCK picks all live on the
+// single "My Picks" list (STK_WATCH), tagged by horizon.
 const SLEEVE_FOR_CLASS: Record<AssetClass, string[]> = {
-  STOCK: ['STK_FAST', 'STK_SHORT'],
+  STOCK: ['STK_WATCH'],
   FUTURE: ['FUT'],
   MF: ['MF'],
 };
@@ -47,6 +56,7 @@ export default function WatchlistPage() {
   const [sleeves, setSleeves] = useState<Sleeve[]>([]);
   const [assetClass, setAssetClass] = useState<AssetClass>('STOCK');
   const [sleeveId, setSleeveId] = useState<number | null>(null);
+  const [horizon, setHorizon] = useState<Horizon>('MULTIDAY');
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -83,10 +93,10 @@ export default function WatchlistPage() {
       const r = await fetch('/api/agent/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...hit, sleeveId }),
+        body: JSON.stringify({ ...hit, sleeveId, horizon: assetClass === 'STOCK' ? horizon : undefined }),
       });
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'failed'); }
-      toast.success(`Added ${hit.name} to ${eligible.find((s) => s.id === sleeveId)?.name ?? 'sleeve'}`);
+      toast.success(assetClass === 'STOCK' ? `Added ${hit.name} as a ${horizon === 'INTRADAY' ? 'intraday' : 'multi-day'} pick` : `Added ${hit.name}`);
       await load();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed to add'); }
   };
@@ -111,13 +121,22 @@ export default function WatchlistPage() {
               <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Type</label>
               <Select value={assetClass} onChange={(v) => setAssetClass(v as AssetClass)} options={CLASS_OPTIONS} />
             </div>
-            <div className="sm:w-52">
-              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Sleeve</label>
-              <Select
-                value={sleeveId != null ? String(sleeveId) : ''}
-                onChange={(v) => setSleeveId(Number(v))}
-                options={eligible.map((s) => ({ value: String(s.id), label: s.name }))}
-              />
+            <div className="sm:w-56">
+              {assetClass === 'STOCK' ? (
+                <>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Hold horizon</label>
+                  <Select value={horizon} onChange={(v) => setHorizon(v as Horizon)} options={HORIZON_OPTIONS} />
+                </>
+              ) : (
+                <>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Sleeve</label>
+                  <Select
+                    value={sleeveId != null ? String(sleeveId) : ''}
+                    onChange={(v) => setSleeveId(Number(v))}
+                    options={eligible.map((s) => ({ value: String(s.id), label: s.name }))}
+                  />
+                </>
+              )}
             </div>
             <div className="flex-1">
               <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-[var(--dxp-text-secondary)]">Search</label>
@@ -155,6 +174,9 @@ export default function WatchlistPage() {
                 <li key={it.id} className="flex items-center justify-between rounded border border-[var(--dxp-border-light)] p-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <Badge variant="info">{it.assetClass}</Badge>
+                    {it.assetClass === 'STOCK' && (
+                      <Badge variant={it.horizon === 'INTRADAY' ? 'warning' : 'success'}>{it.horizon === 'INTRADAY' ? 'Intraday' : 'Multi-day'}</Badge>
+                    )}
                     <span className="font-semibold text-[var(--dxp-text)]">{it.name}</span>
                     <span className="font-mono text-xs text-[var(--dxp-text-muted)]">{it.symbol || it.schemeCode}</span>
                   </div>

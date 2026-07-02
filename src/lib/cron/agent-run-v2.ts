@@ -108,7 +108,7 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
       // ORB + the swing buckets (STK_FAST/STK_SHORT) are owned by the intraday
       // runner (run-intraday / run-swing) — the daily run just marks them to
       // market so they count in the total; it never trades them.
-      const intradayOwned = sleeve.strategy === 'INTRADAY_ORB' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT';
+      const intradayOwned = sleeve.strategy === 'INTRADAY_ORB' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT' || sleeve.key === 'STK_WATCH';
       const r = intradayOwned
         ? { sleeveKey: sleeve.key, quotesFetched: 0, decisions: 0, tradesExecuted: 0, cashBalancePaisa: sleeve.cashBalancePaisa }
         : await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute });
@@ -202,18 +202,21 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   try {
     let trades = 0;
     const results: Array<{ key: string; equityPaisa: number; trades: number }> = [];
-    // Shared liquid universe for the price-scan baskets (built once when open).
-    const needScan = sleeves.some((s) => s.strategy === 'VWAP_REVERSION' || s.strategy === 'GAP_AND_GO');
+    // Shared liquid universe for the algo scan baskets (ORB + VWAP + gap),
+    // built once when open = today's Nifty-500 in-play movers.
+    const needScan = sleeves.some((s) => s.strategy === 'VWAP_REVERSION' || s.strategy === 'GAP_AND_GO' || s.strategy === 'INTRADAY_ORB');
     const scanUniverse = needScan && marketOpen ? await buildScanUniverse(userId, portfolio.id) : [];
     for (const sleeve of sleeves) {
       const hasOpen = (openBySleeve.get(sleeve.id) ?? 0) > 0;
       let r;
-      if (sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT') {
-        // Swing funnel: 2-3 day (SHORT) / 2-3 month (LONG) catalyst holds.
+      if (sleeve.key === 'STK_WATCH' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT') {
+        // "My Picks": the user's watchlist, timed by the combined trigger.
+        // STK_WATCH = intraday (same-day), STK_FAST = 2-3d, STK_SHORT = 2-3mo.
         if (!marketOpen && !hasOpen) continue;
-        r = await runSwing(userId, sleeve, run.id, runDate, { marketOpen, horizon: sleeve.key === 'STK_SHORT' ? 'LONG' : 'SHORT' });
+        const horizon = sleeve.key === 'STK_WATCH' ? 'INTRADAY' : sleeve.key === 'STK_SHORT' ? 'LONG' : 'SHORT';
+        r = await runSwing(userId, sleeve, run.id, runDate, { marketOpen, horizon });
       } else if (sleeve.strategy === 'INTRADAY_ORB') {
-        r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen });
+        r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen, universe: scanUniverse });
       } else if (sleeve.strategy === 'VWAP_REVERSION' || sleeve.strategy === 'GAP_AND_GO') {
         if (!marketOpen && !hasOpen) continue; // no entries + nothing to square off
         r = await runIntradayScan(userId, sleeve, SCAN_STRATEGIES[sleeve.strategy], run.id, runDate, { marketOpen, universe: scanUniverse });

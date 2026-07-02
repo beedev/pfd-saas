@@ -41,7 +41,7 @@ interface CurvePoint { date: string; price: number }
 
 const inr = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
 const actionVariant = (a: string): 'success' | 'warning' | 'info' => (a === 'BUY' ? 'success' : a === 'SELL' ? 'warning' : 'info');
-const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'Mean reversion', XS_MOMENTUM: 'Momentum 12-1', TREND: 'Trend / breakout', RS_ROTATION: 'RS rotation', INTRADAY_ORB: 'Intraday ORB (same-day)', VWAP_REVERSION: 'VWAP reversion', GAP_AND_GO: 'Gap-and-go', NEWS_SIGNAL: 'News signal' };
+const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'My picks · combined trigger', XS_MOMENTUM: 'My picks · combined trigger', TREND: 'Trend / breakout', RS_ROTATION: 'RS rotation', INTRADAY_ORB: 'Intraday ORB (same-day)', VWAP_REVERSION: 'VWAP reversion', GAP_AND_GO: 'Gap-and-go', NEWS_SIGNAL: 'News signal', WATCHLIST: 'My picks · combined trigger' };
 
 export default function AnalystPage() {
   const [sleeves, setSleeves] = useState<Sleeve[]>([]);

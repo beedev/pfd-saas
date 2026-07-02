@@ -57,6 +57,8 @@ export async function POST(request: NextRequest) {
     if (!Number.isInteger(body.sleeveId)) {
       return NextResponse.json({ error: 'sleeveId required' }, { status: 400 });
     }
+    // "My Picks" hold horizon — INTRADAY (same-day) or MULTIDAY (swing).
+    const horizon = body.horizon === 'INTRADAY' ? 'INTRADAY' : 'MULTIDAY';
 
     const portfolio = await ensurePortfolio(userId);
     const [created] = await db
@@ -70,6 +72,7 @@ export async function POST(request: NextRequest) {
         schemeCode,
         isin: typeof body.isin === 'string' ? body.isin.trim() || null : null,
         name,
+        horizon,
         contractMultiplier: typeof body.contractMultiplier === 'number' && body.contractMultiplier > 0 ? body.contractMultiplier : 1,
       })
       .onConflictDoNothing({ target: [agentWatchlist.userId, agentWatchlist.sleeveId, agentWatchlist.assetClass, agentWatchlist.symbol, agentWatchlist.schemeCode] })

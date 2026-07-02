@@ -428,6 +428,13 @@
       "when": 1782962316525,
       "tag": "0060_perpetual_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1782999274815,
+      "tag": "0061_reflective_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }
