@@ -66,7 +66,7 @@ export function manageExit(
 
 export interface OpenIntent {
   symbol: string; name: string; watchlistId?: number; side: AgentSide;
-  entryPaisa: number; stopPaisa: number; targetPaisa: number; qty: number;
+  entryPaisa: number; stopPaisa: number | null; targetPaisa: number | null; qty: number;
   rationale: string; evidence: AgentDecisionEvidence;
 }
 
