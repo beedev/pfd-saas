@@ -15,6 +15,12 @@ import { getQuote } from '@/lib/services/yahoo-finance';
 import { isMarketOpen } from '@/lib/agent/market-data';
 import { runSleeve } from '@/lib/agent/engine/run-sleeve';
 import { runIntradayOrb } from '@/lib/agent/engine/run-intraday';
+import { runIntradayScan, type ScanUniverseItem } from '@/lib/agent/engine/run-intraday-scan';
+import { runNewsSignal } from '@/lib/agent/engine/run-news-signal';
+import { SCAN_STRATEGIES } from '@/lib/agent/strategies/intraday-scan';
+import { agentWatchlist } from '@/db';
+import { getInPlay } from '@/lib/agent/news/ingest';
+import { getBriefBias } from '@/lib/agent/news/brief';
 import { markSleeveToMarket } from '@/lib/agent/engine/mark-sleeve';
 import { snapshotEquity, snapshotSleeveEquity, agentBenchmarkSymbol } from '@/lib/agent/engine/equity-curve';
 import { DEFAULT_SLEEVES } from '@/lib/agent/strategies/registry';
@@ -41,17 +47,34 @@ export async function ensurePortfolio(userId: string): Promise<AgentPortfolio> {
   return created;
 }
 
-/** Seed the 4 equal-split sleeves if none exist. */
+/**
+ * Ensure every default sleeve exists. First run: equal-split the starting capital.
+ * Later: ADD any newly-introduced sleeve (e.g. the VWAP/gap/news baskets) at the
+ * existing per-sleeve allocation — growing the paper corpus, not re-splitting —
+ * and bump the portfolio's starting capital so the total return% stays honest.
+ */
 export async function ensureSleeves(userId: string, portfolio: AgentPortfolio): Promise<AgentSleeve[]> {
   const existing = await db.select().from(agentSleeves).where(eq(agentSleeves.portfolioId, portfolio.id));
-  if (existing.length) return existing;
-  const total = portfolio.startingCapitalPaisa;
-  const per = Math.floor(total / DEFAULT_SLEEVES.length);
-  const rows = DEFAULT_SLEEVES.map((d, i) => {
-    const alloc = i === DEFAULT_SLEEVES.length - 1 ? total - per * (DEFAULT_SLEEVES.length - 1) : per;
-    return { userId, portfolioId: portfolio.id, key: d.key, name: d.name, strategy: d.strategy, cadence: d.cadence, allocationPaisa: alloc, cashBalancePaisa: alloc, paramsJson: {} };
-  });
-  return db.insert(agentSleeves).values(rows).returning();
+  const existingKeys = new Set(existing.map((s) => s.key));
+  const missing = DEFAULT_SLEEVES.filter((d) => !existingKeys.has(d.key));
+  if (!missing.length) return existing;
+
+  // Per-sleeve allocation: match the existing sleeves (grow corpus), else split.
+  const per = existing.length
+    ? existing[0].allocationPaisa
+    : Math.floor(portfolio.startingCapitalPaisa / DEFAULT_SLEEVES.length);
+  const rows = missing.map((d) => ({
+    userId, portfolioId: portfolio.id, key: d.key, name: d.name, strategy: d.strategy, cadence: d.cadence,
+    allocationPaisa: per, cashBalancePaisa: per, paramsJson: {},
+  }));
+  const inserted = await db.insert(agentSleeves).values(rows).returning();
+
+  // Keep starting capital = Σ sleeve allocations so return% is meaningful.
+  const totalAlloc = [...existing, ...inserted].reduce((a, s) => a + s.allocationPaisa, 0);
+  if (totalAlloc !== portfolio.startingCapitalPaisa) {
+    await db.update(agentPortfolios).set({ startingCapitalPaisa: totalAlloc, updatedAt: new Date() }).where(eq(agentPortfolios.id, portfolio.id));
+  }
+  return [...existing, ...inserted];
 }
 
 export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}): Promise<AgentV2Result> {
@@ -136,8 +159,14 @@ function istStamp(): string {
 }
 
 /**
- * Intraday run: only the INTRADAY-cadence sleeves (the 2-3d mean-reversion
- * sleeve), only while the market is open. Runs several times a day; each tick is
+ * Shared liquid universe for the price-scan intraday baskets (VWAP, gap-and-go):
+ * the portfolio's watchlist ∪ today's directional brief names ∪ fresh in-play,
+ * deduped, .NS only, bounded — so the new baskets trade what's liquid + in play.
+ *
+ * (helper) buildScanUniverse defined below runAgentIntraday.
+ *
+ * Intraday run: the INTRADAY-cadence sleeves (ORB, VWAP, gap-and-go, news, and
+ * the 2-3d mean-reversion sleeve), only while the market is open. Runs several times a day; each tick is
  * its own run row (timestamped) so it isn't blocked by the daily idempotency.
  * Equity snapshots use the plain date (one point/day, upserted).
  */
@@ -149,13 +178,13 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   const all = await db.select().from(agentSleeves).where(eq(agentSleeves.portfolioId, portfolio.id));
   const sleeves = all.filter((s) => s.enabled && s.cadence === 'INTRADAY');
   if (!sleeves.length) return { status: 'SKIPPED', reason: 'no-intraday-sleeves', runDate };
-  // When the market is closed we still run ORB sleeves that hold positions (to
-  // square them off — never overnight); legacy intraday sleeves wait for open.
-  const orbIds = sleeves.filter((s) => s.strategy === 'INTRADAY_ORB').map((s) => s.id);
-  const openOrb = orbIds.length
-    ? (await db.select({ id: agentPositions.id }).from(agentPositions).where(inArray(agentPositions.sleeveId, orbIds))).length
-    : 0;
-  if (!marketOpen && !openOrb) return { status: 'SKIPPED', reason: 'market-closed', runDate };
+  // When the market is closed we still run intraday sleeves that hold positions
+  // (to square them off — never overnight); pure entry sleeves wait for open.
+  const openRows = await db.select({ sleeveId: agentPositions.sleeveId }).from(agentPositions)
+    .where(inArray(agentPositions.sleeveId, sleeves.map((s) => s.id)));
+  const openBySleeve = new Map<number, number>();
+  for (const r of openRows) if (r.sleeveId != null) openBySleeve.set(r.sleeveId, (openBySleeve.get(r.sleeveId) ?? 0) + 1);
+  if (!marketOpen && !openRows.length) return { status: 'SKIPPED', reason: 'market-closed', runDate };
 
   const inserted = await db
     .insert(agentRuns)
@@ -168,10 +197,20 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   try {
     let trades = 0;
     const results: Array<{ key: string; equityPaisa: number; trades: number }> = [];
+    // Shared liquid universe for the price-scan baskets (built once when open).
+    const needScan = sleeves.some((s) => s.strategy === 'VWAP_REVERSION' || s.strategy === 'GAP_AND_GO');
+    const scanUniverse = needScan && marketOpen ? await buildScanUniverse(userId, portfolio.id) : [];
     for (const sleeve of sleeves) {
+      const hasOpen = (openBySleeve.get(sleeve.id) ?? 0) > 0;
       let r;
       if (sleeve.strategy === 'INTRADAY_ORB') {
         r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen });
+      } else if (sleeve.strategy === 'VWAP_REVERSION' || sleeve.strategy === 'GAP_AND_GO') {
+        if (!marketOpen && !hasOpen) continue; // no entries + nothing to square off
+        r = await runIntradayScan(userId, sleeve, SCAN_STRATEGIES[sleeve.strategy], run.id, runDate, { marketOpen, universe: scanUniverse });
+      } else if (sleeve.strategy === 'NEWS_SIGNAL') {
+        if (!marketOpen && !hasOpen) continue;
+        r = await runNewsSignal(userId, sleeve, run.id, runDate, { marketOpen });
       } else {
         if (!marketOpen) continue; // legacy intraday sleeves only fill during hours
         r = await runSleeve(userId, sleeve, run.id, runDate, { execute: true });
@@ -188,4 +227,17 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
     await db.update(agentRuns).set({ status: 'FAILED', finishedAt: new Date(), error: message }).where(eq(agentRuns.id, run.id));
     return { status: 'FAILED', reason: message, runDate };
   }
+}
+
+/** See doc above runAgentIntraday. Builds the shared scan universe. */
+async function buildScanUniverse(userId: string, portfolioId: number): Promise<ScanUniverseItem[]> {
+  const wl = await db.select({ symbol: agentWatchlist.symbol, name: agentWatchlist.name }).from(agentWatchlist)
+    .where(and(eq(agentWatchlist.userId, userId), eq(agentWatchlist.portfolioId, portfolioId), eq(agentWatchlist.enabled, true)));
+  const map = new Map<string, ScanUniverseItem>();
+  for (const w of wl) if (w.symbol.endsWith('.NS')) map.set(w.symbol, { symbol: w.symbol, name: w.name });
+  const brief = await getBriefBias().catch(() => new Map<string, { bias: string }>());
+  for (const [s, v] of brief) if (v.bias !== 'NEUTRAL' && s.endsWith('.NS') && !map.has(s)) map.set(s, { symbol: s, name: s });
+  const inPlay = (await getInPlay().catch(() => [])).map((x) => x.symbol);
+  for (const s of inPlay) if (s.endsWith('.NS') && !map.has(s)) map.set(s, { symbol: s, name: s });
+  return [...map.values()].slice(0, 40);
 }

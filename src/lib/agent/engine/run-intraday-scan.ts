@@ -41,7 +41,13 @@ export async function runIntradayScan(
   let grossDeployed = positions.reduce((a, p) => a + Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier), 0);
   let quotesFetched = 0, decisions = 0, trades = 0;
 
-  for (const w of opts.universe) {
+  // Scan the universe PLUS any held symbols not in it (so exits/square-offs
+  // are always processed, even when a holding drops out of the scan list).
+  const uniMap = new Map<string, ScanUniverseItem>();
+  for (const u of opts.universe) if (u.symbol) uniMap.set(u.symbol, u);
+  for (const pos of positions) if (!uniMap.has(pos.symbol)) uniMap.set(pos.symbol, { symbol: pos.symbol, name: pos.name });
+
+  for (const w of uniMap.values()) {
     if (!w.symbol) continue;
     const bars = (await getIntradayBars(w.symbol))
       .filter((b) => minOfDay(b.epoch) >= OR_START && minOfDay(b.epoch) <= SESSION_END);

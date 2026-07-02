@@ -29,4 +29,7 @@ export const DEFAULT_SLEEVES: Array<{ key: import('@/db').AgentSleeveKey; name: 
   { key: 'FUT', name: 'Futures', strategy: 'TREND', cadence: 'DAILY_OPEN' },
   { key: 'MF', name: 'Mutual funds', strategy: 'RS_ROTATION', cadence: 'DAILY_OPEN' },
   { key: 'STK_INTRADAY', name: 'Intraday (ORB)', strategy: 'INTRADAY_ORB', cadence: 'INTRADAY' },
+  { key: 'STK_VWAP', name: 'Intraday · VWAP reversion', strategy: 'VWAP_REVERSION', cadence: 'INTRADAY' },
+  { key: 'STK_GAP', name: 'Intraday · gap-and-go', strategy: 'GAP_AND_GO', cadence: 'INTRADAY' },
+  { key: 'STK_NEWS', name: 'Intraday · news signals', strategy: 'NEWS_SIGNAL', cadence: 'INTRADAY' },
 ];
