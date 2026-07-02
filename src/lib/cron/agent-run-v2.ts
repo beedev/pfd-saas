@@ -11,7 +11,8 @@ import {
   db, agentPortfolios, agentSleeves, agentRuns, agentPositions, priceSnapshots,
   type AgentPortfolio, type AgentSleeve,
 } from '@/db';
-import { getQuote } from '@/lib/services/yahoo-finance';
+import { getQuote, getQuotes } from '@/lib/services/yahoo-finance';
+import { NIFTY_500 } from '@/lib/agent/universe/nifty500';
 import { isMarketOpen } from '@/lib/agent/market-data';
 import { runSleeve } from '@/lib/agent/engine/run-sleeve';
 import { runIntradayOrb } from '@/lib/agent/engine/run-intraday';
@@ -19,7 +20,6 @@ import { runIntradayScan, type ScanUniverseItem } from '@/lib/agent/engine/run-i
 import { runNewsSignal } from '@/lib/agent/engine/run-news-signal';
 import { runSwing } from '@/lib/agent/engine/run-swing';
 import { SCAN_STRATEGIES } from '@/lib/agent/strategies/intraday-scan';
-import { agentWatchlist } from '@/db';
 import { getInPlay } from '@/lib/agent/news/ingest';
 import { getBriefBias } from '@/lib/agent/news/brief';
 import { markSleeveToMarket } from '@/lib/agent/engine/mark-sleeve';
@@ -238,15 +238,33 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   }
 }
 
-/** See doc above runAgentIntraday. Builds the shared scan universe. */
-async function buildScanUniverse(userId: string, portfolioId: number): Promise<ScanUniverseItem[]> {
-  const wl = await db.select({ symbol: agentWatchlist.symbol, name: agentWatchlist.name }).from(agentWatchlist)
-    .where(and(eq(agentWatchlist.userId, userId), eq(agentWatchlist.portfolioId, portfolioId), eq(agentWatchlist.enabled, true)));
+const IN_PLAY_MOVE_PCT = 1.5;  // a Nifty-500 name is "in play" if it's moved ≥ this today
+const SCAN_CHUNK = 50;         // batched-quote chunk size (500 at once would rate-limit)
+
+/**
+ * Shared scan universe for VWAP + gap-and-go = today's Nifty-500 IN-PLAY movers
+ * (|day change| ≥ threshold) ∪ directional brief names ∪ fresh news in-play.
+ * Equities only (.NS) — this drops the `=F` futures + the static large-cap
+ * watchlist that were starving gap-and-go of candidates. Bounded to keep the
+ * per-tick intraday-bar fetches small; the batched quote scan uses the 5-min cache.
+ */
+async function buildScanUniverse(_userId: string, _portfolioId: number): Promise<ScanUniverseItem[]> {
+  // Nifty-500 day-change via batched quotes → the in-play movers (where gaps live).
+  const changes = new Map<string, number>();
+  for (let i = 0; i < NIFTY_500.length; i += SCAN_CHUNK) {
+    const qs = await getQuotes(NIFTY_500.slice(i, i + SCAN_CHUNK));
+    for (const q of qs) if (Number.isFinite(q.regularMarketChangePercent)) changes.set(q.symbol, q.regularMarketChangePercent);
+  }
   const map = new Map<string, ScanUniverseItem>();
-  for (const w of wl) if (w.symbol.endsWith('.NS')) map.set(w.symbol, { symbol: w.symbol, name: w.name });
+  [...changes.entries()]
+    .filter(([, c]) => Math.abs(c) >= IN_PLAY_MOVE_PCT)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 40)
+    .forEach(([s]) => { if (s.endsWith('.NS')) map.set(s, { symbol: s, name: s }); });
+
   const brief = await getBriefBias().catch(() => new Map<string, { bias: string }>());
   for (const [s, v] of brief) if (v.bias !== 'NEUTRAL' && s.endsWith('.NS') && !map.has(s)) map.set(s, { symbol: s, name: s });
   const inPlay = (await getInPlay().catch(() => [])).map((x) => x.symbol);
   for (const s of inPlay) if (s.endsWith('.NS') && !map.has(s)) map.set(s, { symbol: s, name: s });
-  return [...map.values()].slice(0, 40);
+  return [...map.values()].slice(0, 50);
 }
