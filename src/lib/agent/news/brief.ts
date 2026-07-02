@@ -10,7 +10,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { db, agentNews, agentDailyBrief, type AgentBriefBias, type AgentDailyBrief } from '@/db';
 import { runNewsIngest } from './ingest';
-import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
+import { recordLlmUsage, MODEL_FOR, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -46,7 +46,7 @@ export async function runPremarketBrief(): Promise<{ analyzed: number; date: str
     const res = await fetch(OPENAI_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'gpt-4.1', temperature: 0,
+        model: MODEL_FOR.premarket_brief, temperature: 0,
         messages: [
           { role: 'system', content: 'You are an Indian-market pre-market analyst. For each stock and its overnight/morning headlines, judge the LIKELY INTRADAY price direction. Return JSON only: {"items":[{"symbol":"<symbol>","bias":"BULLISH|BEARISH|NEUTRAL","impact":<0..1 expected intraday magnitude>,"why":"<one short line>"}]}. Be conservative — use NEUTRAL unless the news is clearly directional and material.' },
           { role: 'user', content: list },
@@ -56,7 +56,7 @@ export async function runPremarketBrief(): Promise<{ analyzed: number; date: str
     });
     if (res.ok) {
       const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
-      await recordLlmUsage('premarket_brief', 'gpt-4.1', j.usage);
+      await recordLlmUsage('premarket_brief', MODEL_FOR.premarket_brief, j.usage);
       stances = (JSON.parse(j.choices?.[0]?.message?.content ?? '{}').items ?? []) as typeof stances;
     }
   } catch { /* leave stances empty → all NEUTRAL */ }

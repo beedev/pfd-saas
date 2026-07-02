@@ -11,10 +11,10 @@
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { db, agentNews, type AgentBriefBias, type AgentSignalPhrase } from '@/db';
 import { getActiveDictionary, ensurePhrase, recordTag } from './dictionary';
-import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
+import { recordLlmUsage, MODEL_FOR, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const MODEL = 'gpt-4.1';
+const MODEL = MODEL_FOR.signal_tagging;
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 export interface TagItem { newsId: number; symbol: string; title: string; summary?: string | null }

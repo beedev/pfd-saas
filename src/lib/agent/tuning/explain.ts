@@ -10,7 +10,7 @@
 import type { OrbParams } from '../engine/orb-step';
 import type { EdgeMetrics } from './metrics';
 import { describeDelta } from './candidates';
-import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
+import { recordLlmUsage, MODEL_FOR, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const rupee = (p: number | null | undefined) => p == null ? 'n/a' : '₹' + Math.round(p / 100).toLocaleString('en-IN');
@@ -48,7 +48,7 @@ export async function explainCandidate(i: ExplainInput): Promise<string> {
     const res = await fetch(OPENAI_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'gpt-4.1', temperature: 0,
+        model: MODEL_FOR.tuning_explain, temperature: 0,
         messages: [
           { role: 'system', content: 'You explain a parameter-tuning decision for an intraday Opening-Range-Breakout paper-trading sleeve (Indian equities, costs + 30% intraday tax already netted). Write ONE plain, concrete sentence (<40 words) on why the challenger param set is better or worse than the champion, grounded ONLY in the supplied numbers (net P&L is paisa). Name the knob changed. Do not invent figures or give financial advice.' },
           { role: 'user', content: JSON.stringify(payload) },
@@ -57,7 +57,7 @@ export async function explainCandidate(i: ExplainInput): Promise<string> {
     });
     if (!res.ok) return fallback;
     const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
-    await recordLlmUsage('tuning_explain', 'gpt-4.1', j.usage);
+    await recordLlmUsage('tuning_explain', MODEL_FOR.tuning_explain, j.usage);
     const text = j.choices?.[0]?.message?.content?.trim();
     return text && text.length > 0 ? text : fallback;
   } catch {

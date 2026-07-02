@@ -12,7 +12,7 @@ import { FEEDS } from './feeds';
 import { parseFeed } from './rss';
 import { NEWS_EQUITY_UNIVERSE, aliasesFromName } from './universe';
 import { tagRecentNews } from '../signal/tag-news';
-import { recordLlmUsage, type OpenAiUsage } from '../llm/usage';
+import { recordLlmUsage, MODEL_FOR, type OpenAiUsage } from '../llm/usage';
 
 const UA = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -101,7 +101,7 @@ async function scoreSentiment(): Promise<number> {
     const res = await fetch(OPENAI_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'gpt-4.1', temperature: 0,
+        model: MODEL_FOR.news_sentiment, temperature: 0,
         messages: [
           { role: 'system', content: 'You score Indian stock-market headlines. For each numbered item return JSON only: {"items":[{"i":<index>,"sentiment":"POSITIVE|NEGATIVE|NEUTRAL","score":<-1..1>,"relevance":<0..1 how materially it affects the specific stock\'s price>}]}. No prose.' },
           { role: 'user', content: list },
@@ -111,7 +111,7 @@ async function scoreSentiment(): Promise<number> {
     });
     if (!res.ok) return 0;
     const j = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: OpenAiUsage };
-    await recordLlmUsage('news_sentiment', 'gpt-4.1', j.usage);
+    await recordLlmUsage('news_sentiment', MODEL_FOR.news_sentiment, j.usage);
     const parsed = JSON.parse(j.choices?.[0]?.message?.content ?? '{}') as { items?: Array<{ i: number; sentiment: string; score: number; relevance: number }> };
     let n = 0;
     for (const it of parsed.items ?? []) {

@@ -13,6 +13,21 @@ import { db, agentLlmUsage } from '@/db';
 
 export type LlmTask = 'news_sentiment' | 'premarket_brief' | 'signal_tagging' | 'tuning_explain' | 'advisory';
 
+/**
+ * Per-task model. mini for the cheap/low-stakes high-volume tasks; 4.1 for the
+ * quality-critical ones (brief drives trades, tagging must keep the dictionary
+ * consistent, advisory must not misgroup numbers). Flip any task here — cost per
+ * task is tracked so you can measure the effect. (gpt-4.1-mini ≠ the older
+ * gpt-4o-mini; it follows instructions far better.)
+ */
+export const MODEL_FOR: Record<LlmTask, string> = {
+  news_sentiment: 'gpt-4.1-mini',
+  tuning_explain: 'gpt-4.1-mini',
+  premarket_brief: 'gpt-4.1',
+  signal_tagging: 'gpt-4.1',
+  advisory: 'gpt-4.1',
+};
+
 export interface LlmPrice { inputPerM: number; outputPerM: number } // USD per 1,000,000 tokens
 
 export const LLM_PRICING: Record<string, LlmPrice> = {
