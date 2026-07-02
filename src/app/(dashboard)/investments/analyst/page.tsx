@@ -129,11 +129,12 @@ export default function AnalystPage() {
       {/* Sleeve cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {sleeves.map((s) => {
-          const mv = s.positionsValuePaisa;
-          const pnl = s.unrealizedPnlPaisa;
-          const cost = mv - pnl;
-          const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
-          const invested = mv > 0;
+          // Bucket equity (cash + positions) and P&L vs its allocation — one
+          // consistent base across ALL buckets, so the numbers compare cleanly.
+          const equity = s.equityPaisa;
+          const pnl = equity - s.allocationPaisa;               // realized + unrealized since inception
+          const pnlPct = s.allocationPaisa > 0 ? (pnl / s.allocationPaisa) * 100 : 0;
+          const idle = s.openPositions === 0;
           return (
             <Card key={s.id}>
               <CardContent>
@@ -142,16 +143,14 @@ export default function AnalystPage() {
                   <Badge variant="info" className="text-[10px]">{s.cadence === 'INTRADAY' ? 'intraday' : 'daily'}</Badge>
                 </div>
                 <p className="text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{STRATEGY_LABEL[s.strategy] ?? s.strategy}</p>
-                <p className="mt-2 text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">Market value</p>
-                <p className="font-mono text-lg font-bold text-[var(--dxp-text)]">{inr(mv)}</p>
-                {invested ? (
-                  <p className={`font-mono text-sm ${pnl >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                    {pnl >= 0 ? '+' : ''}{inr(pnl)} ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
-                  </p>
-                ) : (
-                  <p className="font-mono text-sm text-[var(--dxp-text-muted)]">not invested</p>
-                )}
-                <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">{s.openPositions} pos · cash {inr(s.cashPaisa)} of {inr(s.allocationPaisa)}</p>
+                <p className="mt-2 text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">Value</p>
+                <p className="font-mono text-lg font-bold text-[var(--dxp-text)]">{inr(equity)}</p>
+                <p className={`font-mono text-sm ${pnl > 0 ? 'text-emerald-700' : pnl < 0 ? 'text-rose-600' : 'text-[var(--dxp-text-muted)]'}`}>
+                  {pnl >= 0 ? '+' : ''}{inr(pnl)} ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
+                </p>
+                <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">
+                  {s.openPositions} pos{idle ? ' · idle' : ''} · cash {inr(s.cashPaisa)} of {inr(s.allocationPaisa)}
+                </p>
               </CardContent>
             </Card>
           );
