@@ -414,6 +414,13 @@
       "when": 1782926563013,
       "tag": "0058_wet_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1782957410140,
+      "tag": "0059_violet_thunderball",
+      "breakpoints": true
     }
   ]
 }

@@ -98,6 +98,27 @@ export function atrProxy(closes: number[], n: number): number | null {
   return sum / n;
 }
 
+export interface OHLCV { high: number; low: number; close: number; volume?: number }
+
+/** True ATR over the last `n` bars (true range = max(h−l, |h−pc|, |l−pc|)). Same units as price. */
+export function atr(bars: OHLCV[], n: number): number | null {
+  if (bars.length < n + 1 || n <= 0) return null;
+  const tr: number[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
+    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  const last = tr.slice(-n);
+  return last.reduce((a, b) => a + b, 0) / last.length;
+}
+
+/** Session VWAP = Σ(typical price × volume) / Σ volume; typical = (h+l+c)/3. Null if no volume. */
+export function vwap(bars: OHLCV[]): number | null {
+  let pv = 0, vol = 0;
+  for (const b of bars) { const v = b.volume ?? 0; pv += ((b.high + b.low + b.close) / 3) * v; vol += v; }
+  return vol > 0 ? pv / vol : null;
+}
+
 /**
  * Return (%) between two points measured in trading days back from the latest:
  * from `startAgo` days ago to `endAgo` days ago. For 12-1 momentum use

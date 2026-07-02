@@ -3465,8 +3465,8 @@ export type AgentTradeStatus = 'FILLED' | 'PENDING';
 export type AgentSide = 'LONG' | 'SHORT';
 
 // v2 — strategy sleeves (each a slice of capital with its own quant strategy).
-export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION' | 'INTRADAY_ORB';
-export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF' | 'STK_INTRADAY';
+export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION' | 'INTRADAY_ORB' | 'VWAP_REVERSION' | 'GAP_AND_GO' | 'NEWS_SIGNAL';
+export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF' | 'STK_INTRADAY' | 'STK_VWAP' | 'STK_GAP' | 'STK_NEWS';
 export type AgentCadence = 'DAILY_OPEN' | 'INTRADAY';
 
 export interface AgentSleeveParams {
@@ -3719,6 +3719,10 @@ export const agentPositions = pgTable('agent_positions', {
   lastPricePaisa: bigint('last_price_paisa', { mode: 'number' }),
   marketValuePaisa: bigint('market_value_paisa', { mode: 'number' }),
   unrealizedPnlPaisa: bigint('unrealized_pnl_paisa', { mode: 'number' }),
+  // Fixed exit levels set at entry (ATR/gap-based strategies). Null = strategy
+  // recomputes its exit each tick (e.g. ORB from the opening range).
+  stopPaisa: bigint('stop_paisa', { mode: 'number' }),
+  targetPaisa: bigint('target_paisa', { mode: 'number' }),
   openedDate: text('opened_date').notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

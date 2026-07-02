@@ -289,7 +289,7 @@ interface YahooChartOHLC {
   chart: {
     result: Array<{
       timestamp?: number[];
-      indicators?: { quote?: Array<{ open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[] }> };
+      indicators?: { quote?: Array<{ open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[] }> };
     }> | null;
     error: { code: string; description: string } | null;
   };
@@ -325,7 +325,7 @@ async function getDailyOHLC(symbol: string, range = '1y'): Promise<DailyBar[]> {
   }
 }
 
-export interface IntradayBar { epoch: number; open: number; high: number; low: number; close: number }
+export interface IntradayBar { epoch: number; open: number; high: number; low: number; close: number; volume?: number }
 
 /**
  * Intraday OHLC bars for today (default 5-min). For the same-day ORB sleeve.
@@ -347,7 +347,8 @@ async function getIntradayBars(symbol: string, interval = '5m'): Promise<Intrada
     for (let i = 0; i < ts.length; i++) {
       const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
       if (o == null || h == null || l == null || c == null) continue;
-      bars.push({ epoch: ts[i], open: o, high: h, low: l, close: c });
+      const v = q.volume?.[i];
+      bars.push({ epoch: ts[i], open: o, high: h, low: l, close: c, volume: v ?? undefined });
     }
     return bars;
   } catch (err) {
