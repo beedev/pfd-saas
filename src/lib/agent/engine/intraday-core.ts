@@ -102,13 +102,14 @@ export async function persistOpen(
 export async function persistClose(
   userId: string, sleeve: AgentSleeve, runId: number, runDate: string,
   pos: OpenPositionLite, name: string, exitPaisa: number, reason: string, asOf: string, cash: number,
+  holdingDays = 0, // 0 = intraday (default); ≥1 = delivery (swing) → delivery costs + STCG/LTCG
 ): Promise<number> {
   const long = pos.side === 'LONG';
   const qty = pos.quantity;
   const notional = Math.round(exitPaisa * qty * pos.contractMultiplier);
   const grossPnl = Math.round((long ? exitPaisa - pos.avgPricePaisa : pos.avgPricePaisa - exitPaisa) * qty * pos.contractMultiplier);
-  const cost = tradeCostPaisa(notional, 'STOCK', true, 0, DEFAULT_COST_MODEL);
-  const tax = cgTaxPaisa(grossPnl, 0, DEFAULT_COST_MODEL);
+  const cost = tradeCostPaisa(notional, 'STOCK', true, holdingDays, DEFAULT_COST_MODEL);
+  const tax = cgTaxPaisa(grossPnl, holdingDays, DEFAULT_COST_MODEL);
   const realized = grossPnl - cost - tax;
   const action = long ? 'SELL' : 'BUY';
   const ev: AgentDecisionEvidence = {

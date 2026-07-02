@@ -17,6 +17,7 @@ import { runSleeve } from '@/lib/agent/engine/run-sleeve';
 import { runIntradayOrb } from '@/lib/agent/engine/run-intraday';
 import { runIntradayScan, type ScanUniverseItem } from '@/lib/agent/engine/run-intraday-scan';
 import { runNewsSignal } from '@/lib/agent/engine/run-news-signal';
+import { runSwing } from '@/lib/agent/engine/run-swing';
 import { SCAN_STRATEGIES } from '@/lib/agent/strategies/intraday-scan';
 import { agentWatchlist } from '@/db';
 import { getInPlay } from '@/lib/agent/news/ingest';
@@ -104,9 +105,11 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
 
     for (const sleeve of sleeves) {
       if (!sleeve.enabled) continue;
-      // Intraday ORB is owned by the intraday runner — at the daily open it has
-      // no setup yet, so just mark it to market so it counts in the total.
-      const r = sleeve.strategy === 'INTRADAY_ORB'
+      // ORB + the swing buckets (STK_FAST/STK_SHORT) are owned by the intraday
+      // runner (run-intraday / run-swing) — the daily run just marks them to
+      // market so they count in the total; it never trades them.
+      const intradayOwned = sleeve.strategy === 'INTRADAY_ORB' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT';
+      const r = intradayOwned
         ? { sleeveKey: sleeve.key, quotesFetched: 0, decisions: 0, tradesExecuted: 0, cashBalancePaisa: sleeve.cashBalancePaisa }
         : await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute });
       const equity = await markSleeveToMarket(userId, sleeve.id, r.cashBalancePaisa);
@@ -176,7 +179,9 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   const portfolio = (await db.select().from(agentPortfolios).where(eq(agentPortfolios.userId, userId)).limit(1))[0];
   if (!portfolio || !portfolio.enabled) return { status: 'SKIPPED', reason: 'disabled', runDate };
   const all = await db.select().from(agentSleeves).where(eq(agentSleeves.portfolioId, portfolio.id));
-  const sleeves = all.filter((s) => s.enabled && s.cadence === 'INTRADAY');
+  // Intraday-cadence sleeves + the two swing buckets (managed intraday for stop/
+  // target, held multi-day — run-swing owns them; the daily run skips them).
+  const sleeves = all.filter((s) => s.enabled && (s.cadence === 'INTRADAY' || s.key === 'STK_SHORT'));
   if (!sleeves.length) return { status: 'SKIPPED', reason: 'no-intraday-sleeves', runDate };
   // When the market is closed we still run intraday sleeves that hold positions
   // (to square them off — never overnight); pure entry sleeves wait for open.
@@ -203,7 +208,11 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
     for (const sleeve of sleeves) {
       const hasOpen = (openBySleeve.get(sleeve.id) ?? 0) > 0;
       let r;
-      if (sleeve.strategy === 'INTRADAY_ORB') {
+      if (sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT') {
+        // Swing funnel: 2-3 day (SHORT) / 2-3 month (LONG) catalyst holds.
+        if (!marketOpen && !hasOpen) continue;
+        r = await runSwing(userId, sleeve, run.id, runDate, { marketOpen, horizon: sleeve.key === 'STK_SHORT' ? 'LONG' : 'SHORT' });
+      } else if (sleeve.strategy === 'INTRADAY_ORB') {
         r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen });
       } else if (sleeve.strategy === 'VWAP_REVERSION' || sleeve.strategy === 'GAP_AND_GO') {
         if (!marketOpen && !hasOpen) continue; // no entries + nothing to square off
