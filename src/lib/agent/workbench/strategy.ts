@@ -14,7 +14,7 @@
 import type { DailyBar } from '@/lib/services/yahoo-finance';
 
 export type StrategyHorizon = 'INTRADAY' | 'SWING' | 'POSITION';
-export type StrategyUniverse = 'NIFTY_500' | 'NIFTY_50' | 'ETF' | 'WATCHLIST';
+export type StrategyUniverse = string;  // a key in the universe registry (universes.ts) — NIFTY_500, sectors, etc.
 
 /** A tunable knob — its range drives the sensitivity sweep, L3 tuning, and the UI. */
 export interface ParamSpec { key: string; label: string; min: number; max: number; step: number; default: number }

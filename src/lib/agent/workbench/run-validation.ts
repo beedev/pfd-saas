@@ -6,7 +6,7 @@
  * check" size; a wider run can be backgrounded later.
  */
 
-import { NIFTY_500 } from '../universe/nifty500';
+import { resolveUniverse } from './universes';
 import { loadUniverseDaily, loadDaily } from './data';
 import type { DailyBar } from '@/lib/services/yahoo-finance';
 import type { Strategy } from './strategy';
@@ -14,17 +14,19 @@ import { paramsFrom } from './strategy';
 import { runUniverse, poolMetrics, type Metrics } from './backtest';
 import { sensitivity, isPlateau, permutation, benchmark, type SensitivityPoint, type PermutationResult, type BenchmarkResult } from './validation';
 
-const UNIVERSE_SIZE = 80;
+const UNIVERSE_CAP = 150;   // cap broad universes for backtest speed; sectors are naturally small
 const PERMUTATIONS = 30;
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
-let cache: { bars: Map<string, DailyBar[]>; bench: DailyBar[]; at: number } | null = null;
-async function universe(now: number): Promise<{ bars: Map<string, DailyBar[]>; bench: DailyBar[] }> {
-  if (cache && now - cache.at < CACHE_TTL_MS) return cache;
-  const bars = await loadUniverseDaily(NIFTY_500.slice(0, UNIVERSE_SIZE), '5y');
+const cache = new Map<string, { bars: Map<string, DailyBar[]>; bench: DailyBar[]; at: number }>();
+async function universe(key: string, now: number): Promise<{ bars: Map<string, DailyBar[]>; bench: DailyBar[] }> {
+  const hit = cache.get(key);
+  if (hit && now - hit.at < CACHE_TTL_MS) return hit;
+  const bars = await loadUniverseDaily(resolveUniverse(key).slice(0, UNIVERSE_CAP), '5y');
   const bench = await loadDaily('NIFTYBEES.NS', '5y').catch(() => [] as DailyBar[]);
-  cache = { bars, bench, at: now };
-  return cache;
+  const v = { bars, bench, at: now };
+  cache.set(key, v);
+  return v;
 }
 
 export interface Verdict {
@@ -39,7 +41,7 @@ export interface Verdict {
 }
 
 export async function validateStrategy(strategy: Strategy, now: number = Date.now()): Promise<Verdict> {
-  const { bars, bench } = await universe(now);
+  const { bars, bench } = await universe(strategy.meta.universe, now);
   const params = paramsFrom(strategy.meta.params);
   const trades = runUniverse(strategy, bars, params);
   const m = poolMetrics(trades);

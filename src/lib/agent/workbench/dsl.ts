@@ -16,8 +16,8 @@ export type NumExpr =
   | number
   | { param: string }                                   // a strategy parameter
   | { close: number } | { open: number } | { high: number } | { low: number }   // series value at offset
-  | { sma: number } | { rsi: number } | { atr: number } // indicator (period), at today
-  | { priorHigh: number } | { priorLow: number }        // extreme over the prior N bars (excl today)
+  | { sma: NumExpr } | { rsi: NumExpr } | { atr: NumExpr } // indicator, period is itself an expr (so it can be a param)
+  | { priorHigh: NumExpr } | { priorLow: NumExpr }        // extreme over the prior N bars (excl today)
   | { sub: [NumExpr, NumExpr] } | { add: [NumExpr, NumExpr] } | { mul: [NumExpr, NumExpr] } | { div: [NumExpr, NumExpr] };
 
 export type Condition =

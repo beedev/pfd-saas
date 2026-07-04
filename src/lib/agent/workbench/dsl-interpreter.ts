@@ -21,11 +21,11 @@ function evalNum(e: NumExpr, ctx: Ctx): number {
   if ('open' in e) return at(ctx.bars, 'open', e.open);
   if ('high' in e) return at(ctx.bars, 'high', e.high);
   if ('low' in e) return at(ctx.bars, 'low', e.low);
-  if ('sma' in e) return sma(closesOf(ctx.bars), Math.round(e.sma)) ?? NaN;
-  if ('rsi' in e) return rsi(closesOf(ctx.bars), Math.round(e.rsi)) ?? NaN;
-  if ('atr' in e) return atr(ctx.bars.map((b) => ({ high: b.high, low: b.low, close: b.close })), Math.round(e.atr)) ?? NaN;
-  if ('priorHigh' in e) { const n = Math.round(e.priorHigh); const s = ctx.bars.slice(-n - 1, -1); return s.length ? Math.max(...s.map((b) => b.high)) : NaN; }
-  if ('priorLow' in e) { const n = Math.round(e.priorLow); const s = ctx.bars.slice(-n - 1, -1); return s.length ? Math.min(...s.map((b) => b.low)) : NaN; }
+  if ('sma' in e) return sma(closesOf(ctx.bars), Math.round(evalNum(e.sma, ctx))) ?? NaN;
+  if ('rsi' in e) return rsi(closesOf(ctx.bars), Math.round(evalNum(e.rsi, ctx))) ?? NaN;
+  if ('atr' in e) return atr(ctx.bars.map((b) => ({ high: b.high, low: b.low, close: b.close })), Math.round(evalNum(e.atr, ctx))) ?? NaN;
+  if ('priorHigh' in e) { const n = Math.round(evalNum(e.priorHigh, ctx)); const s = n >= 1 ? ctx.bars.slice(-n - 1, -1) : []; return s.length ? Math.max(...s.map((b) => b.high)) : NaN; }
+  if ('priorLow' in e) { const n = Math.round(evalNum(e.priorLow, ctx)); const s = n >= 1 ? ctx.bars.slice(-n - 1, -1) : []; return s.length ? Math.min(...s.map((b) => b.low)) : NaN; }
   if ('sub' in e) return evalNum(e.sub[0], ctx) - evalNum(e.sub[1], ctx);
   if ('add' in e) return evalNum(e.add[0], ctx) + evalNum(e.add[1], ctx);
   if ('mul' in e) return evalNum(e.mul[0], ctx) * evalNum(e.mul[1], ctx);

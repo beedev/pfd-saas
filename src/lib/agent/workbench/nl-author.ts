@@ -8,6 +8,7 @@
 
 import { recordLlmUsage, MODEL_FOR, type OpenAiUsage } from '../llm/usage';
 import type { DslSpec, NumExpr, Condition, StopRule } from './dsl';
+import { universeKeys, universeLabel } from './universes';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = MODEL_FOR.nl_author;
@@ -15,7 +16,9 @@ const MODEL = MODEL_FOR.nl_author;
 const GRAMMAR = `
 The DSL is JSON. A strategy is long-only.
 Shape: { "meta": {id,name,description,horizon,universe}, "params":[{key,label,min,max,step,default}], "entry":<Condition>, "exit":<Condition>, "stop":<Stop>?, "maxHoldDays":<Num>? }
-  horizon ∈ INTRADAY|SWING|POSITION (use SWING for multi-day holds). universe ∈ NIFTY_500|NIFTY_50|ETF|WATCHLIST.
+  horizon ∈ INTRADAY|SWING|POSITION (use SWING for multi-day holds).
+  universe ∈ ${universeKeys().join('|')}. If the description names a sector, pick that sector universe (pharma→NIFTY_PHARMA, banks→NIFTY_BANK, IT→NIFTY_IT, auto→NIFTY_AUTO, metal→NIFTY_METAL, energy/power→NIFTY_ENERGY, FMCG→NIFTY_FMCG, realty→NIFTY_REALTY, financials→NIFTY_FIN_SERVICE); else NIFTY_500.
+  Indicator/lookback periods (sma/rsi/atr/priorHigh/priorLow) may be a {"param":..} so they can be tuned — prefer that for any number the user might vary (e.g. "20-day high" → priorHigh:{param:"breakoutDays"}).
 NumExpr (a number): a literal number; {"param":"key"}; {"close":off}|{"open":off}|{"high":off}|{"low":off} (off 0=today,1=yesterday);
   {"sma":n}|{"rsi":n}|{"atr":n}; {"priorHigh":n}|{"priorLow":n} (extreme over prior n bars); {"sub":[a,b]}|{"add":..}|{"mul":..}|{"div":..}.
 Condition (a boolean): {"gt":[a,b]}|{"lt":..}|{"gte":..}|{"lte":..}; {"and":[..]}|{"or":[..]}|{"not":c};
@@ -82,11 +85,11 @@ function num(e: NumExpr): string {
   if ('open' in e) return `open${off(e.open)}`;
   if ('high' in e) return `high${off(e.high)}`;
   if ('low' in e) return `low${off(e.low)}`;
-  if ('sma' in e) return `${e.sma}-day SMA`;
-  if ('rsi' in e) return `RSI(${e.rsi})`;
-  if ('atr' in e) return `ATR(${e.atr})`;
-  if ('priorHigh' in e) return `${e.priorHigh}-day high`;
-  if ('priorLow' in e) return `${e.priorLow}-day low`;
+  if ('sma' in e) return `${num(e.sma)}-day SMA`;
+  if ('rsi' in e) return `RSI(${num(e.rsi)})`;
+  if ('atr' in e) return `ATR(${num(e.atr)})`;
+  if ('priorHigh' in e) return `${num(e.priorHigh)}-day high`;
+  if ('priorLow' in e) return `${num(e.priorLow)}-day low`;
   if ('sub' in e) return `(${num(e.sub[0])} − ${num(e.sub[1])})`;
   if ('add' in e) return `(${num(e.add[0])} + ${num(e.add[1])})`;
   if ('mul' in e) return `(${num(e.mul[0])} × ${num(e.mul[1])})`;
@@ -114,7 +117,7 @@ const stopStr = (s: StopRule): string => s.type === 'atr' ? `stop ${num(s.mult)}
 
 /** Render a spec to plain English — this is what the user confirms before it runs. */
 export function explainSpec(spec: DslSpec): string {
-  const parts = [`BUY when ${cond(spec.entry)}`, `EXIT when ${cond(spec.exit)}`];
+  const parts = [`In ${universeLabel(spec.meta.universe)}: BUY when ${cond(spec.entry)}`, `EXIT when ${cond(spec.exit)}`];
   if (spec.maxHoldDays != null) parts[1] += `, or after ${num(spec.maxHoldDays)} days`;
   if (spec.stop) parts.push(stopStr(spec.stop));
   const p = spec.params.length ? `  Params: ${spec.params.map((x) => `${x.key}=${x.default}`).join(', ')}.` : '';
