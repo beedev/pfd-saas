@@ -3585,6 +3585,22 @@ export const agentWatchlist = pgTable('agent_watchlist', {
 export type AgentWatchlistItem = typeof agentWatchlist.$inferSelect;
 export type NewAgentWatchlistItem = typeof agentWatchlist.$inferInsert;
 
+// Workbench: user-authored strategies (NL → DSL spec), with the last validation result.
+export type AgentStrategyStatus = 'DRAFT' | 'VALIDATED' | 'REJECTED';
+export const agentUserStrategies = pgTable('agent_user_strategies', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  sourceNl: text('source_nl').notNull().default(''),          // the original English description
+  specJson: jsonb('spec_json').notNull(),                     // the DSL spec
+  validationJson: jsonb('validation_json'),                   // last validation verdict + metrics
+  status: text('status').$type<AgentStrategyStatus>().notNull().default('DRAFT'),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
+}, (table) => [index('agent_user_strategies_user_id_idx').on(table.userId)]);
+export type AgentUserStrategy = typeof agentUserStrategies.$inferSelect;
+
 // One row per daily run — the idempotency anchor (unique on user+runDate).
 export const agentRuns = pgTable('agent_runs', {
   id: serial('id').primaryKey(),

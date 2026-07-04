@@ -11,7 +11,7 @@
 import { desc, gte, sql } from 'drizzle-orm';
 import { db, agentLlmUsage } from '@/db';
 
-export type LlmTask = 'news_sentiment' | 'premarket_brief' | 'signal_tagging' | 'tuning_explain' | 'advisory';
+export type LlmTask = 'news_sentiment' | 'premarket_brief' | 'signal_tagging' | 'tuning_explain' | 'advisory' | 'nl_author';
 
 /**
  * Per-task model. mini for the cheap/low-stakes high-volume tasks; 4.1 for the
@@ -26,6 +26,7 @@ export const MODEL_FOR: Record<LlmTask, string> = {
   premarket_brief: 'gpt-4.1',
   signal_tagging: 'gpt-4.1',
   advisory: 'gpt-4.1',
+  nl_author: 'gpt-4.1',              // strategy authoring is high-stakes — use the strong model
 };
 
 export interface LlmPrice { inputPerM: number; outputPerM: number } // USD per 1,000,000 tokens
