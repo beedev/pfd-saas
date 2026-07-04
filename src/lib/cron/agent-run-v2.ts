@@ -19,6 +19,7 @@ import { runIntradayOrb } from '@/lib/agent/engine/run-intraday';
 import { runIntradayScan, type ScanUniverseItem } from '@/lib/agent/engine/run-intraday-scan';
 import { runNewsSignal } from '@/lib/agent/engine/run-news-signal';
 import { runSwing } from '@/lib/agent/engine/run-swing';
+import { emitSleeveSignals } from '@/lib/agent/engine/signal-feed';
 import { SCAN_STRATEGIES } from '@/lib/agent/strategies/intraday-scan';
 import { getInPlay } from '@/lib/agent/news/ingest';
 import { getBriefBias } from '@/lib/agent/news/brief';
@@ -109,11 +110,14 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
       // runner (run-intraday / run-swing) — the daily run just marks them to
       // market so they count in the total; it never trades them.
       const intradayOwned = sleeve.strategy === 'INTRADAY_ORB' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT' || sleeve.key === 'STK_WATCH';
+      // RS rotation ranks an injected Nifty universe (not a watchlist) so it doesn't pollute My-Picks.
+      const universeSymbols = sleeve.key === 'STK_RS' ? NIFTY_500.slice(0, 150) : undefined;
       const r = intradayOwned
         ? { sleeveKey: sleeve.key, quotesFetched: 0, decisions: 0, tradesExecuted: 0, cashBalancePaisa: sleeve.cashBalancePaisa }
-        : await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute });
+        : await runSleeve(userId, sleeve, run.id, runDate, { execute: canExecute, universeSymbols });
       const equity = await markSleeveToMarket(userId, sleeve.id, r.cashBalancePaisa);
       await snapshotSleeveEquity(userId, portfolio.id, sleeve.id, sleeve.name, equity, runDate);
+      if (r.tradesExecuted > 0) await emitSleeveSignals(userId, sleeve, runDate).catch(() => {}); // advisory Telegram, best-effort
       totalEquity += equity;
       totalTrades += r.tradesExecuted;
       sleeveResults.push({ key: sleeve.key, name: sleeve.name, equityPaisa: equity, trades: r.tradesExecuted, allocationPaisa: sleeve.allocationPaisa });

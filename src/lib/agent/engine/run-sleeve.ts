@@ -44,14 +44,16 @@ export async function runSleeve(
   sleeve: AgentSleeve,
   runId: number,
   runDate: string,
-  opts: { execute?: boolean } = {},
+  opts: { execute?: boolean; universeSymbols?: string[] } = {},
 ): Promise<SleeveRunResult> {
   const execute = opts.execute !== false; // when false (market closed), record decisions but don't fill
-  // 1. Watchlist for this sleeve.
-  const wl = await db
-    .select()
-    .from(agentWatchlist)
-    .where(and(eq(agentWatchlist.userId, userId), eq(agentWatchlist.sleeveId, sleeve.id), eq(agentWatchlist.enabled, true)));
+  // 1. Universe: an injected symbol list (e.g. Nifty-500 for RS rotation, so it
+  //    doesn't need — or pollute — the My-Picks watchlist), else this sleeve's watchlist.
+  const wl = opts.universeSymbols
+    ? opts.universeSymbols.map((s) => ({ id: undefined as number | undefined, assetClass: 'STOCK' as const, symbol: s, schemeCode: '', isin: null as string | null, contractMultiplier: 1, name: s }))
+    : (await db.select().from(agentWatchlist)
+        .where(and(eq(agentWatchlist.userId, userId), eq(agentWatchlist.sleeveId, sleeve.id), eq(agentWatchlist.enabled, true))))
+        .map((w) => ({ id: w.id as number | undefined, assetClass: w.assetClass, symbol: w.symbol, schemeCode: w.schemeCode, isin: w.isin, contractMultiplier: w.contractMultiplier, name: w.name }));
 
   // 2. Real quotes + history per instrument (skip those without a fresh quote).
   const instruments: InstrumentInput[] = [];
@@ -68,7 +70,7 @@ export async function runSleeve(
     // 2y of history so 12-1 momentum (needs ~252+21 bars) has enough data.
     const history = await getInstrumentHistory(ref, '2y');
     instruments.push({
-      watchlistId: w.id,
+      watchlistId: w.id ?? null,
       assetClass: w.assetClass,
       symbol: w.symbol,
       schemeCode: w.schemeCode,

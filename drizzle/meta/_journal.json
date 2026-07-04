@@ -442,6 +442,13 @@
       "when": 1783145545360,
       "tag": "0062_slim_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1783169790403,
+      "tag": "0063_parallel_lockjaw",
+      "breakpoints": true
     }
   ]
 }

@@ -37,4 +37,8 @@ export const DEFAULT_SLEEVES: Array<{ key: import('@/db').AgentSleeveKey; name: 
   // "My Picks" intraday bucket — trades the user's INTRADAY-tagged watchlist
   // names on the combined trigger, squared off same day (run-swing INTRADAY).
   { key: 'STK_WATCH', name: 'My Picks · intraday', strategy: 'WATCHLIST', cadence: 'INTRADAY' },
+  // Relative-strength rotation on a Nifty universe — the one strategy that
+  // passed the full workbench validation gate (21% CAGR, low turnover). Ranks
+  // 12-1 momentum ÷ vol, holds top-3, injected Nifty universe (not the watchlist).
+  { key: 'STK_RS', name: 'Relative-strength rotation', strategy: 'RS_ROTATION', cadence: 'DAILY_OPEN' },
 ];

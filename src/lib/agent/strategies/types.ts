@@ -18,7 +18,7 @@ import type {
 import type { InstrumentQuote, PricePoint } from '../market-data';
 
 export interface InstrumentInput {
-  watchlistId: number;
+  watchlistId: number | null;
   assetClass: AgentAssetClass;
   symbol: string;
   schemeCode: string;
@@ -55,7 +55,7 @@ export interface SleeveContext {
 }
 
 export interface StrategyIntent {
-  watchlistId: number;
+  watchlistId: number | null;
   assetClass: AgentAssetClass;
   symbol: string;
   schemeCode: string;

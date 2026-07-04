@@ -3466,7 +3466,7 @@ export type AgentSide = 'LONG' | 'SHORT';
 
 // v2 — strategy sleeves (each a slice of capital with its own quant strategy).
 export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION' | 'INTRADAY_ORB' | 'VWAP_REVERSION' | 'GAP_AND_GO' | 'NEWS_SIGNAL' | 'WATCHLIST';
-export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF' | 'STK_INTRADAY' | 'STK_VWAP' | 'STK_GAP' | 'STK_NEWS' | 'STK_WATCH';
+export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF' | 'STK_INTRADAY' | 'STK_VWAP' | 'STK_GAP' | 'STK_NEWS' | 'STK_WATCH' | 'STK_RS';
 export type AgentCadence = 'DAILY_OPEN' | 'INTRADAY';
 export type AgentWatchlistHorizon = 'INTRADAY' | 'MULTIDAY'; // "My Picks" per-entry hold horizon
 
@@ -3550,6 +3550,9 @@ export const agentSleeves = pgTable('agent_sleeves', {
   // propose; tuningAutoPromote = actually write paramsJson behind guardrails.
   tuningEnabled: boolean('tuning_enabled').notNull().default(false),
   tuningAutoPromote: boolean('tuning_auto_promote').notNull().default(false),
+  // Promotion gate: when true, this bucket's BUY fills push an advisory Telegram
+  // signal (entry + exit path) for the user to act on manually. Off by default.
+  emitSignals: boolean('emit_signals').notNull().default(false),
   lastRunAt: timestamp('last_run_at', { mode: 'date' }),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),

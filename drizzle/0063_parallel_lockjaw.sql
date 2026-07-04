@@ -1,0 +1,1 @@
+ALTER TABLE "agent_sleeves" ADD COLUMN "emit_signals" boolean DEFAULT false NOT NULL;
