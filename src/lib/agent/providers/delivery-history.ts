@@ -10,7 +10,9 @@
  */
 
 import { db, agentDeliveryHistory } from '@/db';
-import { getBhavcopyForDate } from './nse-bhavcopy';
+import { getBhavcopyForDate, nseSessionCookies } from './nse-bhavcopy';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -21,17 +23,20 @@ const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 export async function backfillDeliveryHistory(tradingDays = 20): Promise<{ added: number; haveDays: number }> {
   const existing = new Set((await db.selectDistinct({ d: agentDeliveryHistory.tradeDate }).from(agentDeliveryHistory)).map((r) => r.d));
   const now = Date.now();
+  const cookies = await nseSessionCookies();                 // one session reused across the batch
   let collected = 0, added = 0;
   for (let back = 1; back <= 40 && collected < tradingDays; back++) {
     const d = new Date(now - back * 86400000);
     if (d.getDay() === 0 || d.getDay() === 6) continue;      // weekend
     const key = iso(d);
     if (existing.has(key)) { collected++; continue; }         // already stored
-    const rows = await getBhavcopyForDate(d);
-    if (!rows || rows.size < 100) continue;                   // holiday / no file
+    let rows = await getBhavcopyForDate(d, cookies);
+    if (!rows) { await sleep(500); rows = await getBhavcopyForDate(d, cookies); }   // one retry
+    if (!rows || rows.size < 100) { await sleep(300); continue; }   // holiday / throttled
     const vals = [...rows.values()].map((r) => ({ tradeDate: key, symbol: r.symbol, deliveryPct: r.deliveryPct }));
     for (let i = 0; i < vals.length; i += 500) await db.insert(agentDeliveryHistory).values(vals.slice(i, i + 500)).onConflictDoNothing();
     collected++; added++;
+    await sleep(400);                                        // throttle — don't trip NSE rate limits
   }
   return { added, haveDays: collected };
 }

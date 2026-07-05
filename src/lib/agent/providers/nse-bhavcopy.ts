@@ -91,11 +91,16 @@ export async function getBhavcopy(): Promise<Map<string, BhavRow>> {
   return cache.get(key)!;
 }
 
-/** Fetch a specific past date's bhavcopy (used by the delivery-history backfill). */
-export async function getBhavcopyForDate(d: Date): Promise<Map<string, BhavRow> | null> {
-  let cookies = '';
-  try { cookies = await nseCookies(); } catch { /* archive sometimes serves without */ }
-  return fetchDateRows(d, cookies);
+/** One NSE session cookie string, to REUSE across a batch (avoids re-handshaking
+ *  — and rate-limiting — on every backfill date). */
+export async function nseSessionCookies(): Promise<string> {
+  try { return await nseCookies(); } catch { return ''; }
+}
+
+/** Fetch a specific past date's bhavcopy. Pass shared cookies for batch backfills. */
+export async function getBhavcopyForDate(d: Date, cookies?: string): Promise<Map<string, BhavRow> | null> {
+  const ck = cookies ?? await nseSessionCookies();
+  return fetchDateRows(d, ck);
 }
 
 /** Convenience: look up one symbol (accepts "RELIANCE" or "RELIANCE.NS"). */
