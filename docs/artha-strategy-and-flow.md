@@ -12,12 +12,16 @@ places a real trade.
 
 ## 1. The one belief everything rests on
 
-**Indian stocks trend; they don't revert.** When a stock is going up, it tends to
-keep going up; when it's going down, it keeps going down. So the money is in
-**buying strength and riding it**, *not* in "buying the dip" of a falling stock.
+**Over intermediate horizons (~3–12 months), momentum has historically beaten
+mean-reversion in Indian equities.** A stock that's been leading tends to keep
+leading over the next several months, so for our 2-3-month holds the edge is in
+**buying strength and riding it**, not buying the dip of a falling stock. This is
+*horizon-specific* — intraday, weekly, and post-earnings *reversals* genuinely
+exist; momentum is strongest over *months*, which is the horizon we trade.
 
 We didn't assume this — we **tested** it (Section 6). Every "buy the dip" idea we
-tried lost money after costs. Only **relative-strength momentum** survived. This
+tried over our horizon lost money after costs. Only **relative-strength momentum**
+survived. This
 is also the belief behind well-known systems (Weinstein's Stage Analysis,
 O'Neil's CANSLIM) and behind the commercial screener WealthLab, whose picks our
 own picks agree with 4 times out of 5.
@@ -116,7 +120,7 @@ You get a Telegram message like:
 
 ---
 
-## 6. How we know it works — the backtest
+## 6. What the backtest shows — and its limits
 
 We tested strategies against **Timothy Masters' four checks** (from *Testing and
 Tuning Market Trading Systems*), which are designed to catch strategies that only
@@ -152,9 +156,16 @@ Tuning Market Trading Systems*), which are designed to catch strategies that onl
 independently rated **4 of our 5** momentum picks as Stage-2 uptrends — two very
 different systems agreeing is strong evidence we're finding real strength.
 
-**Honest caveat:** the backtest validated the *relative-strength momentum* engine.
-The full daily system (news + announcements + spike + ₹10K accumulation) is now
-running as a **live forward-test** — which is exactly what the scorecard measures.
+**What this does *not* yet prove.** We ran the permutation test, but not the full
+battery a quant desk would want before real money: **walk-forward** (roll train→
+test through time), **regime-specific** performance (COVID crash, 2022 correction,
+sideways years), **bootstrap confidence intervals** on the 21% CAGR, and **Monte
+Carlo trade-sequencing** (probability of ruin / drawdown distribution). So the
+honest claim is: *historical testing indicates relative-strength momentum showed
+statistically significant outperformance under the tested assumptions.* Whether
+that edge persists live is what the forward-test scorecard is measuring — and the
+full daily system (news + announcements + spike + ₹10K accumulation) is an
+**untested extension** of the validated momentum core, not itself yet validated.
 
 ---
 
