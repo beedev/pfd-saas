@@ -13,6 +13,7 @@ import type { DailyBar } from '@/lib/services/yahoo-finance';
 import { rsi, sma } from '../signals/indicators';
 import type { Strategy } from './strategy';
 import { runInstrument, poolMetrics } from './backtest';
+import { computeStage, type Stage } from './stage';
 
 const P = (r: number) => Math.round(r * 100);
 
@@ -55,6 +56,7 @@ export interface CharacterReport {
   reversion: { netPct: number; winRate: number; trades: number };
   momentum: { netPct: number; winRate: number; trades: number };
   rangeStatus: 'in-range' | 'broke-up' | 'broke-down';
+  stage: Stage;                    // current Weinstein stage — the buy-now gate (STAGE2 = advancing)
   recommended: 'MEAN_REVERSION' | 'MOMENTUM' | 'AVOID';
   verdict: 'YES' | 'NO';
   note: string;
@@ -73,6 +75,7 @@ export function assessStock(symbol: string, bars: DailyBar[]): CharacterReport {
   const hi = Math.max(...win.map((b) => b.high)), lo = Math.min(...win.map((b) => b.low));
   const px = closes[closes.length - 1];
   const rangeStatus = px >= hi * 0.995 ? 'broke-up' : px <= lo * 1.005 ? 'broke-down' : 'in-range';
+  const stage = computeStage(closes);   // current-trend gate — trending CHARACTER ≠ advancing NOW
 
   // route: prefer the strategy that BOTH matches character AND paid ≥ a small hurdle.
   const revOk = reversion.trades >= 8 && reversion.netPct > 2;
@@ -85,10 +88,14 @@ export function assessStock(symbol: string, bars: DailyBar[]): CharacterReport {
   else if (momOk && revOk) recommended = momentum.netPct >= reversion.netPct ? 'MOMENTUM' : 'MEAN_REVERSION';
 
   const verdict = recommended === 'AVOID' ? 'NO' : 'YES';
+  // A momentum name that isn't Stage 2 NOW (basing / topping / declining) trends by
+  // character but is not a buy today — flag it so the buy paths can hold off.
+  const stageWarn = recommended === 'MOMENTUM' && stage !== 'STAGE2'
+    ? ` ⚠ ${stage} now (not advancing) — wait for Stage 2.` : '';
   const note = recommended === 'MEAN_REVERSION'
     ? `Reverting name — buy dips paid (+${reversion.netPct.toFixed(0)}% over history).${rangeStatus !== 'in-range' ? ' ⚠ range broke — pause.' : ''}`
     : recommended === 'MOMENTUM'
-      ? `Trending name — ride strength (+${momentum.netPct.toFixed(0)}% over history).`
+      ? `Trending name — ride strength (+${momentum.netPct.toFixed(0)}% over history).${stageWarn}`
       : `Neither rule paid net of cost — skip.`;
-  return { symbol, character, autocorr: +ac.toFixed(3), reversion, momentum, rangeStatus, recommended, verdict, note };
+  return { symbol, character, autocorr: +ac.toFixed(3), reversion, momentum, rangeStatus, stage, recommended, verdict, note };
 }

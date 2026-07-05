@@ -47,6 +47,7 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
     const r = assessStock(sym.replace('.NS', ''), bars);
     if (r.verdict !== 'YES') continue;
     if (r.recommended === 'MEAN_REVERSION' && r.rangeStatus !== 'in-range') continue;   // range broke → skip the dip
+    if (r.recommended === 'MOMENTUM' && r.stage !== 'STAGE2') continue;                 // trends by character but basing/declining now → wait
     // Split: momentum/trend → hold 2-3 months; reversion → intraday only.
     const horizon: 'INTRADAY' | 'MULTIDAY' = r.recommended === 'MOMENTUM' ? 'MULTIDAY' : 'INTRADAY';
     picks.push({ symbol: sym, name: r.symbol, horizon, recommended: r.recommended, report: r });

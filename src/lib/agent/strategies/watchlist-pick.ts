@@ -13,6 +13,7 @@
 import type { DailyBar } from '@/lib/services/yahoo-finance';
 import type { AgentDecisionEvidence } from '@/db';
 import { sma, atr } from '../signals/indicators';
+import { isStage2 } from '../workbench/stage';
 
 export interface PickParams { smaSlow: number; smaFast: number; breakoutN: number; stopAtr: number; atrPeriod: number }
 export const PICK_DEFAULTS: PickParams = { smaSlow: 50, smaFast: 20, breakoutN: 20, stopAtr: 2.0, atrPeriod: 14 };
@@ -33,7 +34,8 @@ export function watchlistPick(bars: DailyBar[], regimeOk: boolean, params: PickP
   const a = atr(bars.map((b) => ({ high: b.high, low: b.low, close: b.close })), params.atrPeriod);
   if (smaSlow == null || smaFast == null || a == null || a <= 0) return null;
 
-  if (!(px > smaSlow)) return null;                                   // stock must be in an uptrend
+  if (!(px > smaSlow)) return null;                                   // stock must be in an uptrend (50-DMA)
+  if (!isStage2(closes)) return null;                                 // Stage-2 gate: above a RISING 200-DMA — no basing/declining names
   const priorHigh = Math.max(...highs.slice(-params.breakoutN - 1, -1)); // prior N-day high (excl today)
   const breakout = px > priorHigh && px > prev;                       // momentum: new high, still pushing
   const pullback = px <= smaFast * 1.02 && px >= smaFast * 0.97 && px > prev; // near 20-SMA, bouncing
