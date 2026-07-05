@@ -10,6 +10,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { db, agentNews, agentDailyBrief, type AgentBriefBias, type AgentDailyBrief } from '@/db';
 import { runNewsIngest } from './ingest';
+import { newsLookbackHours } from '../trading-calendar';
 import { recordLlmUsage, MODEL_FOR, type OpenAiUsage } from '../llm/usage';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -19,8 +20,9 @@ export async function runPremarketBrief(): Promise<{ analyzed: number; date: str
   const date = istDate();
   await runNewsIngest().catch(() => {}); // refresh feeds + per-item sentiment first
 
-  // Fresh tagged equity news from the overnight/morning window.
-  const since = new Date(Date.now() - 18 * 60 * 60 * 1000);
+  // Fresh tagged equity news since the previous session (spans weekends/holidays,
+  // so a Monday brief consolidates the whole weekend, not just the last overnight).
+  const since = new Date(Date.now() - newsLookbackHours() * 60 * 60 * 1000);
   const rows = await db.select().from(agentNews)
     .where(and(gte(agentNews.publishedAt, since), sql`${agentNews.symbols} is not null and jsonb_array_length(${agentNews.symbols}) > 0`))
     .orderBy(desc(agentNews.publishedAt)).limit(400);

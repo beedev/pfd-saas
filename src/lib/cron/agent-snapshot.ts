@@ -9,6 +9,7 @@
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { db, agentPortfolios, agentSleeves, agentPositions, agentTrades, agentDailySnapshots } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
+import { isTradingDayNow } from '@/lib/agent/trading-calendar';
 import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -18,6 +19,7 @@ export interface SnapshotResult { status: 'RECORDED' | 'SKIPPED'; date: string; 
 
 export async function recordDailySnapshot(userId: string): Promise<SnapshotResult> {
   const date = istDate();
+  if (!isTradingDayNow()) return { status: 'SKIPPED', date };   // no weekend/holiday snapshots — Friday's equity stands
   const pf = (await db.select().from(agentPortfolios).where(eq(agentPortfolios.userId, userId)).limit(1))[0];
   if (!pf || !pf.enabled) return { status: 'SKIPPED', date };
 

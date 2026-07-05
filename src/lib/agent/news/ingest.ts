@@ -8,6 +8,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { db, agentNews, agentWatchlist, type AgentNews } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
+import { newsLookbackHours } from '../trading-calendar';
 import { FEEDS } from './feeds';
 import { parseFeed } from './rss';
 import { NEWS_EQUITY_UNIVERSE, aliasesFromName } from './universe';
@@ -139,7 +140,7 @@ export async function getRecentNews(symbols?: string[], limit = 60): Promise<Age
 
 /** "In play" = tracked symbols with fresh (≤48h) high-relevance news. */
 export async function getInPlay(): Promise<Array<{ symbol: string; headlines: number; topTitle: string; sentiment: string | null }>> {
-  const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  const since = new Date(Date.now() - Math.max(48, newsLookbackHours()) * 60 * 60 * 1000);   // ≥48h, but span the weekend/holiday gap
   const rows = await db.select().from(agentNews).where(gte(agentNews.publishedAt, since)).orderBy(desc(agentNews.publishedAt)).limit(500);
   const by = new Map<string, { headlines: number; topTitle: string; sentiment: string | null; rel: number }>();
   for (const r of rows) {

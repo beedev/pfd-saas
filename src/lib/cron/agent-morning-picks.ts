@@ -19,6 +19,7 @@ import { backfillDeliveryHistory, getMarketNorms, deliverySpike, relativeVolume 
 import { screenRsStage, atrStopFrac } from '@/lib/agent/engine/rs-stage-screen';
 import { resolveUniverse } from '@/lib/agent/workbench/universes';
 import { sectorOf, sectorStrengthScores } from '@/lib/agent/workbench/sectors';
+import { isTradingDayNow } from '@/lib/agent/trading-calendar';
 import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const MIN_LIQUIDITY_CR = 5;      // hard gate: untradeable below ₹5 cr/day
@@ -42,6 +43,7 @@ export interface MorningPicksResult { status: 'COMPLETED' | 'SKIPPED'; pickDate:
 
 export async function runMorningPicks(userId: string): Promise<MorningPicksResult> {
   const pickDate = istDate();
+  if (!isTradingDayNow()) return { status: 'SKIPPED', pickDate, considered: 0, picked: 0, intraday: 0, multiday: 0 };   // weekend / NSE holiday — market closed, run trading days only
   const pf = (await db.select().from(agentPortfolios).where(eq(agentPortfolios.userId, userId)).limit(1))[0];
   if (!pf || !pf.enabled) return { status: 'SKIPPED', pickDate, considered: 0, picked: 0, intraday: 0, multiday: 0 };
 
