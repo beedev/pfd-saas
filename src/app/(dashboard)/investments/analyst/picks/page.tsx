@@ -14,7 +14,8 @@ import { ArrowLeft, Loader2, RefreshCw, TrendingUp, Zap, Newspaper, Megaphone, R
 
 interface Pick {
   symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; source: string;
-  recommended: string; stage: string | null; liquidityCr: number | null; deliveryPct: number | null; rsExcess: number | null;
+  recommended: string; stage: string | null; score: number | null; sector: string | null; relVolume: number | null;
+  liquidityCr: number | null; deliveryPct: number | null; rsExcess: number | null;
   suggestedBuy: number | null; targetPrice: number | null; stopPrice: number | null; note: string;
 }
 const inr = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -33,8 +34,10 @@ function PickRow({ p }: { p: Pick }) {
     <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2.5">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
+          {p.score != null && <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700" title="Composite score: RS 40 · spike 20 · rel-vol 20 · sector 20">{p.score}</span>}
           <span className="font-semibold text-slate-900">{p.name || p.symbol}</span>
           {p.stage && <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${stageColor(p.stage)}`}>{p.stage}</span>}
+          {p.sector && p.sector !== 'OTHER' && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{p.sector}</span>}
           <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600"><src.Icon className="h-3 w-3" />{src.label}</span>
         </div>
         <div className="mt-0.5 truncate text-xs text-slate-500">{p.note}</div>

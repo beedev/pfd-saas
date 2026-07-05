@@ -18,6 +18,9 @@ export async function GET() {
     return {
       symbol: r.symbol, name: r.name, horizon: r.horizon, source: r.source, recommended: r.recommended,
       stage: (rep.stage as string) ?? null,
+      score: typeof rep.score === 'number' ? Math.round(rep.score * 100) : null,
+      sector: (rep.sector as string) ?? null,
+      relVolume: typeof rep.relVolume === 'number' ? rep.relVolume : null,
       liquidityCr: typeof rep.liquidityCr === 'number' ? rep.liquidityCr : null,
       deliveryPct: typeof rep.deliveryPct === 'number' ? rep.deliveryPct : null,
       rsExcess: typeof rep.rsExcess === 'number' ? rep.rsExcess : null,

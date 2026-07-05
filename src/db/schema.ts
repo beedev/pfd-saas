@@ -3633,6 +3633,7 @@ export const agentDeliveryHistory = pgTable('agent_delivery_history', {
   tradeDate: text('trade_date').notNull(),        // YYYY-MM-DD (IST session)
   symbol: text('symbol').notNull(),               // NSE symbol, no suffix
   deliveryPct: real('delivery_pct').notNull(),    // 0..100
+  volume: bigint('volume', { mode: 'number' }).default(0),   // shares traded — for relative-volume
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
 }, (table) => [
   uniqueIndex('agent_delivery_hist_unique_idx').on(table.tradeDate, table.symbol),

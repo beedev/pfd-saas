@@ -1,0 +1,1 @@
+ALTER TABLE "agent_delivery_history" ADD COLUMN "volume" bigint DEFAULT 0;

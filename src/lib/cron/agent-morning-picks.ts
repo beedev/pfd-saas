@@ -15,13 +15,19 @@ import { getInPlay } from '@/lib/agent/news/ingest';
 import { getBriefBias } from '@/lib/agent/news/brief';
 import { getAnnouncementSymbols } from '@/lib/agent/news/announcements';
 import { getBhavcopy } from '@/lib/agent/providers/nse-bhavcopy';
-import { backfillDeliveryHistory, getDeliveryAverages, deliverySpike } from '@/lib/agent/providers/delivery-history';
+import { backfillDeliveryHistory, getMarketNorms, deliverySpike, relativeVolume } from '@/lib/agent/providers/delivery-history';
 import { screenRsStage, atrStopFrac } from '@/lib/agent/engine/rs-stage-screen';
 import { resolveUniverse } from '@/lib/agent/workbench/universes';
+import { sectorOf, sectorStrengthScores } from '@/lib/agent/workbench/sectors';
 import { sendTelegramToUser } from '@/lib/services/telegram';
 
-const MIN_LIQUIDITY_CR = 5;      // drop anything trading < ₹5 cr/day — untradeable
+const MIN_LIQUIDITY_CR = 5;      // hard gate: untradeable below ₹5 cr/day
+const DELIV_FLOOR = 25;          // hard gate: kill pure intraday froth (delivery < 25%)
 const MAX_CANDIDATES = 40;
+const MAX_MULTIDAY = 15;         // top-scored 2-3mo picks per day
+const MAX_PER_SECTOR = 3;        // concentration cap — momentum clusters, but don't over-bet one sector
+const MAX_INTRADAY = 5;
+const ret6mo = (closes: number[]) => (closes.length < 127 ? 0 : closes[closes.length - 1] / closes[closes.length - 127] - 1);
 // Suggested exit levels for the signal — MATCHES the run-swing validation buy:
 //   2-3 month → volatility-based stop (2×ATR, clamped 4-10%) + 2:1 target;
 //   intraday  → +3% / -2% (square off same day).
@@ -39,17 +45,18 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
   const pf = (await db.select().from(agentPortfolios).where(eq(agentPortfolios.userId, userId)).limit(1))[0];
   if (!pf || !pf.enabled) return { status: 'SKIPPED', pickDate, considered: 0, picked: 0, intraday: 0, multiday: 0 };
 
-  // 1. Candidates: news in-play + directional brief + whole-spectrum NSE
-  //    announcements (breaks the Nifty-500 bubble — any material filing nominates a name).
+  // 1. Candidates: news + brief + whole-spectrum NSE announcements + RS/Stage-2 screen.
   const inPlay = (await getInPlay().catch(() => [])).map((x) => x.symbol);
   const brief = await getBriefBias().catch(() => new Map<string, { bias: string }>());
   const briefNames = [...brief.entries()].filter(([, v]) => v.bias !== 'NEUTRAL').map(([s]) => s);
   const announced = await getAnnouncementSymbols(40).catch(() => []);
   const announcedSet = new Set(announced);
-  const candidates = [...new Set([...briefNames, ...inPlay, ...announced])].filter((s) => s.endsWith('.NS')).slice(0, MAX_CANDIDATES);
+  const screen = await screenRsStage(resolveUniverse('NIFTY_500').slice(0, 150), '^NSEI', 20).catch(() => []);
+  const screenSet = new Set(screen.map((s) => s.symbol));
+  const candidates = [...new Set([...briefNames, ...inPlay, ...announced, ...screen.map((s) => s.symbol)])].filter((s) => s.endsWith('.NS')).slice(0, MAX_CANDIDATES + screen.length);
   if (!candidates.length) return { status: 'COMPLETED', pickDate, considered: 0, picked: 0, intraday: 0, multiday: 0 };
 
-  // 2. Liquidity (traded value/day) + delivery % from NSE bhavcopy; Yahoo volume fallback.
+  // 2. Market data: liquidity + delivery + volume + price + 20-day norms.
   const bhav = await getBhavcopy().catch(() => new Map());
   const qs = await getQuotes(candidates).catch(() => []);
   const yLiq = new Map<string, number>();
@@ -60,53 +67,78 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
   }
   const liqOf = (sym: string) => bhav.get(sym.replace('.NS', ''))?.tradedValueCr ?? yLiq.get(sym) ?? 0;
   const delivOf = (sym: string): number | null => bhav.get(sym.replace('.NS', ''))?.deliveryPct ?? null;
-  const priceOf = (sym: string): number | null => yPrice.get(sym) ?? bhav.get(sym.replace('.NS', ''))?.close ?? null;   // live quote first, else bhavcopy close
-  // Relative-delivery spike: today's delivery vs the stock's own 20-day norm.
+  const volOf = (sym: string): number | null => bhav.get(sym.replace('.NS', ''))?.volume ?? null;
+  const priceOf = (sym: string): number | null => yPrice.get(sym) ?? bhav.get(sym.replace('.NS', ''))?.close ?? null;
   await backfillDeliveryHistory(20).catch(() => {});
-  const deliveryNorms = await getDeliveryAverages().catch(() => new Map());
-  const spikeOf = (sym: string, deliv: number | null) => deliverySpike(deliv, deliveryNorms.get(sym.replace('.NS', '')));
+  const norms = await getMarketNorms().catch(() => new Map());
+  const normOf = (sym: string) => norms.get(sym.replace('.NS', ''));
+  const idx = await loadDaily('^NSEI', '1y').catch(() => []);
+  const idxRet = ret6mo(idx.map((b) => b.close));
 
-  // 3. Vet each: character test + liquidity + delivery gates → YES only.
-  const picks: Array<{ symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; recommended: string; liquidityCr: number; deliveryPct: number | null; deliverySpikeRatio: number | null; suggestedBuy: number | null; targetPrice: number | null; stopPrice: number | null; source: string; report: unknown }> = [];
+  // 3. Gate + collect factors. MANDATORY gates: liquidity + Stage 2 + delivery floor.
+  //    Everything else (RS, delivery-spike, relative-volume, sector) becomes a SCORE,
+  //    per the review — no single soft signal can veto a genuine leader.
+  interface Scored { sym: string; name: string; rsExcess: number; spikeRatio: number | null; relVol: number | null; deliv: number | null; buy: number | null; atrFrac: number; source: string; sector: string; score: number }
+  const momentum: Scored[] = [];
+  const reversion: Array<{ sym: string; name: string; deliv: number | null; buy: number | null }> = [];
   for (const sym of candidates) {
-    if (liqOf(sym) < MIN_LIQUIDITY_CR) continue;                          // too thin to trade
+    if (liqOf(sym) < MIN_LIQUIDITY_CR) continue;                          // hard gate: tradeability
     const bars = await loadDaily(sym, '5y').catch(() => []);
     if (bars.length < 250) continue;
     const r = assessStock(sym.replace('.NS', ''), bars);
-    if (r.verdict !== 'YES') continue;
-    if (r.recommended === 'MEAN_REVERSION' && r.rangeStatus !== 'in-range') continue;   // range broke → skip the dip
-    if (r.recommended === 'MOMENTUM' && r.stage !== 'STAGE2') continue;                 // trends by character but basing/declining now → wait
-    // Split: momentum/trend → hold 2-3 months; reversion → intraday only.
-    const horizon: 'INTRADAY' | 'MULTIDAY' = r.recommended === 'MOMENTUM' ? 'MULTIDAY' : 'INTRADAY';
     const deliv = delivOf(sym);
-    const spike = spikeOf(sym, deliv);
-    if (horizon === 'MULTIDAY' && !spike.pass) continue;    // conviction gate: delivery spike vs the stock's own norm
-    const buy = priceOf(sym);
-    const ex = buy ? exitLevels(buy, horizon, atrStopFrac(bars.map((b) => ({ high: b.high, low: b.low, close: b.close })))) : null;
-    picks.push({ symbol: sym, name: r.symbol, horizon, recommended: r.recommended, liquidityCr: liqOf(sym), deliveryPct: deliv, deliverySpikeRatio: spike.ratio, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, source: announcedSet.has(sym) ? 'announcement' : 'news',
-      report: { ...r, liquidityCr: liqOf(sym), deliveryPct: deliv, deliverySpikeRatio: spike.ratio, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null } });
+    if (r.recommended === 'MEAN_REVERSION' && r.rangeStatus === 'in-range') {   // intraday dip path (separate)
+      reversion.push({ sym, name: r.symbol, deliv, buy: priceOf(sym) });
+      continue;
+    }
+    if (r.stage !== 'STAGE2') continue;                                  // hard gate: must be advancing
+    if (deliv != null && deliv < DELIV_FLOOR) continue;                  // hard gate: kill pure froth
+    momentum.push({
+      sym, name: r.symbol,
+      rsExcess: ret6mo(bars.map((b) => b.close)) - idxRet,
+      spikeRatio: deliverySpike(deliv, normOf(sym)).ratio,
+      relVol: relativeVolume(volOf(sym), normOf(sym)),
+      deliv, buy: priceOf(sym), atrFrac: atrStopFrac(bars.map((b) => ({ high: b.high, low: b.low, close: b.close }))),
+      source: screenSet.has(sym) ? 'screen' : announcedSet.has(sym) ? 'announcement' : 'news',
+      sector: sectorOf(sym), score: 0,
+    });
   }
 
-  // 3b. RS/Stage-2 screen — dynamically strong names (replaces the static blue-chip
-  //     watchlist role): Stage-2 + beating the Nifty on 6-month RS, liquid, real delivery.
-  const strong = await screenRsStage(resolveUniverse('NIFTY_500').slice(0, 150), '^NSEI', 12).catch(() => []);
-  const seen = new Set(picks.map((p) => p.symbol));
-  for (const s of strong) {
-    if (seen.has(s.symbol) || !s.symbol.endsWith('.NS')) continue;
-    const liq = liqOf(s.symbol);
-    if (liq < MIN_LIQUIDITY_CR) continue;
-    const deliv = delivOf(s.symbol);
-    const spike = spikeOf(s.symbol, deliv);
-    if (!spike.pass) continue;
-    seen.add(s.symbol);
-    const rsPct = +(s.rsExcess * 100).toFixed(1);
-    const buy = priceOf(s.symbol);
-    const ex = buy ? exitLevels(buy, 'MULTIDAY', s.atrFrac) : null;
-    picks.push({ symbol: s.symbol, name: s.name, horizon: 'MULTIDAY', recommended: 'MOMENTUM', liquidityCr: liq, deliveryPct: deliv, deliverySpikeRatio: spike.ratio, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, source: 'screen',
-      report: { stage: 'STAGE2', recommended: 'MOMENTUM', source: 'rs_stage_screen', rsExcess: rsPct, liquidityCr: liq, deliveryPct: deliv, deliverySpikeRatio: spike.ratio, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, note: `RS screen — Stage 2, +${rsPct.toFixed(0)}% vs Nifty (6mo).` } });
+  // 4. Score: RS 40% + delivery-spike 20% + relative-volume 20% + sector-strength 20%.
+  //    Percentile ranks within today's set; missing factor → neutral 0.5.
+  const sectorScores = sectorStrengthScores(momentum.map((m) => m.sym));
+  const rankOf = (vals: (number | null)[]) => { const s = vals.filter((v): v is number => v != null).sort((a, b) => a - b); return (v: number | null) => (v == null || !s.length ? 0.5 : s.filter((x) => x <= v).length / s.length); };
+  const rRs = rankOf(momentum.map((m) => m.rsExcess));
+  const rSpike = rankOf(momentum.map((m) => m.spikeRatio));
+  const rVol = rankOf(momentum.map((m) => m.relVol));
+  for (const m of momentum) m.score = +(0.40 * rRs(m.rsExcess) + 0.20 * rSpike(m.spikeRatio) + 0.20 * rVol(m.relVol) + 0.20 * (sectorScores.get(m.sym) ?? 0.5)).toFixed(3);
+  momentum.sort((a, b) => b.score - a.score);
+
+  // 5. Sector cap + top N.
+  const secCount = new Map<string, number>();
+  const chosen: Scored[] = [];
+  for (const m of momentum) {
+    if (chosen.length >= MAX_MULTIDAY) break;
+    if (m.sector !== 'OTHER' && (secCount.get(m.sector) ?? 0) >= MAX_PER_SECTOR) continue;
+    secCount.set(m.sector, (secCount.get(m.sector) ?? 0) + 1);
+    chosen.push(m);
   }
 
-  // 4. Persist today's picks (idempotent per user/date/symbol).
+  // 6. Build picks — scored 2-3mo momentum + intraday reversion.
+  const picks: Array<{ symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; recommended: string; score: number | null; deliveryPct: number | null; deliverySpikeRatio: number | null; suggestedBuy: number | null; targetPrice: number | null; stopPrice: number | null; source: string; report: unknown }> = [];
+  for (const m of chosen) {
+    const ex = m.buy ? exitLevels(m.buy, 'MULTIDAY', m.atrFrac) : null;
+    const rsPct = +(m.rsExcess * 100).toFixed(1);
+    picks.push({ symbol: m.sym, name: m.name, horizon: 'MULTIDAY', recommended: 'MOMENTUM', score: m.score, deliveryPct: m.deliv, deliverySpikeRatio: m.spikeRatio, suggestedBuy: m.buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, source: m.source,
+      report: { stage: 'STAGE2', recommended: 'MOMENTUM', source: m.source, score: m.score, rsExcess: rsPct, deliverySpikeRatio: m.spikeRatio, relVolume: m.relVol, sector: m.sector, deliveryPct: m.deliv, liquidityCr: liqOf(m.sym), suggestedBuy: m.buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, note: `Score ${(m.score * 100).toFixed(0)} · RS +${rsPct.toFixed(0)}% · ${m.sector}${m.relVol ? ` · ${m.relVol.toFixed(1)}× vol` : ''}` } });
+  }
+  for (const rv of reversion.slice(0, MAX_INTRADAY)) {
+    const ex = rv.buy ? exitLevels(rv.buy, 'INTRADAY') : null;
+    picks.push({ symbol: rv.sym, name: rv.name, horizon: 'INTRADAY', recommended: 'MEAN_REVERSION', score: null, deliveryPct: rv.deliv, deliverySpikeRatio: null, suggestedBuy: rv.buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, source: 'news',
+      report: { recommended: 'MEAN_REVERSION', deliveryPct: rv.deliv, suggestedBuy: rv.buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, note: 'Intraday dip — reverting name, in range.' } });
+  }
+
+  // 7. Persist today's picks (idempotent per user/date/symbol).
   await db.delete(agentDailyPicks).where(and(eq(agentDailyPicks.userId, userId), eq(agentDailyPicks.pickDate, pickDate)));
   if (picks.length) {
     await db.insert(agentDailyPicks).values(picks.map((p) => ({ userId, pickDate, symbol: p.symbol, name: p.name, horizon: p.horizon, source: p.source, recommended: p.recommended, reportJson: p.report })));
@@ -120,7 +152,8 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
       const buyStr = p.suggestedBuy ? `buy ~₹${p.suggestedBuy.toFixed(0)}` : 'buy at open';
       const exStr = p.targetPrice != null && p.stopPrice != null ? ` → tgt ₹${p.targetPrice.toFixed(0)} / stop ₹${p.stopPrice.toFixed(0)}` : '';
       const deliv = p.deliveryPct != null ? ` · ${p.deliveryPct.toFixed(0)}% deliv${p.deliverySpikeRatio ? ` (${p.deliverySpikeRatio.toFixed(1)}×)` : ''}` : '';
-      return `• *${p.name}* — ${buyStr}${exStr}${deliv}`;
+      const scoreStr = p.score != null ? ` \`${(p.score * 100).toFixed(0)}\`` : '';
+      return `• *${p.name}*${scoreStr} — ${buyStr}${exStr}${deliv}`;
     };
     const msg = [
       `📈 *Artha — Today's picks · ${pickDate}*`,
