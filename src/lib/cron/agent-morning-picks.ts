@@ -15,17 +15,21 @@ import { getInPlay } from '@/lib/agent/news/ingest';
 import { getBriefBias } from '@/lib/agent/news/brief';
 import { getAnnouncementSymbols } from '@/lib/agent/news/announcements';
 import { getBhavcopy } from '@/lib/agent/providers/nse-bhavcopy';
-import { screenRsStage } from '@/lib/agent/engine/rs-stage-screen';
+import { screenRsStage, atrStopFrac } from '@/lib/agent/engine/rs-stage-screen';
 import { resolveUniverse } from '@/lib/agent/workbench/universes';
 import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const MIN_LIQUIDITY_CR = 5;      // drop anything trading < ₹5 cr/day — untradeable
-const MIN_DELIVERY_PCT = 20;     // 2-3mo picks: skip pure intraday churn (little real accumulation)
+const MIN_DELIVERY_PCT = 45;     // 2-3mo picks: only high-conviction names (≥45% of volume taken to delivery, not churn)
 const MAX_CANDIDATES = 40;
-// Suggested exit levels for the signal (matches the run-swing horizon targets):
-//   2-3 month → +12% target / -8% stop;  intraday → +3% / -2% (square off same day).
-const exitLevels = (buy: number, horizon: 'INTRADAY' | 'MULTIDAY') =>
-  horizon === 'MULTIDAY' ? { target: buy * 1.12, stop: buy * 0.92 } : { target: buy * 1.03, stop: buy * 0.98 };
+// Suggested exit levels for the signal — MATCHES the run-swing validation buy:
+//   2-3 month → volatility-based stop (2×ATR, clamped 4-10%) + 2:1 target;
+//   intraday  → +3% / -2% (square off same day).
+const exitLevels = (buy: number, horizon: 'INTRADAY' | 'MULTIDAY', stopFrac = 0.08) => {
+  if (horizon === 'INTRADAY') return { target: buy * 1.03, stop: buy * 0.98 };
+  const stop = buy * (1 - stopFrac);
+  return { target: buy + 2 * (buy - stop), stop };
+};
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 export interface MorningPicksResult { status: 'COMPLETED' | 'SKIPPED'; pickDate: string; considered: number; picked: number; intraday: number; multiday: number }
@@ -59,7 +63,7 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
   const priceOf = (sym: string): number | null => yPrice.get(sym) ?? bhav.get(sym.replace('.NS', ''))?.close ?? null;   // live quote first, else bhavcopy close
 
   // 3. Vet each: character test + liquidity + delivery gates → YES only.
-  const picks: Array<{ symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; recommended: string; liquidityCr: number; deliveryPct: number | null; suggestedBuy: number | null; source: string; report: unknown }> = [];
+  const picks: Array<{ symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; recommended: string; liquidityCr: number; deliveryPct: number | null; suggestedBuy: number | null; targetPrice: number | null; stopPrice: number | null; source: string; report: unknown }> = [];
   for (const sym of candidates) {
     if (liqOf(sym) < MIN_LIQUIDITY_CR) continue;                          // too thin to trade
     const bars = await loadDaily(sym, '5y').catch(() => []);
@@ -73,8 +77,8 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
     const deliv = delivOf(sym);
     if (horizon === 'MULTIDAY' && deliv != null && deliv < MIN_DELIVERY_PCT) continue;  // churn, not real accumulation → skip the hold
     const buy = priceOf(sym);
-    const ex = buy ? exitLevels(buy, horizon) : null;
-    picks.push({ symbol: sym, name: r.symbol, horizon, recommended: r.recommended, liquidityCr: liqOf(sym), deliveryPct: deliv, suggestedBuy: buy, source: announcedSet.has(sym) ? 'announcement' : 'news',
+    const ex = buy ? exitLevels(buy, horizon, atrStopFrac(bars.map((b) => ({ high: b.high, low: b.low, close: b.close })))) : null;
+    picks.push({ symbol: sym, name: r.symbol, horizon, recommended: r.recommended, liquidityCr: liqOf(sym), deliveryPct: deliv, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, source: announcedSet.has(sym) ? 'announcement' : 'news',
       report: { ...r, liquidityCr: liqOf(sym), deliveryPct: deliv, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null } });
   }
 
@@ -91,8 +95,8 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
     seen.add(s.symbol);
     const rsPct = +(s.rsExcess * 100).toFixed(1);
     const buy = priceOf(s.symbol);
-    const ex = buy ? exitLevels(buy, 'MULTIDAY') : null;
-    picks.push({ symbol: s.symbol, name: s.name, horizon: 'MULTIDAY', recommended: 'MOMENTUM', liquidityCr: liq, deliveryPct: deliv, suggestedBuy: buy, source: 'screen',
+    const ex = buy ? exitLevels(buy, 'MULTIDAY', s.atrFrac) : null;
+    picks.push({ symbol: s.symbol, name: s.name, horizon: 'MULTIDAY', recommended: 'MOMENTUM', liquidityCr: liq, deliveryPct: deliv, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, source: 'screen',
       report: { stage: 'STAGE2', recommended: 'MOMENTUM', source: 'rs_stage_screen', rsExcess: rsPct, liquidityCr: liq, deliveryPct: deliv, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, note: `RS screen — Stage 2, +${rsPct.toFixed(0)}% vs Nifty (6mo).` } });
   }
 
@@ -107,10 +111,8 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
   // 5. Signal the user.
   if (picks.length) {
     const line = (p: typeof picks[number]) => {
-      const b = p.suggestedBuy;
-      const ex = b ? exitLevels(b, p.horizon) : null;
-      const buyStr = b ? `buy ~₹${b.toFixed(0)}` : 'buy at open';
-      const exStr = ex ? ` → tgt ₹${ex.target.toFixed(0)} / stop ₹${ex.stop.toFixed(0)}` : '';
+      const buyStr = p.suggestedBuy ? `buy ~₹${p.suggestedBuy.toFixed(0)}` : 'buy at open';
+      const exStr = p.targetPrice != null && p.stopPrice != null ? ` → tgt ₹${p.targetPrice.toFixed(0)} / stop ₹${p.stopPrice.toFixed(0)}` : '';
       const deliv = p.deliveryPct != null ? ` · ${p.deliveryPct.toFixed(0)}% deliv` : '';
       return `• *${p.name}* — ${buyStr}${exStr}${deliv}`;
     };

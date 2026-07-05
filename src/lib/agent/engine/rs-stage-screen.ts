@@ -12,8 +12,16 @@
 
 import { loadDaily } from '../workbench/data';
 import { computeStage } from '../workbench/stage';
+import { atr } from '../signals/indicators';
 
-export interface StrongName { symbol: string; name: string; rsExcess: number; stage: 'STAGE2' }
+export interface StrongName { symbol: string; name: string; rsExcess: number; stage: 'STAGE2'; atrFrac: number }
+/** 2×ATR as a fraction of price, clamped to a 4%..10% stop distance. */
+export function atrStopFrac(bars: { high: number; low: number; close: number }[]): number {
+  const a = atr(bars, 14);
+  const px = bars[bars.length - 1]?.close ?? 0;
+  if (a == null || a <= 0 || px <= 0) return 0.08;
+  return Math.min(Math.max((2 * a) / px, 0.04), 0.10);
+}
 
 const LOOKBACK = 126;            // ~6 months of trading days
 const CONCURRENCY = 8;
@@ -42,7 +50,7 @@ export async function screenRsStage(universe: string[], indexSymbol: string, lim
       if (computeStage(closes) !== 'STAGE2') return null;        // advancing only
       const rsExcess = ret6mo(closes) - idxRet;                  // must beat the market
       if (rsExcess <= 0) return null;
-      return { symbol: sym, name: sym.replace('.NS', ''), rsExcess, stage: 'STAGE2' };
+      return { symbol: sym, name: sym.replace('.NS', ''), rsExcess, stage: 'STAGE2', atrFrac: atrStopFrac(bars) };
     }));
     for (const r of rows) if (r) found.push(r);
   }

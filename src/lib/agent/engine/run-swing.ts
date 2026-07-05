@@ -19,6 +19,7 @@ import { sizeQty, persistOpen, persistClose, saveCash, type OpenPositionLite } f
 import { minOfDay, LAST_ENTRY, SQUARE_OFF } from './orb-step';
 import { watchlistPick, regimeOkFromIndex, PICK_DEFAULTS } from '../strategies/watchlist-pick';
 import { isStage2 } from '../workbench/stage';
+import { atr } from '../signals/indicators';
 import type { SleeveRunResult } from './run-sleeve';
 
 export type SwingHorizon = 'INTRADAY' | 'SHORT' | 'LONG';
@@ -118,20 +119,26 @@ export async function runSwing(
     quotes++;
     let entry: number, stopPaisa: number, rule: string, evidence: AgentDecisionEvidence;
     if (fixedNotional > 0) {
-      // Validation buy: trust the vetted pick, enter at last close with a fixed -8%
-      // stop, but still require the name to be Stage 2 right now (per-stock safety).
+      // Validation buy: trust the vetted Stage-2 pick. Stop is VOLATILITY-based
+      // (2×ATR), clamped to 4%..10% risk — tight on calm names, room on jumpy ones,
+      // NOT a blunt flat %. Requires the name to be Stage 2 right now (safety).
       const closes = bars.map((b) => b.close);
-      if (closes.length < 2 || !isStage2(closes)) continue;
-      entry = Math.round(closes[closes.length - 1] * 100);
-      stopPaisa = Math.round(entry * 0.92);
-      rule = 'validation buy — Stage 2 pick';
-      evidence = { rule, inputs: { close: +(entry / 100).toFixed(2) }, thresholds: { stopPaisa }, source: 'YAHOO' };
+      if (closes.length < 60 || !isStage2(closes)) continue;
+      const px = closes[closes.length - 1];
+      const a = atr(bars.map((b) => ({ high: b.high, low: b.low, close: b.close })), 14);
+      const rawStop = a != null && a > 0 ? px - 2 * a : px * 0.92;
+      const stopPx = Math.min(Math.max(rawStop, px * 0.90), px * 0.96);   // clamp: never risk >10% or <4%
+      entry = Math.round(px * 100);
+      stopPaisa = Math.round(stopPx * 100);
+      rule = `validation buy — Stage 2; 2×ATR stop (${((1 - stopPx / px) * 100).toFixed(1)}% risk)`;
+      evidence = { rule, inputs: { close: +px.toFixed(2), atr: a != null ? +a.toFixed(2) : 0 }, thresholds: { stopPaisa }, source: 'YAHOO' };
     } else {
       const pick = watchlistPick(bars, regimeOk, { ...PICK_DEFAULTS, stopAtr: p.stopAtr });
       if (!pick) continue;
       entry = pick.entryPaisa; stopPaisa = pick.stopPaisa; rule = pick.rule; evidence = pick.evidence;
     }
-    const target = entry + Math.round((entry * p.targetPct) / 100);
+    // Validation target = clean 2:1 reward:risk off the actual stop distance; else the horizon %.
+    const target = fixedNotional > 0 ? entry + 2 * (entry - stopPaisa) : entry + Math.round((entry * p.targetPct) / 100);
     const qty = fixedNotional > 0
       ? Math.floor(fixedNotional / entry)
       : sizeQty(entry, stopPaisa, 'LONG', { allocationPaisa: sleeve.allocationPaisa, cashBalancePaisa: cash, grossDeployedPaisa: grossDeployed, riskPctPerTrade: p.riskPctPerTrade });
