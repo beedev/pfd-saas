@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 
 import { Button, Card, CardHeader, CardContent, Input, Select, Badge } from '@dxp/ui';
-import { ArrowLeft, Search, Trash2, Plus, Loader2 } from 'lucide-react';
+import { ArrowLeft, Search, Trash2, Plus, Loader2, RefreshCw } from 'lucide-react';
 
 type AssetClass = 'STOCK' | 'MF' | 'FUTURE';
 
@@ -19,7 +19,13 @@ interface WatchItem {
   schemeCode: string;
   name: string;
   horizon: Horizon;
+  sector: string | null;
+  entryDate: string | null;
+  entryPrice: number | null;
+  currentPrice: number | null;
+  gainPct: number | null;
 }
+const inr = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 interface SearchHit {
   assetClass: AssetClass;
   symbol?: string;
@@ -106,6 +112,20 @@ export default function WatchlistPage() {
     await load();
   };
 
+  const [rebuilding, setRebuilding] = useState(false);
+  const rebuildFromRs = async () => {
+    if (!confirm('Clear the watchlist and rebuild it from the current RS/Stage-2 leaders?')) return;
+    setRebuilding(true);
+    try {
+      const r = await fetch('/api/agent/watchlist/rebuild', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'failed');
+      toast.success(`Rebuilt — ${d.added} RS leaders added`);
+      await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Rebuild failed'); }
+    finally { setRebuilding(false); }
+  };
+
   return (
     <div className="space-y-6">
       <Link href="/investments/analyst" className="inline-flex items-center gap-1 text-sm text-[var(--dxp-text-muted)] hover:text-[var(--dxp-text)]">
@@ -164,26 +184,44 @@ export default function WatchlistPage() {
       </Card>
 
       <Card>
-        <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Monitored ({items.length})</h3></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <h3 className="text-base font-bold text-[var(--dxp-text)]">Monitored ({items.length})</h3>
+          <Button variant="secondary" size="sm" onClick={rebuildFromRs} disabled={rebuilding}>
+            {rebuilding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rebuild from RS leaders
+          </Button>
+        </CardHeader>
         <CardContent>
           {items.length === 0 ? (
-            <p className="py-6 text-center text-[var(--dxp-text-muted)]">Nothing monitored yet.</p>
+            <p className="py-6 text-center text-[var(--dxp-text-muted)]">Nothing monitored yet. Use <b>Rebuild from RS leaders</b> to build it from the current Stage-2 momentum leaders.</p>
           ) : (
-            <ul className="space-y-2">
-              {items.map((it) => (
-                <li key={it.id} className="flex items-center justify-between rounded border border-[var(--dxp-border-light)] p-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Badge variant="info">{it.assetClass}</Badge>
-                    {it.assetClass === 'STOCK' && (
-                      <Badge variant={it.horizon === 'INTRADAY' ? 'warning' : 'success'}>{it.horizon === 'INTRADAY' ? 'Intraday' : 'Multi-day'}</Badge>
-                    )}
-                    <span className="font-semibold text-[var(--dxp-text)]">{it.name}</span>
-                    <span className="font-mono text-xs text-[var(--dxp-text-muted)]">{it.symbol || it.schemeCode}</span>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => remove(it.id)}><Trash2 className="h-4 w-4 text-rose-500" /></Button>
-                </li>
-              ))}
-            </ul>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--dxp-border-light)] text-left text-xs uppercase tracking-wider text-[var(--dxp-text-secondary)]">
+                    <th className="py-2 pr-3">Name</th><th className="pr-3">Sector</th><th className="pr-3">Added</th>
+                    <th className="pr-3 text-right">Entry</th><th className="pr-3 text-right">Current</th><th className="pr-3 text-right">Growth/Loss</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it) => (
+                    <tr key={it.id} className="border-b border-[var(--dxp-border-light)]/50">
+                      <td className="py-2 pr-3">
+                        <span className="font-semibold text-[var(--dxp-text)]">{it.name}</span>
+                        <span className="ml-2 font-mono text-xs text-[var(--dxp-text-muted)]">{(it.symbol || it.schemeCode).replace('.NS', '')}</span>
+                      </td>
+                      <td className="pr-3 text-xs text-[var(--dxp-text-muted)]">{it.sector && it.sector !== 'OTHER' ? it.sector : '—'}</td>
+                      <td className="pr-3 text-xs text-[var(--dxp-text-muted)]">{it.entryDate ?? '—'}</td>
+                      <td className="pr-3 text-right">{it.entryPrice != null ? inr(it.entryPrice) : '—'}</td>
+                      <td className="pr-3 text-right">{it.currentPrice != null ? inr(it.currentPrice) : '—'}</td>
+                      <td className={`pr-3 text-right font-semibold ${it.gainPct == null ? 'text-[var(--dxp-text-muted)]' : it.gainPct >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                        {it.gainPct != null ? `${it.gainPct >= 0 ? '+' : ''}${it.gainPct}%` : '—'}
+                      </td>
+                      <td className="text-right"><Button variant="ghost" size="sm" onClick={() => remove(it.id)}><Trash2 className="h-4 w-4 text-rose-500" /></Button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>

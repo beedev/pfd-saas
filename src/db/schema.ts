@@ -3578,6 +3578,9 @@ export const agentWatchlist = pgTable('agent_watchlist', {
   contractMultiplier: real('contract_multiplier').notNull().default(1),
   enabled: boolean('enabled').notNull().default(true),
   horizon: text('horizon').$type<AgentWatchlistHorizon>().notNull().default('MULTIDAY'), // "My Picks" hold horizon
+  entryPricePaisa: bigint('entry_price_paisa', { mode: 'number' }),   // price when added (for growth/loss tracking)
+  entryDate: text('entry_date'),                                      // IST YYYY-MM-DD added
+  sector: text('sector'),                                             // sector label at add time
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 }, (table) => [

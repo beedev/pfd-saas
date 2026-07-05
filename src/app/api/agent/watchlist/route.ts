@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
 import { db, agentPortfolios, agentWatchlist, type AgentAssetClass } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
+import { getQuotes } from '@/lib/services/yahoo-finance';
 
 const CLASSES: AgentAssetClass[] = ['STOCK', 'MF', 'FUTURE'];
 
@@ -27,7 +28,17 @@ export async function GET() {
       .from(agentWatchlist)
       .where(eq(agentWatchlist.userId, userId))
       .orderBy(desc(agentWatchlist.id));
-    return NextResponse.json({ watchlist: rows });
+    // Enrich with live price + growth/loss since entry.
+    const symbols = [...new Set(rows.map((r) => r.symbol).filter(Boolean))];
+    const qs = symbols.length ? await getQuotes(symbols).catch(() => []) : [];
+    const px = new Map(qs.filter((q) => Number.isFinite(q.regularMarketPrice)).map((q) => [q.symbol, q.regularMarketPrice]));
+    const watchlist = rows.map((r) => {
+      const currentPrice = px.get(r.symbol) ?? null;
+      const entryPrice = r.entryPricePaisa != null ? r.entryPricePaisa / 100 : null;
+      const gainPct = currentPrice != null && entryPrice != null && entryPrice > 0 ? +(((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2) : null;
+      return { ...r, entryPrice, currentPrice, gainPct };
+    });
+    return NextResponse.json({ watchlist });
   } catch (err) {
     console.error('GET agent/watchlist:', err);
     return NextResponse.json({ error: 'Failed to load watchlist' }, { status: 500 });
