@@ -167,6 +167,28 @@ that edge persists live is what the forward-test scorecard is measuring — and 
 full daily system (news + announcements + spike + ₹10K accumulation) is an
 **untested extension** of the validated momentum core, not itself yet validated.
 
+**Expanded validation (2026-07-05, monthly RS rotation, top-5, ~80 names, 108
+months).** We built the harness the review asked for:
+
+*Regime performance (annualized):* profitable in **every** regime — Pre-COVID
++8%, COVID-2020 +79%, Bull-2021 +175%, **Correction-2022 +82%**, Recovery-23/24
++33%, Current-25/26 +19%. Momentum held up even in the 2022 correction.
+
+*Bootstrap 95% CI on CAGR:* point ≈ **47%**, but the 95% interval is **wide:
+[+18%, +83%]**. The honest takeaway is *not* "47% CAGR" — it's "positive with
+high uncertainty."
+
+*Monte-Carlo (same returns, shuffled order):* median max-drawdown **−36%**,
+worst-5% **−52%**; probability of ending the period in a loss **≈ 0%**, of losing
+half **≈ 0%**. So over a full cycle it reliably made money — **but the interim
+drawdowns are brutal (−35% to −50%)**. A concentrated top-5 momentum book is a
+high-return, high-drawdown ride; position count and regime-scaling would soften it.
+
+*Caveats that keep me honest:* this run has **survivorship bias** (today's index
+members), **excludes transaction costs**, and short regime windows make those
+annualized figures noisy. So: *directionally strong and robust across regimes,
+with large drawdowns and wide confidence bands* — a fair, unglamorous summary.
+
 ---
 
 ## 7. How we score it going forward
