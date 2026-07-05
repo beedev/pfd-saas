@@ -10,7 +10,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { Button, Card, CardHeader, CardContent, Badge } from '@dxp/ui';
-import { ArrowLeft, Sparkles, Loader2, Save, FlaskConical, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Sparkles, Loader2, Save, FlaskConical, Trash2, ChevronDown, ChevronRight, Newspaper, ListChecks, Search } from 'lucide-react';
 
 interface Verdict {
   verdict: 'PROMISING' | 'REJECTED';
@@ -23,6 +23,13 @@ interface Verdict {
 }
 interface Strat { id: number; name: string; description: string; sourceNl: string; status: string; specJson: unknown; validationJson: Verdict | null }
 
+interface Report {
+  symbol: string; character: 'REVERTS' | 'TRENDS' | 'NEUTRAL'; autocorr: number;
+  reversion: { netPct: number; winRate: number; trades: number };
+  momentum: { netPct: number; winRate: number; trades: number };
+  rangeStatus: string; recommended: 'MEAN_REVERSION' | 'MOMENTUM' | 'AVOID'; verdict: 'YES' | 'NO'; note: string;
+}
+
 const pct = (x: number) => (x * 100).toFixed(1) + '%';
 
 export default function WorkbenchPage() {
@@ -33,6 +40,20 @@ export default function WorkbenchPage() {
   const [showJson, setShowJson] = useState(false);
   const [strategies, setStrategies] = useState<Strat[]>([]);
   const [validating, setValidating] = useState<number | null>(null);
+  const [candInput, setCandInput] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [reports, setReports] = useState<Report[] | null>(null);
+
+  const checkCandidates = async (body: { symbols?: string[]; source?: string }) => {
+    setChecking(true); setReports(null);
+    try {
+      const r = await fetch('/api/agent/workbench/character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      setReports(j.reports ?? []);
+      if (!j.reports?.length) toast.info(j.note || 'No candidates found');
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Check failed'); } finally { setChecking(false); }
+  };
 
   const load = useCallback(async () => {
     const r = await fetch('/api/agent/workbench/strategies').then((r) => r.json());
@@ -106,6 +127,44 @@ export default function WorkbenchPage() {
                 <Button variant="secondary" onClick={save} disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save strategy</Button>
               </>}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Candidate check — does a stock trend or revert?</h3></CardHeader>
+        <CardContent>
+          <p className="mb-2 text-sm text-[var(--dxp-text-muted)]">Vet stocks before trading them. Type names, or pull today&apos;s news candidates / your watchlist. It tests each stock&apos;s character and which strategy actually paid on it — then says yes/no.</p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <input value={candInput} onChange={(e) => setCandInput(e.target.value)} placeholder="e.g. RELIANCE, ITC, ADANIPOWER"
+              className="flex-1 rounded border border-[var(--dxp-border-light)] bg-[var(--dxp-surface)] p-2 text-sm text-[var(--dxp-text)]"
+              onKeyDown={(e) => e.key === 'Enter' && checkCandidates({ symbols: candInput.split(/[,\s]+/).filter(Boolean) })} />
+            <Button variant="primary" onClick={() => checkCandidates({ symbols: candInput.split(/[,\s]+/).filter(Boolean) })} disabled={checking}>
+              {checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}Check
+            </Button>
+            <Button variant="secondary" onClick={() => checkCandidates({ source: 'news' })} disabled={checking}><Newspaper className="mr-2 h-4 w-4" />News candidates</Button>
+            <Button variant="secondary" onClick={() => checkCandidates({ source: 'watchlist' })} disabled={checking}><ListChecks className="mr-2 h-4 w-4" />My watchlist</Button>
+          </div>
+
+          {reports && (
+            <ul className="mt-4 space-y-2">
+              {reports.length === 0 && <li className="text-sm text-[var(--dxp-text-muted)]">No candidates.</li>}
+              {reports.map((r) => (
+                <li key={r.symbol} className="rounded border border-[var(--dxp-border-light)] p-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={r.verdict === 'YES' ? 'success' : 'warning'}>{r.verdict}</Badge>
+                    <span className="font-semibold text-[var(--dxp-text)]">{r.symbol}</span>
+                    <Badge variant="info">{r.character}</Badge>
+                    {r.recommended !== 'AVOID' && <Badge variant="success">{r.recommended === 'MOMENTUM' ? 'ride strength' : 'buy dips'}</Badge>}
+                    {r.rangeStatus !== 'in-range' && <span className="text-xs text-amber-600">range {r.rangeStatus}</span>}
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--dxp-text-secondary)]">{r.note}</p>
+                  <p className="mt-0.5 font-mono text-[11px] text-[var(--dxp-text-muted)]">
+                    dip-buy {r.reversion.netPct.toFixed(0)}% ({r.reversion.trades} trades) · momentum {r.momentum.netPct.toFixed(0)}% ({r.momentum.trades} trades) · autocorr {r.autocorr}
+                  </p>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>
