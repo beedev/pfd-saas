@@ -30,34 +30,41 @@ own picks agree with 4 times out of 5.
 
 ## 2. What we look for in a stock
 
-A stock has to clear **four gates** to make the list. Each removes a different
-kind of junk:
+Two things are **mandatory** — a stock is rejected outright if it fails either:
 
-1. **Stage 2 (the trend gate).** Using Stan Weinstein's four stages:
-   - Stage 1 = basing (flat, going nowhere)
-   - **Stage 2 = advancing (price above a *rising* 200-day average) ← we only buy this**
-   - Stage 3 = topping
-   - Stage 4 = declining
-   A stock must be in **Stage 2 right now.** This is what stops us buying a
-   "good company" that's actually in a downtrend (e.g. RELIANCE was Stage 4).
+1. **Stage 2 (the trend gate).** Weinstein's four stages — Stage 1 basing, **Stage
+   2 advancing (price above a *rising* 200-day average) ← we only buy this**, Stage
+   3 topping, Stage 4 declining. Must be Stage 2 *right now*. This stops us buying a
+   "good company" that's actually in a downtrend (RELIANCE was Stage 4).
+2. **Liquidity (tradeability).** At least **₹5 crore/day** traded, so you can
+   actually get in and out. Throws away tiny illiquid names that only *look* strong.
 
-2. **Relative Strength (the leadership gate).** The stock must be **beating the
-   Nifty** over the last 6 months. We rank by how *far* ahead it is. A stock that
-   only rises as much as the index isn't leadership — we want the leaders.
+Everything else is a **weighted score, not a hard gate** — because (per our own
+strategy review) no single soft signal should be able to veto a genuine leader.
+The survivors are ranked on four factors, and we take the **top 15 (max 3 per
+sector)**:
 
-3. **Liquidity (the tradeability gate).** It must trade **at least ₹5 crore a
-   day**, so you can actually get in and out. This throws away tiny illiquid names
-   that *look* strong on a chart but can't be traded.
+| Factor | Weight | What it captures |
+|---|---|---|
+| **Relative strength** (6-mo vs Nifty) | 40% | leadership — how far ahead of the market |
+| **Delivery spike** (vs its own 20-day norm) | 20% | conviction — real accumulation rising *now* |
+| **Relative volume** (vs its own 20-day norm) | 20% | interest — volume expanding on the move |
+| **Sector strength** (momentum clustering) | 20% | is its sector leading? (buy the strong stock in the strong sector) |
 
-4. **Delivery spike (the conviction gate).** "Delivery %" is how much of a day's
-   volume was real buying-to-hold versus intraday churn. Instead of a fixed
-   threshold (which unfairly punishes actively-traded leaders), we check whether
-   **today's delivery is high *relative to that stock's own 20-day normal*** — a
-   spike means genuine accumulation is starting *now*. Example: a name at 30%
-   delivery passes if its usual level is ~21% (a 1.4× spike), because the buying
-   is *rising*.
+Each factor is **percentile-ranked within the day's candidates**, so it's
+normalized and scale-free. A **25% delivery floor** still applies as a hard cut to
+kill pure intraday froth, and the **sector cap (max 3/sector)** stops the book from
+over-concentrating.
 
-Only stocks that pass **all four** make the daily list.
+**Delivery %** = how much of a day's volume was real buying-to-hold vs intraday
+churn; we score the *spike* (today vs the stock's own 20-day norm), so a leader at
+30% delivery whose usual level is ~21% (a 1.4× spike) scores well — the buying is
+*rising*, which a flat "≥45%" cut would have missed.
+
+*Why a score, not four equal gates?* A name shouldn't automatically win on RS alone,
+and shouldn't be thrown away for narrowly missing on delivery. The score balances
+all four. (Example: ACUTAAS had the *highest* RS but ranked 3rd because its volume
+and delivery were soft; a name strong on **all four** won.)
 
 ---
 
@@ -159,7 +166,7 @@ different systems agreeing is strong evidence we're finding real strength.
 **What this does *not* yet prove.** We ran the permutation test, but not the full
 battery a quant desk would want before real money: **walk-forward** (roll train→
 test through time), **regime-specific** performance (COVID crash, 2022 correction,
-sideways years), **bootstrap confidence intervals** on the 21% CAGR, and **Monte
+sideways years), **bootstrap confidence intervals** on the CAGR, and **Monte
 Carlo trade-sequencing** (probability of ruin / drawdown distribution). So the
 honest claim is: *historical testing indicates relative-strength momentum showed
 statistically significant outperformance under the tested assumptions.* Whether
@@ -209,6 +216,11 @@ There's also an **Exit Review** page that runs *your existing holdings* through
 the same Stage/RS lens and flags **EXIT** (Stage 4), **TRIM** (Stage 3 or lagging
 the Nifty), **REVIEW** (Stage 1, idle) or **HOLD** (Stage 2).
 
+And the **Watchlist** is now a *dynamic RS/Stage-2 leader list* (not a static set of
+blue-chips). "Rebuild from RS leaders" repopulates it from the current screen and
+stamps each name with its **entry price, date, and sector**, so the page tracks
+**growth/loss since entry** live — a running report card on the leaders themselves.
+
 ---
 
 ## 8. What Artha deliberately does *not* do
@@ -220,6 +232,47 @@ the Nifty), **REVIEW** (Stage 1, idle) or **HOLD** (Stage 2).
 - **No shorting for multi-day holds** (cash equities can't be held short overnight
   in India) — long-only for anything beyond intraday.
 - **No futures** — no thoroughly-validated futures strategy yet.
+
+---
+
+## 9. Changes from the strategy review (2026-07-05) — and what's deferred
+
+An external review rated the framework 8.5/10. What we changed in response:
+
+- **Tempered the claims.** "Stocks trend, don't revert" → scoped to the 3–12-month
+  horizon we trade (reversals exist intraday/weekly). "We know it works" → "what the
+  backtest shows *and its limits*."
+- **Hard gates → a weighted score** (Section 2). Only Stage 2 + liquidity are
+  mandatory now; RS / delivery-spike / relative-volume / sector-strength are a
+  ranked score. No single soft signal can veto a leader.
+- **Added relative-volume and sector-strength** as score inputs; **demoted the
+  delivery filter** from a veto to a 20% score input; **added a sector cap** (max
+  3/sector) for concentration.
+- **Expanded validation** (Section 6): regime performance, bootstrap CI, and Monte
+  Carlo — with the honest result (robust across regimes, but wide CI and large
+  drawdowns).
+- **Dynamic RS watchlist** replacing the static blue-chips.
+
+**Deferred — and why (so it's on the record):**
+
+- **Objective news classification** (positive-catalyst-only rules). *Lower urgency:*
+  the price-based Stage-2/RS gates already filter out bad-news names downstream. On
+  the list.
+- **Exit-system rework** (a single coherent trailing-stop / Stage-2 exit, with the
+  ATR stop as a *wide disaster stop* only). The review correctly noted the current
+  ATR-stop + Stage-exit + fixed target can conflict — but fixing it properly
+  **needs the validation harness to tune**, so it comes *after* validation, not before.
+- **Regime-scaled exposure + portfolio limits** (max positions, sector weight caps).
+  Correct for *going live*, but they would undo the deliberate **"no-cap, ₹10K,
+  accumulate max sample"** design of the current forward-test, whose whole point is
+  to score stock *selection*. Deferred to the live phase (a sector cap is already in
+  for scoring integrity).
+- **Dynamic liquidity** (top-% by traded value vs the fixed ₹5cr floor) — minor;
+  the floor works for now.
+- **Earnings-growth overlay** — *maybe*, and only as a quality *rank boost*. **Not
+  P/E** — a value filter fights the momentum edge.
+- **ADX filter** — declined: Stage 2 (price above a rising 200-DMA) already encodes
+  "is it trending"; ADX is largely redundant.
 
 ---
 
