@@ -14,8 +14,10 @@ import { ArrowLeft, Loader2, RefreshCw, TrendingUp, Zap, Newspaper, Megaphone, R
 
 interface Pick {
   symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; source: string;
-  recommended: string; stage: string | null; liquidityCr: number | null; deliveryPct: number | null; rsExcess: number | null; note: string;
+  recommended: string; stage: string | null; liquidityCr: number | null; deliveryPct: number | null; rsExcess: number | null;
+  suggestedBuy: number | null; targetPrice: number | null; stopPrice: number | null; note: string;
 }
+const inr = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 const stageColor = (s: string | null) => s === 'STAGE2' ? 'bg-emerald-100 text-emerald-700' : s === 'STAGE3' ? 'bg-amber-100 text-amber-700' : s === 'STAGE4' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600';
 const sourceMeta: Record<string, { label: string; Icon: typeof Newspaper }> = {
@@ -37,9 +39,14 @@ function PickRow({ p }: { p: Pick }) {
         <div className="mt-0.5 truncate text-xs text-slate-500">{p.note}</div>
       </div>
       <div className="flex shrink-0 items-center gap-4 text-right text-xs">
+        {p.suggestedBuy != null && (
+          <div>
+            <div className="font-semibold text-slate-900">buy ~{inr(p.suggestedBuy)}</div>
+            {p.targetPrice != null && p.stopPrice != null && <div className="text-slate-400">tgt {inr(p.targetPrice)} · stop {inr(p.stopPrice)}</div>}
+          </div>
+        )}
         {p.rsExcess != null && <div><div className="font-semibold text-emerald-600">+{p.rsExcess.toFixed(0)}%</div><div className="text-slate-400">vs Nifty</div></div>}
-        {p.liquidityCr != null && <div><div className="font-medium text-slate-700">₹{p.liquidityCr.toFixed(0)}cr</div><div className="text-slate-400">traded/d</div></div>}
-        {p.deliveryPct != null && <div><div className="font-medium text-slate-700">{p.deliveryPct.toFixed(0)}%</div><div className="text-slate-400">delivery</div></div>}
+        {p.deliveryPct != null && <div><div className="font-medium text-slate-700">{p.deliveryPct.toFixed(0)}%</div><div className="text-slate-400">deliv</div></div>}
       </div>
     </div>
   );
@@ -72,7 +79,7 @@ export default function TodaysPicksPage() {
       </div>
 
       <h1 className="text-2xl font-bold text-slate-900">Today&apos;s Picks</h1>
-      <p className="mt-1 text-sm text-slate-500">Vetted by the 07:35 pipeline — character + Stage-2 + liquidity + delivery gates. Paper buckets trade these on a valid entry. {date && `(${date})`}</p>
+      <p className="mt-1 text-sm text-slate-500">Vetted by the 07:35 pipeline — character + Stage-2 + liquidity + delivery gates. Exit at target/stop or when a name drops out of Stage 2 (≤2-3 mo). {date && `(${date})`}</p>
 
       {loading ? (
         <div className="mt-10 flex justify-center text-slate-400"><Loader2 className="h-6 w-6 animate-spin" /></div>

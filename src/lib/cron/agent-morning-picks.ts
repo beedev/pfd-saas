@@ -22,6 +22,10 @@ import { sendTelegramToUser } from '@/lib/services/telegram';
 const MIN_LIQUIDITY_CR = 5;      // drop anything trading < ₹5 cr/day — untradeable
 const MIN_DELIVERY_PCT = 20;     // 2-3mo picks: skip pure intraday churn (little real accumulation)
 const MAX_CANDIDATES = 40;
+// Suggested exit levels for the signal (matches the run-swing horizon targets):
+//   2-3 month → +12% target / -8% stop;  intraday → +3% / -2% (square off same day).
+const exitLevels = (buy: number, horizon: 'INTRADAY' | 'MULTIDAY') =>
+  horizon === 'MULTIDAY' ? { target: buy * 1.12, stop: buy * 0.92 } : { target: buy * 1.03, stop: buy * 0.98 };
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 export interface MorningPicksResult { status: 'COMPLETED' | 'SKIPPED'; pickDate: string; considered: number; picked: number; intraday: number; multiday: number }
@@ -45,12 +49,17 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
   const bhav = await getBhavcopy().catch(() => new Map());
   const qs = await getQuotes(candidates).catch(() => []);
   const yLiq = new Map<string, number>();
-  for (const q of qs) if (Number.isFinite(q.regularMarketPrice) && Number.isFinite(q.regularMarketVolume)) yLiq.set(q.symbol, (q.regularMarketPrice * q.regularMarketVolume) / 1e7);
+  const yPrice = new Map<string, number>();
+  for (const q of qs) {
+    if (Number.isFinite(q.regularMarketPrice) && Number.isFinite(q.regularMarketVolume)) yLiq.set(q.symbol, (q.regularMarketPrice * q.regularMarketVolume) / 1e7);
+    if (Number.isFinite(q.regularMarketPrice)) yPrice.set(q.symbol, q.regularMarketPrice);
+  }
   const liqOf = (sym: string) => bhav.get(sym.replace('.NS', ''))?.tradedValueCr ?? yLiq.get(sym) ?? 0;
   const delivOf = (sym: string): number | null => bhav.get(sym.replace('.NS', ''))?.deliveryPct ?? null;
+  const priceOf = (sym: string): number | null => yPrice.get(sym) ?? bhav.get(sym.replace('.NS', ''))?.close ?? null;   // live quote first, else bhavcopy close
 
   // 3. Vet each: character test + liquidity + delivery gates → YES only.
-  const picks: Array<{ symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; recommended: string; liquidityCr: number; deliveryPct: number | null; source: string; report: unknown }> = [];
+  const picks: Array<{ symbol: string; name: string; horizon: 'INTRADAY' | 'MULTIDAY'; recommended: string; liquidityCr: number; deliveryPct: number | null; suggestedBuy: number | null; source: string; report: unknown }> = [];
   for (const sym of candidates) {
     if (liqOf(sym) < MIN_LIQUIDITY_CR) continue;                          // too thin to trade
     const bars = await loadDaily(sym, '5y').catch(() => []);
@@ -63,7 +72,10 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
     const horizon: 'INTRADAY' | 'MULTIDAY' = r.recommended === 'MOMENTUM' ? 'MULTIDAY' : 'INTRADAY';
     const deliv = delivOf(sym);
     if (horizon === 'MULTIDAY' && deliv != null && deliv < MIN_DELIVERY_PCT) continue;  // churn, not real accumulation → skip the hold
-    picks.push({ symbol: sym, name: r.symbol, horizon, recommended: r.recommended, liquidityCr: liqOf(sym), deliveryPct: deliv, source: announcedSet.has(sym) ? 'announcement' : 'news', report: { ...r, liquidityCr: liqOf(sym), deliveryPct: deliv } });
+    const buy = priceOf(sym);
+    const ex = buy ? exitLevels(buy, horizon) : null;
+    picks.push({ symbol: sym, name: r.symbol, horizon, recommended: r.recommended, liquidityCr: liqOf(sym), deliveryPct: deliv, suggestedBuy: buy, source: announcedSet.has(sym) ? 'announcement' : 'news',
+      report: { ...r, liquidityCr: liqOf(sym), deliveryPct: deliv, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null } });
   }
 
   // 3b. RS/Stage-2 screen — dynamically strong names (replaces the static blue-chip
@@ -78,8 +90,10 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
     if (deliv != null && deliv < MIN_DELIVERY_PCT) continue;
     seen.add(s.symbol);
     const rsPct = +(s.rsExcess * 100).toFixed(1);
-    picks.push({ symbol: s.symbol, name: s.name, horizon: 'MULTIDAY', recommended: 'MOMENTUM', liquidityCr: liq, deliveryPct: deliv, source: 'screen',
-      report: { stage: 'STAGE2', recommended: 'MOMENTUM', source: 'rs_stage_screen', rsExcess: rsPct, liquidityCr: liq, deliveryPct: deliv, note: `RS screen — Stage 2, +${rsPct.toFixed(0)}% vs Nifty (6mo).` } });
+    const buy = priceOf(s.symbol);
+    const ex = buy ? exitLevels(buy, 'MULTIDAY') : null;
+    picks.push({ symbol: s.symbol, name: s.name, horizon: 'MULTIDAY', recommended: 'MOMENTUM', liquidityCr: liq, deliveryPct: deliv, suggestedBuy: buy, source: 'screen',
+      report: { stage: 'STAGE2', recommended: 'MOMENTUM', source: 'rs_stage_screen', rsExcess: rsPct, liquidityCr: liq, deliveryPct: deliv, suggestedBuy: buy, targetPrice: ex?.target ?? null, stopPrice: ex?.stop ?? null, note: `RS screen — Stage 2, +${rsPct.toFixed(0)}% vs Nifty (6mo).` } });
   }
 
   // 4. Persist today's picks (idempotent per user/date/symbol).
@@ -92,12 +106,19 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
 
   // 5. Signal the user.
   if (picks.length) {
-    const line = (p: typeof picks[number]) => `• ${p.name} — ${p.recommended === 'MOMENTUM' ? 'ride' : 'dip'} (₹${p.liquidityCr.toFixed(0)}cr/d${p.deliveryPct != null ? `, ${p.deliveryPct.toFixed(0)}% deliv` : ''})`;
+    const line = (p: typeof picks[number]) => {
+      const b = p.suggestedBuy;
+      const ex = b ? exitLevels(b, p.horizon) : null;
+      const buyStr = b ? `buy ~₹${b.toFixed(0)}` : 'buy at open';
+      const exStr = ex ? ` → tgt ₹${ex.target.toFixed(0)} / stop ₹${ex.stop.toFixed(0)}` : '';
+      const deliv = p.deliveryPct != null ? ` · ${p.deliveryPct.toFixed(0)}% deliv` : '';
+      return `• *${p.name}* — ${buyStr}${exStr}${deliv}`;
+    };
     const msg = [
-      `🔎 *Today's picks — ${pickDate}*`,
-      multiday.length ? `*2-3 month:*\n${multiday.map(line).join('\n')}` : '',
-      intraday.length ? `*Intraday:*\n${intraday.map(line).join('\n')}` : '',
-      `_Vetted (character + liquidity). Paper buckets will trade these on a valid entry. Your call for real._`,
+      `📈 *Artha — Today's picks · ${pickDate}*`,
+      multiday.length ? `*2-3 month (ride strength):*\n${multiday.map(line).join('\n')}` : '',
+      intraday.length ? `*Intraday (square off same day):*\n${intraday.map(line).join('\n')}` : '',
+      `_Exit: hold while Stage 2 (above a rising 200-DMA); exit on target, stop, or when it drops out of Stage 2 (≤2-3 mo). Paper — your call for real._`,
     ].filter(Boolean).join('\n');
     await sendTelegramToUser(userId, msg).catch(() => {});
   }

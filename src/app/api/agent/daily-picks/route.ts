@@ -21,6 +21,9 @@ export async function GET() {
       liquidityCr: typeof rep.liquidityCr === 'number' ? rep.liquidityCr : null,
       deliveryPct: typeof rep.deliveryPct === 'number' ? rep.deliveryPct : null,
       rsExcess: typeof rep.rsExcess === 'number' ? rep.rsExcess : null,
+      suggestedBuy: typeof rep.suggestedBuy === 'number' ? rep.suggestedBuy : null,
+      targetPrice: typeof rep.targetPrice === 'number' ? rep.targetPrice : null,
+      stopPrice: typeof rep.stopPrice === 'number' ? rep.stopPrice : null,
       note: (rep.note as string) ?? '',
     };
   });
