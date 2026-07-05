@@ -18,6 +18,7 @@ interface Pick {
   suggestedBuy: number | null; targetPrice: number | null; stopPrice: number | null; note: string;
 }
 const inr = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+interface Score { closed: { trades: number; winRatePct: number; totalPnlRupees: number; avgReturnPct: number } | null; open: { positions: number; unrealizedRupees: number } | null }
 
 const stageColor = (s: string | null) => s === 'STAGE2' ? 'bg-emerald-100 text-emerald-700' : s === 'STAGE3' ? 'bg-amber-100 text-amber-700' : s === 'STAGE4' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600';
 const sourceMeta: Record<string, { label: string; Icon: typeof Newspaper }> = {
@@ -55,15 +56,17 @@ function PickRow({ p }: { p: Pick }) {
 export default function TodaysPicksPage() {
   const [picks, setPicks] = useState<Pick[]>([]);
   const [date, setDate] = useState('');
+  const [score, setScore] = useState<Score | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/agent/daily-picks');
-      const data = await res.json();
+      const [pr, sr] = await Promise.all([fetch('/api/agent/daily-picks'), fetch('/api/agent/scorecard')]);
+      const data = await pr.json();
       setPicks(data.picks ?? []);
       setDate(data.date ?? '');
+      setScore(await sr.json().catch(() => null));
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -80,6 +83,16 @@ export default function TodaysPicksPage() {
 
       <h1 className="text-2xl font-bold text-slate-900">Today&apos;s Picks</h1>
       <p className="mt-1 text-sm text-slate-500">Vetted by the 07:35 pipeline — character + Stage-2 + liquidity + delivery gates. Exit at target/stop or when a name drops out of Stage 2 (≤2-3 mo). {date && `(${date})`}</p>
+
+      {score?.closed && score.closed.trades > 0 && (
+        <Card className="mt-4"><CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 py-3 text-sm">
+          <span className="font-semibold text-slate-800">Algo score (₹10K/pick)</span>
+          <span>{score.closed.trades} closed · <b>{score.closed.winRatePct.toFixed(0)}%</b> win</span>
+          <span>avg <b className={score.closed.avgReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-500'}>{score.closed.avgReturnPct >= 0 ? '+' : ''}{score.closed.avgReturnPct}%</b></span>
+          <span>realized <b className={score.closed.totalPnlRupees >= 0 ? 'text-emerald-600' : 'text-rose-500'}>{inr(score.closed.totalPnlRupees)}</b></span>
+          {score.open && score.open.positions > 0 && <span className="text-slate-500">{score.open.positions} open · unrealized {inr(score.open.unrealizedRupees)}</span>}
+        </CardContent></Card>
+      )}
 
       {loading ? (
         <div className="mt-10 flex justify-center text-slate-400"><Loader2 className="h-6 w-6 animate-spin" /></div>

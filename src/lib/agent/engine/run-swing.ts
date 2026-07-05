@@ -13,11 +13,12 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db, agentTrades, agentPositions, agentWatchlist, agentDailyPicks, type AgentSleeve } from '@/db';
+import { db, agentTrades, agentPositions, agentWatchlist, agentDailyPicks, type AgentSleeve, type AgentDecisionEvidence } from '@/db';
 import { getQuotes, getDailyOHLC, type DailyBar } from '@/lib/services/yahoo-finance';
 import { sizeQty, persistOpen, persistClose, saveCash, type OpenPositionLite } from './intraday-core';
 import { minOfDay, LAST_ENTRY, SQUARE_OFF } from './orb-step';
 import { watchlistPick, regimeOkFromIndex, PICK_DEFAULTS } from '../strategies/watchlist-pick';
+import { isStage2 } from '../workbench/stage';
 import type { SleeveRunResult } from './run-sleeve';
 
 export type SwingHorizon = 'INTRADAY' | 'SHORT' | 'LONG';
@@ -38,6 +39,10 @@ export async function runSwing(
   opts: { marketOpen: boolean; horizon: SwingHorizon; candidatesOverride?: PickCandidate[] },
 ): Promise<SleeveRunResult> {
   const p = { ...HORIZON[opts.horizon], ...((sleeve.paramsJson as Record<string, number>) ?? {}) };
+  // Validation mode (fixedNotionalPaisa > 0): equal-weight ₹X per name, buy every
+  // vetted Stage-2 pick directly (no trigger wait, no regime gate, no position cap)
+  // so we accumulate a large sample to SCORE the algorithm. Exit adds a Stage-2 rule.
+  const fixedNotional = (p as unknown as Record<string, number>).fixedNotionalPaisa ?? 0;
   const today = istDate();
   const nowMin = minOfDay(Math.floor(Date.now() / 1000));
 
@@ -76,8 +81,10 @@ export async function runSwing(
     // Intraday: force flat at 15:15 / on close / if held overnight. Multi-day: max-hold.
     const squareOff = p.intraday && (nowMin >= SQUARE_OFF || !opts.marketOpen || existing.openedDate !== today);
     const maxHold = !p.intraday && heldDays >= p.maxHoldDays;
-    if (!hitStop && !hitTarget && !squareOff && !maxHold) continue;
-    const reason = hitStop ? 'stop hit' : hitTarget ? 'target hit' : squareOff ? 'square-off' : `max hold ${p.maxHoldDays}d`;
+    // Validation holds also exit the moment a name drops out of Stage 2 (trend broke).
+    const lostStage2 = fixedNotional > 0 && !p.intraday && !isStage2((await getOhlc(existing.symbol)).map((b) => b.close));
+    if (!hitStop && !hitTarget && !squareOff && !maxHold && !lostStage2) continue;
+    const reason = hitStop ? 'stop hit' : hitTarget ? 'target hit' : squareOff ? 'square-off' : lostStage2 ? 'lost Stage 2' : `max hold ${p.maxHoldDays}d`;
     const pos: OpenPositionLite = {
       id: existing.id, symbol: existing.symbol, side: existing.side, quantity: existing.quantity,
       contractMultiplier: existing.contractMultiplier, avgPricePaisa: existing.avgPricePaisa,
@@ -95,7 +102,7 @@ export async function runSwing(
   // Market regime gate — index (^NSEI) above its 50-day SMA. Fail-closed (no data → no entries).
   const idx = await getOhlc('^NSEI').catch(() => [] as DailyBar[]);
   const regimeOk = idx.length >= 52 && regimeOkFromIndex(idx.map((b) => b.close));
-  if (!regimeOk) { await saveCash(sleeve.id, cash); return { sleeveKey: sleeve.key, quotesFetched: quotes, decisions, tradesExecuted: trades, cashBalancePaisa: cash }; }
+  if (!regimeOk && fixedNotional === 0) { await saveCash(sleeve.id, cash); return { sleeveKey: sleeve.key, quotesFetched: quotes, decisions, tradesExecuted: trades, cashBalancePaisa: cash }; }
 
   // Candidates = the user's watchlist picks ∪ today's morning-pipeline picks (news-vetted), for this horizon.
   const candidates = opts.candidatesOverride ?? await gatherCandidates(userId, sleeve.portfolioId, p.watchTag, today);
@@ -109,17 +116,31 @@ export async function runSwing(
     if (held.has(c.symbol) || tradedToday.has(c.symbol)) continue;
     const bars = await getOhlc(c.symbol);
     quotes++;
-    const pick = watchlistPick(bars, regimeOk, { ...PICK_DEFAULTS, stopAtr: p.stopAtr });
-    if (!pick) continue;
-    const entry = pick.entryPaisa;
+    let entry: number, stopPaisa: number, rule: string, evidence: AgentDecisionEvidence;
+    if (fixedNotional > 0) {
+      // Validation buy: trust the vetted pick, enter at last close with a fixed -8%
+      // stop, but still require the name to be Stage 2 right now (per-stock safety).
+      const closes = bars.map((b) => b.close);
+      if (closes.length < 2 || !isStage2(closes)) continue;
+      entry = Math.round(closes[closes.length - 1] * 100);
+      stopPaisa = Math.round(entry * 0.92);
+      rule = 'validation buy — Stage 2 pick';
+      evidence = { rule, inputs: { close: +(entry / 100).toFixed(2) }, thresholds: { stopPaisa }, source: 'YAHOO' };
+    } else {
+      const pick = watchlistPick(bars, regimeOk, { ...PICK_DEFAULTS, stopAtr: p.stopAtr });
+      if (!pick) continue;
+      entry = pick.entryPaisa; stopPaisa = pick.stopPaisa; rule = pick.rule; evidence = pick.evidence;
+    }
     const target = entry + Math.round((entry * p.targetPct) / 100);
-    const qty = sizeQty(entry, pick.stopPaisa, 'LONG', { allocationPaisa: sleeve.allocationPaisa, cashBalancePaisa: cash, grossDeployedPaisa: grossDeployed, riskPctPerTrade: p.riskPctPerTrade });
-    if (qty < 1) continue;
+    const qty = fixedNotional > 0
+      ? Math.floor(fixedNotional / entry)
+      : sizeQty(entry, stopPaisa, 'LONG', { allocationPaisa: sleeve.allocationPaisa, cashBalancePaisa: cash, grossDeployedPaisa: grossDeployed, riskPctPerTrade: p.riskPctPerTrade });
+    if (qty < 1 || entry * qty > cash) continue;
     const label = opts.horizon === 'INTRADAY' ? 'intraday pick' : opts.horizon === 'LONG' ? '2-3mo pick' : '2-3d pick';
-    const rationale = `${label} → LONG ${c.symbol} @ ₹${(entry / 100).toFixed(2)} — ${pick.rule}; target ₹${(target / 100).toFixed(2)} (+${p.targetPct}%), stop ₹${(pick.stopPaisa / 100).toFixed(2)}.`;
+    const rationale = `${label} → LONG ${c.symbol} @ ₹${(entry / 100).toFixed(2)} — ${rule}; target ₹${(target / 100).toFixed(2)} (+${p.targetPct}%), stop ₹${(stopPaisa / 100).toFixed(2)}.`;
     cash = await persistOpen(userId, sleeve, runId, runDate, {
-      symbol: c.symbol, name: c.name, side: 'LONG', entryPaisa: entry, stopPaisa: pick.stopPaisa, targetPaisa: target, qty, rationale,
-      evidence: { ...pick.evidence, dataAsOf: today, thresholds: { ...pick.evidence.thresholds, targetPaisa: target } },
+      symbol: c.symbol, name: c.name, side: 'LONG', entryPaisa: entry, stopPaisa, targetPaisa: target, qty, rationale,
+      evidence: { ...evidence, dataAsOf: today, thresholds: { ...evidence.thresholds, targetPaisa: target } },
     }, cash);
     grossDeployed += entry * qty; openCount++; held.add(c.symbol); decisions++; trades++;
   }
