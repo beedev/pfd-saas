@@ -27,6 +27,7 @@ import { runDailyDigestJob } from '@/lib/cron/daily-digest';
 import { runAgentV2, runAgentIntraday } from '@/lib/cron/agent-run-v2';
 import { runNewsIngest } from '@/lib/agent/news/ingest';
 import { runPremarketBrief } from '@/lib/agent/news/brief';
+import { runMorningPicks } from '@/lib/cron/agent-morning-picks';
 import { runAgentSelfTune } from '@/lib/cron/agent-self-tune';
 import { runEodReview } from '@/lib/agent/signal/eod-review';
 import { settlePendingRedemptions } from '@/lib/finance/mf-redeem-worker';
@@ -53,6 +54,7 @@ const ADVANCE_MS: Record<JobType, number> = {
   agent_premarket_brief: 24 * 60 * 60 * 1000, // daily (anchored to 07:30 IST below)
   agent_self_tune: 24 * 60 * 60 * 1000,       // daily (anchored to 16:00 IST below)
   agent_eod_review: 24 * 60 * 60 * 1000,      // daily (anchored to 16:30 IST below)
+  agent_morning_picks: 24 * 60 * 60 * 1000,   // daily (anchored to 07:35 IST below — just after the brief)
 };
 
 // agent_premarket_brief fires at 07:30 IST — overnight/morning news digested
@@ -61,6 +63,15 @@ const NEXT_PREMARKET_IST = sql`(
   CASE WHEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' > now()
   THEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
   ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
+)`;
+
+// agent_morning_picks fires at 07:35 IST — 5 min after the brief (07:30) so the
+// day's directional names are fresh: vet candidates → split intraday/2-3mo →
+// store the day's picks + signal. run-swing trades them during the session.
+const NEXT_MORNINGPICKS_IST = sql`(
+  CASE WHEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 35 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' > now()
+  THEN ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 35 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC'
+  ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '7 hours 35 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
 )`;
 
 // agent_daily_run fires at the NSE open — 09:20 IST, a 5-min buffer past the
@@ -189,6 +200,11 @@ export async function POST(request: NextRequest) {
           // Global pre-market directional brief (07:30 IST) → drives intraday.
           report.result = await runPremarketBrief();
           break;
+        case 'agent_morning_picks':
+          // Per-user (07:35 IST): vet the day's candidates → split intraday/2-3mo
+          // → store picks + Telegram signal. run-swing trades them intraday.
+          report.result = await runMorningPicks(job.userId);
+          break;
         case 'agent_self_tune':
           // L3 post-close (16:00 IST): archive bars + propose ORB param tuning.
           // No-ops unless a sleeve has tuning enabled. Propose-only in Phase 3.
@@ -231,7 +247,9 @@ export async function POST(request: NextRequest) {
               ? NEXT_SELFTUNE_IST
               : job.jobType === 'agent_eod_review'
                 ? NEXT_EODREVIEW_IST
-                : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
+                : job.jobType === 'agent_morning_picks'
+                  ? NEXT_MORNINGPICKS_IST
+                  : sql`NOW() + (${advanceMs}::text || ' milliseconds')::interval`,
         updatedAt: sql`NOW()`,
       })
       .where(eq(scheduledJobs.id, job.id));
@@ -257,7 +275,7 @@ async function ensureDefaultJobsForAllUsers(): Promise<void> {
     INSERT INTO scheduled_jobs (user_id, job_type, enabled, next_run_at)
     SELECT u.id, j.jt, true, NOW()
     FROM "user" u
-    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run'), ('agent_intraday_run'), ('agent_news_ingest'), ('agent_premarket_brief'), ('agent_self_tune'), ('agent_eod_review')) AS j(jt)
+    CROSS JOIN (VALUES ('daily_digest'), ('alerts_check'), ('sip_auto_execute'), ('agent_daily_run'), ('agent_intraday_run'), ('agent_news_ingest'), ('agent_premarket_brief'), ('agent_self_tune'), ('agent_eod_review'), ('agent_morning_picks')) AS j(jt)
     WHERE NOT EXISTS (
       SELECT 1 FROM scheduled_jobs s WHERE s.user_id = u.id AND s.job_type = j.jt
     )

@@ -16,6 +16,7 @@ const JOB_META: Record<JobType, { label: string; cadence: string; group: 'Analys
   alerts_check: { label: 'Alerts check', cadence: 'every 5 min', group: 'General' },
   sip_auto_execute: { label: 'SIP auto-execute', cadence: 'daily', group: 'General' },
   agent_premarket_brief: { label: 'Pre-market brief', cadence: '07:30 IST', group: 'Analyst' },
+  agent_morning_picks: { label: 'Morning picks (vet + signal)', cadence: '07:35 IST', group: 'Analyst' },
   agent_daily_run: { label: 'Daily run', cadence: '09:20 IST', group: 'Analyst' },
   agent_intraday_run: { label: 'Intraday (ORB)', cadence: 'every 10 min', group: 'Analyst' },
   agent_news_ingest: { label: 'News ingest', cadence: 'every 30 min', group: 'Analyst' },

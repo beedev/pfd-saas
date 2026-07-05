@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune' | 'agent_eod_review';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune' | 'agent_eod_review' | 'agent_morning_picks';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {
@@ -3603,6 +3603,25 @@ export const agentUserStrategies = pgTable('agent_user_strategies', {
   updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow(),
 }, (table) => [index('agent_user_strategies_user_id_idx').on(table.userId)]);
 export type AgentUserStrategy = typeof agentUserStrategies.$inferSelect;
+
+// Morning pipeline: the day's vetted stock picks (news → character test → yes),
+// split by horizon. run-swing reads these as candidates for the day.
+export const agentDailyPicks = pgTable('agent_daily_picks', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  pickDate: text('pick_date').notNull(),                       // IST YYYY-MM-DD
+  symbol: text('symbol').notNull(),
+  name: text('name').notNull().default(''),
+  horizon: text('horizon').$type<AgentWatchlistHorizon>().notNull(),   // INTRADAY | MULTIDAY (2-3 month)
+  source: text('source').notNull().default(''),               // news / brief / in-play
+  recommended: text('recommended').notNull().default(''),     // MOMENTUM | MEAN_REVERSION
+  reportJson: jsonb('report_json'),                           // the character-test report card
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  index('agent_daily_picks_user_date_idx').on(table.userId, table.pickDate),
+  uniqueIndex('agent_daily_picks_unique_idx').on(table.userId, table.pickDate, table.symbol),
+]);
+export type AgentDailyPick = typeof agentDailyPicks.$inferSelect;
 
 // One row per daily run — the idempotency anchor (unique on user+runDate).
 export const agentRuns = pgTable('agent_runs', {

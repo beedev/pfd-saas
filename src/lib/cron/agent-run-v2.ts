@@ -109,7 +109,7 @@ export async function runAgentV2(userId: string, opts: { manual?: boolean } = {}
       // ORB + the swing buckets (STK_FAST/STK_SHORT) are owned by the intraday
       // runner (run-intraday / run-swing) — the daily run just marks them to
       // market so they count in the total; it never trades them.
-      const intradayOwned = sleeve.strategy === 'INTRADAY_ORB' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT' || sleeve.key === 'STK_WATCH';
+      const intradayOwned = sleeve.strategy === 'INTRADAY_ORB' || sleeve.key === 'STK_SHORT' || sleeve.key === 'STK_WATCH';
       // RS rotation ranks an injected Nifty universe (not a watchlist) so it doesn't pollute My-Picks.
       const universeSymbols = sleeve.key === 'STK_RS' ? NIFTY_500.slice(0, 150) : undefined;
       const r = intradayOwned
@@ -213,11 +213,10 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
     for (const sleeve of sleeves) {
       const hasOpen = (openBySleeve.get(sleeve.id) ?? 0) > 0;
       let r;
-      if (sleeve.key === 'STK_WATCH' || sleeve.key === 'STK_FAST' || sleeve.key === 'STK_SHORT') {
-        // "My Picks": the user's watchlist, timed by the combined trigger.
-        // STK_WATCH = intraday (same-day), STK_FAST = 2-3d, STK_SHORT = 2-3mo.
+      if (sleeve.key === 'STK_WATCH' || sleeve.key === 'STK_SHORT') {
+        // "My Picks": STK_WATCH = intraday (same-day), STK_SHORT = 2-3 month.
         if (!marketOpen && !hasOpen) continue;
-        const horizon = sleeve.key === 'STK_WATCH' ? 'INTRADAY' : sleeve.key === 'STK_SHORT' ? 'LONG' : 'SHORT';
+        const horizon = sleeve.key === 'STK_WATCH' ? 'INTRADAY' : 'LONG';
         r = await runSwing(userId, sleeve, run.id, runDate, { marketOpen, horizon });
       } else if (sleeve.strategy === 'INTRADAY_ORB') {
         r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen, universe: scanUniverse });

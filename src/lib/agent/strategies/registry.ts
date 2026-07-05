@@ -24,12 +24,12 @@ export function getStrategy(key: AgentStrategy): Strategy {
 
 /** Default sleeve definitions for the equal-split seeding. */
 export const DEFAULT_SLEEVES: Array<{ key: import('@/db').AgentSleeveKey; name: string; strategy: AgentStrategy; cadence: import('@/db').AgentCadence }> = [
-  { key: 'STK_FAST', name: 'My Picks · 2-3 day', strategy: 'MEAN_REVERSION', cadence: 'INTRADAY' },
   { key: 'STK_SHORT', name: 'My Picks · 2-3 month', strategy: 'XS_MOMENTUM', cadence: 'DAILY_OPEN' },
-  { key: 'FUT', name: 'Futures', strategy: 'TREND', cadence: 'DAILY_OPEN' },
-  // Mutual funds retired as an active bucket (2026-07-02) — MFs are long-term
-  // holdings, not day-trading alpha (NAV is EOD-only, 1% <1yr exit load). Existing
-  // MF sleeves are disabled on deploy; not re-seeded here.
+  // Retired 2026-07-05 → two-horizon model (intraday + 2-3 month only):
+  //  · STK_FAST (2-3 day) — collapsed; multi-day picks now go to STK_SHORT.
+  //  · FUT (futures) — no thorough validated futures strategy yet.
+  //  · MF (mutual funds, 2026-07-02) — long-term holdings, not day-trading alpha.
+  // Existing sleeves for these keys are disabled on deploy; not re-seeded here.
   { key: 'STK_INTRADAY', name: 'Intraday (ORB)', strategy: 'INTRADAY_ORB', cadence: 'INTRADAY' },
   { key: 'STK_VWAP', name: 'Intraday · VWAP reversion', strategy: 'VWAP_REVERSION', cadence: 'INTRADAY' },
   { key: 'STK_GAP', name: 'Intraday · gap-and-go', strategy: 'GAP_AND_GO', cadence: 'INTRADAY' },

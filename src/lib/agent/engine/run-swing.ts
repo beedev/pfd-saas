@@ -13,7 +13,7 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db, agentTrades, agentPositions, agentWatchlist, type AgentSleeve } from '@/db';
+import { db, agentTrades, agentPositions, agentWatchlist, agentDailyPicks, type AgentSleeve } from '@/db';
 import { getQuotes, getDailyOHLC, type DailyBar } from '@/lib/services/yahoo-finance';
 import { sizeQty, persistOpen, persistClose, saveCash, type OpenPositionLite } from './intraday-core';
 import { minOfDay, LAST_ENTRY, SQUARE_OFF } from './orb-step';
@@ -97,7 +97,8 @@ export async function runSwing(
   const regimeOk = idx.length >= 52 && regimeOkFromIndex(idx.map((b) => b.close));
   if (!regimeOk) { await saveCash(sleeve.id, cash); return { sleeveKey: sleeve.key, quotesFetched: quotes, decisions, tradesExecuted: trades, cashBalancePaisa: cash }; }
 
-  const candidates = opts.candidatesOverride ?? await getMyPicks(sleeve.portfolioId, p.watchTag);
+  // Candidates = the user's watchlist picks ∪ today's morning-pipeline picks (news-vetted), for this horizon.
+  const candidates = opts.candidatesOverride ?? await gatherCandidates(userId, sleeve.portfolioId, p.watchTag, today);
   const held = new Set(heldSymbols);
   const tradedRows = await db.select({ symbol: agentTrades.symbol }).from(agentTrades)
     .where(and(eq(agentTrades.sleeveId, sleeve.id), eq(agentTrades.tradeDate, runDate)));
@@ -128,6 +129,18 @@ export async function runSwing(
 }
 
 /** The user's picks for a horizon tag — the portfolio's enabled .NS watchlist entries, deduped. */
+/** Watchlist picks ∪ today's morning-pipeline (news-vetted) picks, deduped by symbol. */
+async function gatherCandidates(userId: string, portfolioId: number, tag: 'INTRADAY' | 'MULTIDAY', today: string): Promise<PickCandidate[]> {
+  const wl = await getMyPicks(portfolioId, tag);
+  const daily = await db.select({ symbol: agentDailyPicks.symbol, name: agentDailyPicks.name })
+    .from(agentDailyPicks)
+    .where(and(eq(agentDailyPicks.userId, userId), eq(agentDailyPicks.pickDate, today), eq(agentDailyPicks.horizon, tag)));
+  const seen = new Set(wl.map((w) => w.symbol));
+  const out = [...wl];
+  for (const d of daily) if (d.symbol.endsWith('.NS') && !seen.has(d.symbol)) { seen.add(d.symbol); out.push({ symbol: d.symbol, name: d.name }); }
+  return out;
+}
+
 async function getMyPicks(portfolioId: number, tag: 'INTRADAY' | 'MULTIDAY'): Promise<PickCandidate[]> {
   const rows = await db.select({ symbol: agentWatchlist.symbol, name: agentWatchlist.name, horizon: agentWatchlist.horizon })
     .from(agentWatchlist)
