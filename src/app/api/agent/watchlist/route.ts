@@ -5,10 +5,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { desc, eq } from 'drizzle-orm';
-import { db, agentPortfolios, agentWatchlist, type AgentAssetClass } from '@/db';
+import { and, desc, eq } from 'drizzle-orm';
+import { db, agentPortfolios, agentWatchlist, agentDailyPicks, agentPositions, type AgentAssetClass } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getQuotes } from '@/lib/services/yahoo-finance';
+
+const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const daysBetween = (from: string) => Math.max(0, Math.round((Date.now() - Date.parse(from)) / 86400000));
 
 const CLASSES: AgentAssetClass[] = ['STOCK', 'MF', 'FUTURE'];
 
@@ -19,26 +22,55 @@ async function ensurePortfolio(userId: string) {
   return created;
 }
 
+/**
+ * Watchlist = the buy→hold lifecycle tracker:
+ *   • held   — open positions (bought), tracked entry → current → growth/loss.
+ *   • toBuy  — today's picks (+ any manual watchlist names) NOT yet held.
+ * Driven by the pipeline: a pick shows in toBuy, gets bought, then flips to held.
+ */
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) return unauthenticated();
   try {
-    const rows = await db
-      .select()
-      .from(agentWatchlist)
-      .where(eq(agentWatchlist.userId, userId))
-      .orderBy(desc(agentWatchlist.id));
-    // Enrich with live price + growth/loss since entry.
-    const symbols = [...new Set(rows.map((r) => r.symbol).filter(Boolean))];
+    const today = istDate();
+    const positions = await db.select().from(agentPositions).where(eq(agentPositions.userId, userId));
+    const heldSyms = new Set(positions.map((p) => p.symbol));
+
+    const picks = await db.select().from(agentDailyPicks).where(and(eq(agentDailyPicks.userId, userId), eq(agentDailyPicks.pickDate, today)));
+    const manual = await db.select().from(agentWatchlist).where(eq(agentWatchlist.userId, userId)).orderBy(desc(agentWatchlist.id));
+
+    // Live prices for everything on screen.
+    const symbols = [...new Set([...positions.map((p) => p.symbol), ...picks.map((p) => p.symbol), ...manual.map((m) => m.symbol)].filter(Boolean))];
     const qs = symbols.length ? await getQuotes(symbols).catch(() => []) : [];
     const px = new Map(qs.filter((q) => Number.isFinite(q.regularMarketPrice)).map((q) => [q.symbol, q.regularMarketPrice]));
-    const watchlist = rows.map((r) => {
-      const currentPrice = px.get(r.symbol) ?? null;
-      const entryPrice = r.entryPricePaisa != null ? r.entryPricePaisa / 100 : null;
-      const gainPct = currentPrice != null && entryPrice != null && entryPrice > 0 ? +(((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2) : null;
-      return { ...r, entryPrice, currentPrice, gainPct };
+
+    const held = positions.map((p) => {
+      const current = px.get(p.symbol) ?? null;
+      const entry = p.avgPricePaisa / 100;
+      return {
+        symbol: p.symbol, name: p.name, sector: null as string | null,
+        entryPrice: entry, currentPrice: current,
+        gainPct: current != null && entry > 0 ? +(((current - entry) / entry) * 100).toFixed(2) : null,
+        target: p.targetPaisa != null ? p.targetPaisa / 100 : null, stop: p.stopPaisa != null ? p.stopPaisa / 100 : null,
+        entryDate: p.openedDate, daysHeld: daysBetween(p.openedDate), quantity: p.quantity,
+      };
     });
-    return NextResponse.json({ watchlist });
+
+    const seen = new Set(heldSyms);
+    const toBuy: Array<Record<string, unknown>> = [];
+    for (const p of picks) {
+      if (p.horizon !== 'MULTIDAY' || seen.has(p.symbol)) continue;
+      seen.add(p.symbol);
+      const rep = (p.reportJson ?? {}) as Record<string, unknown>;
+      toBuy.push({ symbol: p.symbol, name: p.name, sector: (rep.sector as string) ?? null, source: p.source, score: typeof rep.score === 'number' ? Math.round(rep.score * 100) : null, suggestedBuy: rep.suggestedBuy ?? null, target: rep.targetPrice ?? null, stop: rep.stopPrice ?? null, currentPrice: px.get(p.symbol) ?? null });
+    }
+    for (const m of manual) {   // manual additions the user still wants to buy
+      if (seen.has(m.symbol)) continue;
+      seen.add(m.symbol);
+      toBuy.push({ symbol: m.symbol, name: m.name, sector: m.sector ?? null, source: 'manual', score: null, suggestedBuy: m.entryPricePaisa != null ? m.entryPricePaisa / 100 : null, target: null, stop: null, currentPrice: px.get(m.symbol) ?? null });
+    }
+
+    return NextResponse.json({ held, toBuy });
   } catch (err) {
     console.error('GET agent/watchlist:', err);
     return NextResponse.json({ error: 'Failed to load watchlist' }, { status: 500 });
@@ -65,9 +97,8 @@ export async function POST(request: NextRequest) {
     if (assetClass !== 'MF' && !symbol) {
       return NextResponse.json({ error: 'symbol required' }, { status: 400 });
     }
-    if (!Number.isInteger(body.sleeveId)) {
-      return NextResponse.json({ error: 'sleeveId required' }, { status: 400 });
-    }
+    // Watchlist is decoupled from sleeves now (pipeline-driven); sleeveId optional.
+    const sleeveId = Number.isInteger(body.sleeveId) ? body.sleeveId : null;
     // "My Picks" hold horizon — INTRADAY (same-day) or MULTIDAY (swing).
     const horizon = body.horizon === 'INTRADAY' ? 'INTRADAY' : 'MULTIDAY';
 
@@ -77,7 +108,7 @@ export async function POST(request: NextRequest) {
       .values({
         userId,
         portfolioId: portfolio.id,
-        sleeveId: body.sleeveId,
+        sleeveId,
         assetClass,
         symbol,
         schemeCode,
