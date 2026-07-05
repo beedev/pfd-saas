@@ -7,7 +7,7 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db, agentDailyPicks, agentPortfolios } from '@/db';
+import { db, agentDailyPicks, agentPortfolios, agentRunHealth } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
 import { loadDaily } from '@/lib/agent/workbench/data';
 import { assessStock } from '@/lib/agent/workbench/character';
@@ -162,6 +162,21 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
       `_Exit: hold while Stage 2 (above a rising 200-DMA); exit on target, stop, or when it drops out of Stage 2 (≤2-3 mo). Paper — your call for real._`,
     ].filter(Boolean).join('\n');
     await sendTelegramToUser(userId, msg).catch(() => {});
+  }
+
+  // 8. Run-health + heartbeat — recorded EVERY day, sent even on 0 picks, so a
+  //    silent data failure can't masquerade as a genuine no-signal day.
+  const bhavRows = (bhav as Map<string, unknown>).size ?? 0;
+  const quotesOk = qs.length > 0;
+  const status = picks.length ? 'OK' : (bhavRows === 0 && screen.length === 0 && !quotesOk) ? 'DATA_GAP' : 'NO_SIGNAL';
+  const note = status === 'DATA_GAP' ? 'Yahoo/NSE unavailable' : status === 'NO_SIGNAL' ? 'no qualifying leaders' : '';
+  await db.insert(agentRunHealth).values({ userId, runDate: pickDate, status, considered: candidates.length, picked: picks.length, bhavRows, screenCount: screen.length, announcementCount: announced.length, quotesOk, note })
+    .onConflictDoUpdate({ target: [agentRunHealth.userId, agentRunHealth.runDate], set: { status, considered: candidates.length, picked: picks.length, bhavRows, screenCount: screen.length, announcementCount: announced.length, quotesOk, note } }).catch(() => {});
+  if (!picks.length) {
+    const hb = status === 'DATA_GAP'
+      ? `⚠️ *Artha ${pickDate}* — data gap this morning (Yahoo/NSE unavailable). No picks: this is a DATA GAP, *not* a no-signal day.`
+      : `ℹ️ *Artha ${pickDate}* — ran OK: ${candidates.length} candidates, 0 qualified (soft market / no leaders). No trades today.`;
+    await sendTelegramToUser(userId, hb).catch(() => {});
   }
   return { status: 'COMPLETED', pickDate, considered: candidates.length, picked: picks.length, intraday: intraday.length, multiday: multiday.length };
 }

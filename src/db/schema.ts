@@ -301,7 +301,7 @@ export type TransformationCheck = typeof transformationChecks.$inferSelect;
  *
  * Schedule is baked in code for MVP (Sprint 7+ adds per-user override).
  */
-export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune' | 'agent_eod_review' | 'agent_morning_picks';
+export type JobType = 'daily_digest' | 'alerts_check' | 'sip_auto_execute' | 'agent_daily_run' | 'agent_intraday_run' | 'agent_news_ingest' | 'agent_premarket_brief' | 'agent_self_tune' | 'agent_eod_review' | 'agent_morning_picks' | 'agent_daily_snapshot';
 export type JobStatus = 'pending' | 'success' | 'failed';
 
 export const scheduledJobs = pgTable('scheduled_jobs', {
@@ -3643,6 +3643,45 @@ export const agentDeliveryHistory = pgTable('agent_delivery_history', {
   index('agent_delivery_hist_symbol_idx').on(table.symbol),
 ]);
 export type AgentDeliveryHistory = typeof agentDeliveryHistory.$inferSelect;
+
+// Daily performance snapshot (1 row/day/user) — the equity time series a 6-month
+// forward-test is analyzed from. Metrics are computed on-demand elsewhere; THIS is
+// the persisted record so the curve / drawdown / regime analysis survive.
+export const agentDailySnapshots = pgTable('agent_daily_snapshots', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  snapshotDate: text('snapshot_date').notNull(),                        // YYYY-MM-DD IST
+  equityPaisa: bigint('equity_paisa', { mode: 'number' }).notNull(),    // cash + open positions market value
+  cashPaisa: bigint('cash_paisa', { mode: 'number' }).notNull(),
+  unrealizedPaisa: bigint('unrealized_paisa', { mode: 'number' }).default(0),
+  realizedCumPaisa: bigint('realized_cum_paisa', { mode: 'number' }).default(0),
+  openPositions: integer('open_positions').default(0),
+  closedTrades: integer('closed_trades').default(0),
+  winRatePct: real('win_rate_pct').default(0),
+  peakEquityPaisa: bigint('peak_equity_paisa', { mode: 'number' }),     // running high-water mark
+  drawdownPct: real('drawdown_pct').default(0),                         // current DD from peak (≤ 0)
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [uniqueIndex('agent_daily_snap_unique_idx').on(table.userId, table.snapshotDate)]);
+export type AgentDailySnapshot = typeof agentDailySnapshots.$inferSelect;
+
+// Run-health (1 row/day/user) — did the morning pipeline actually run, and was the
+// data good? Distinguishes "no trade because no signal" from "no trade because a
+// data source failed" — essential so a silent breakage doesn't corrupt the study.
+export const agentRunHealth = pgTable('agent_run_health', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  runDate: text('run_date').notNull(),                                  // YYYY-MM-DD IST
+  status: text('status').notNull(),                                     // OK | DATA_GAP | NO_SIGNAL | SKIPPED
+  considered: integer('considered').default(0),
+  picked: integer('picked').default(0),
+  bhavRows: integer('bhav_rows').default(0),
+  screenCount: integer('screen_count').default(0),
+  announcementCount: integer('announcement_count').default(0),
+  quotesOk: boolean('quotes_ok').default(false),
+  note: text('note').default(''),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [uniqueIndex('agent_run_health_unique_idx').on(table.userId, table.runDate)]);
+export type AgentRunHealth = typeof agentRunHealth.$inferSelect;
 
 // One row per daily run — the idempotency anchor (unique on user+runDate).
 export const agentRuns = pgTable('agent_runs', {
