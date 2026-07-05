@@ -3623,6 +3623,23 @@ export const agentDailyPicks = pgTable('agent_daily_picks', {
 ]);
 export type AgentDailyPick = typeof agentDailyPicks.$inferSelect;
 
+// Rolling per-stock delivery % history (from NSE bhavcopy) → relative-delivery
+// SPIKE signal: today's delivery vs the stock's own 20-day norm. A momentum leader
+// printing above its own average = accumulation kicking in (smarter than a flat
+// absolute threshold, which biases toward sleepy low-churn names). Global market
+// data — NOT user-scoped (same pattern as tax_slabs / cost_inflation_index).
+export const agentDeliveryHistory = pgTable('agent_delivery_history', {
+  id: serial('id').primaryKey(),
+  tradeDate: text('trade_date').notNull(),        // YYYY-MM-DD (IST session)
+  symbol: text('symbol').notNull(),               // NSE symbol, no suffix
+  deliveryPct: real('delivery_pct').notNull(),    // 0..100
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [
+  uniqueIndex('agent_delivery_hist_unique_idx').on(table.tradeDate, table.symbol),
+  index('agent_delivery_hist_symbol_idx').on(table.symbol),
+]);
+export type AgentDeliveryHistory = typeof agentDeliveryHistory.$inferSelect;
+
 // One row per daily run — the idempotency anchor (unique on user+runDate).
 export const agentRuns = pgTable('agent_runs', {
   id: serial('id').primaryKey(),

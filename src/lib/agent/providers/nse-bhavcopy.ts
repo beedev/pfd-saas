@@ -60,32 +60,42 @@ function parseBhav(csv: string): Map<string, BhavRow> {
   return out;
 }
 
+/** Fetch + parse one specific date's archive (null if weekend/holiday/missing). */
+async function fetchDateRows(d: Date, cookies: string): Promise<Map<string, BhavRow> | null> {
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return null;                 // weekend
+  try {
+    const res = await fetch(`${ARCHIVE}${ddmmyyyy(d)}.csv`, {
+      headers: { 'User-Agent': UA, Referer: 'https://www.nseindia.com/', ...(cookies ? { Cookie: cookies } : {}) },
+    });
+    if (!res.ok) return null;
+    const csv = await res.text();
+    if (csv.length < 5000 || !csv.includes('DELIV_PER')) return null;
+    const map = parseBhav(csv);
+    return map.size > 100 ? map : null;
+  } catch { return null; }
+}
+
 /** Fetch the most recent available bhavcopy (walks back up to 6 days over weekends/holidays). */
 export async function getBhavcopy(): Promise<Map<string, BhavRow>> {
   const today = new Date();
   const key = ddmmyyyy(today);
   if (cache.has(key)) return cache.get(key)!;
-
   let cookies = '';
-  try { cookies = await nseCookies(); } catch { /* proceed without — archive sometimes serves anyway */ }
-
+  try { cookies = await nseCookies(); } catch { /* archive sometimes serves without */ }
   for (let back = 0; back <= 6; back++) {
-    const d = new Date(today.getTime() - back * 86400000);
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) continue;                  // skip weekends
-    try {
-      const res = await fetch(`${ARCHIVE}${ddmmyyyy(d)}.csv`, {
-        headers: { 'User-Agent': UA, Referer: 'https://www.nseindia.com/', ...(cookies ? { Cookie: cookies } : {}) },
-      });
-      if (!res.ok) continue;
-      const csv = await res.text();
-      if (csv.length < 5000 || !csv.includes('DELIV_PER')) continue;
-      const map = parseBhav(csv);
-      if (map.size > 100) { cache.set(key, map); return map; }
-    } catch { /* try the previous day */ }
+    const rows = await fetchDateRows(new Date(today.getTime() - back * 86400000), cookies);
+    if (rows) { cache.set(key, rows); return rows; }
   }
   cache.set(key, new Map());                               // negative-cache the miss for this run
   return cache.get(key)!;
+}
+
+/** Fetch a specific past date's bhavcopy (used by the delivery-history backfill). */
+export async function getBhavcopyForDate(d: Date): Promise<Map<string, BhavRow> | null> {
+  let cookies = '';
+  try { cookies = await nseCookies(); } catch { /* archive sometimes serves without */ }
+  return fetchDateRows(d, cookies);
 }
 
 /** Convenience: look up one symbol (accepts "RELIANCE" or "RELIANCE.NS"). */
