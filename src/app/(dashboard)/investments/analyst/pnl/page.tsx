@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { Card, CardHeader, CardContent, Badge, Button } from '@dxp/ui';
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 
-interface Inflight { symbol: string; name: string; side: string; qty: number; entryPaisa: number; lastPaisa: number | null; marketPaisa: number; unrealPaisa: number }
+interface Inflight { symbol: string; name: string; side: string; qty: number; entryPaisa: number; lastPaisa: number | null; investedPaisa: number; marketPaisa: number; unrealPaisa: number }
 interface Ledger { symbol: string; name: string; side: string; qty: number; exitPaisa: number; realizedPaisa: number }
 interface Bucket {
   key: string; name: string; type: 'intraday' | 'swing';
@@ -83,34 +83,30 @@ export default function PnlPage() {
                         <td className={`pr-2 text-right font-semibold ${col(b.dailyPnlPaisa)}`}>{signed(b.dailyPnlPaisa)}</td>
                         <td className="pr-1 text-slate-400">{hasDetail ? (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : null}</td>
                       </tr>
-                      {isOpen && (
-                        <tr key={b.key + '-d'} className="bg-slate-50/60"><td colSpan={6} className="px-3 py-3">
-                          {b.inflight.length > 0 && (
-                            <div className="mb-3">
-                              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">{b.type === 'intraday' ? 'In-flight (open trades)' : 'Held positions'}</div>
-                              <table className="w-full text-xs"><tbody>{b.inflight.map((f) => (
-                                <tr key={f.symbol} className="border-b border-slate-100">
-                                  <td className="py-1 pr-2 font-medium text-slate-700">{f.name}</td><td className="pr-2 text-slate-400">{f.side} ×{f.qty}</td>
-                                  <td className="pr-2 text-right text-slate-500">entry {inr(f.entryPaisa)}</td><td className="pr-2 text-right text-slate-500">now {f.lastPaisa != null ? inr(f.lastPaisa) : '—'}</td>
-                                  <td className="pr-2 text-right">{inr(f.marketPaisa)}</td><td className={`pr-2 text-right font-semibold ${col(f.unrealPaisa)}`}>{signed(f.unrealPaisa)}</td>
-                                </tr>
-                              ))}</tbody></table>
-                            </div>
-                          )}
-                          {b.ledger.length > 0 && (
-                            <div>
-                              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Today&apos;s closed round-trips → {signed(b.realizedTodayPaisa)}</div>
-                              <table className="w-full text-xs"><tbody>{b.ledger.map((l, i) => (
-                                <tr key={i} className="border-b border-slate-100">
-                                  <td className="py-1 pr-2 font-medium text-slate-700">{l.name}</td><td className="pr-2 text-slate-400">{l.side} ×{l.qty}</td>
-                                  <td className="pr-2 text-right text-slate-500">exit {inr(l.exitPaisa)}</td>
-                                  <td className={`pr-2 text-right font-semibold ${col(l.realizedPaisa)}`}>{signed(l.realizedPaisa)}</td>
-                                </tr>
-                              ))}</tbody></table>
-                            </div>
-                          )}
-                        </td></tr>
+                      {isOpen && b.inflight.length > 0 && (
+                        <tr key={b.key + '-hh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={6}>{b.type === 'intraday' ? 'In-flight — open trades' : 'Held positions'}</td></tr>
                       )}
+                      {isOpen && b.inflight.map((f) => (
+                        <tr key={b.key + '-p-' + f.symbol} className="border-b border-slate-100 bg-slate-50/40 text-xs">
+                          <td className="py-1.5 pl-6 pr-2"><span className="font-medium text-slate-700">{f.name}</span> <span className="text-slate-400">(Ent {inr(f.entryPaisa)}) · {f.side} ×{f.qty}</span></td>
+                          <td className="pr-2 text-right text-slate-500">{inr(f.investedPaisa)}</td>
+                          <td className="pr-2 text-right"><span className="font-medium text-slate-700">{inr(f.marketPaisa)}</span> <span className="text-slate-400">· now {f.lastPaisa != null ? inr(f.lastPaisa) : '—'}</span></td>
+                          <td className="pr-2 text-right text-slate-300">—</td>
+                          <td className={`pr-2 text-right font-semibold ${col(f.unrealPaisa)}`}>{signed(f.unrealPaisa)}</td>
+                          <td className="pr-1"></td>
+                        </tr>
+                      ))}
+                      {isOpen && b.ledger.length > 0 && (
+                        <tr key={b.key + '-lh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={6}>Closed round-trips today → <span className={col(b.realizedTodayPaisa)}>{signed(b.realizedTodayPaisa)}</span></td></tr>
+                      )}
+                      {isOpen && b.ledger.map((l, i) => (
+                        <tr key={b.key + '-l-' + i} className="border-b border-slate-100 bg-slate-50/40 text-xs">
+                          <td className="py-1.5 pl-6 pr-2"><span className="font-medium text-slate-700">{l.name}</span> <span className="text-slate-400">(Exit {inr(l.exitPaisa)}) · {l.side} ×{l.qty}</span></td>
+                          <td className="pr-2"></td><td className="pr-2"></td><td className="pr-2"></td>
+                          <td className={`pr-2 text-right font-semibold ${col(l.realizedPaisa)}`}>{signed(l.realizedPaisa)}</td>
+                          <td className="pr-1"></td>
+                        </tr>
+                      ))}
                     </Fragment>
                   );
                 })}</tbody>

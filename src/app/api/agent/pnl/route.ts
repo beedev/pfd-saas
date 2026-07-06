@@ -52,7 +52,8 @@ export async function GET() {
       // Equity contribution: LONG = market value (cash WAS spent at entry, so add it back);
       // SHORT = P&L only (no cash spent). At EOD intraday is flat → posVal 0 → equity = cash.
       posVal += p.side === 'SHORT' ? u : exposure;
-      return { symbol: p.symbol, name: p.name, side: p.side, qty: p.quantity, entryPaisa: p.avgPricePaisa, lastPaisa: last, marketPaisa: exposure, unrealPaisa: u };
+      const invested = Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier);   // entry × qty
+      return { symbol: p.symbol, name: p.name, side: p.side, qty: p.quantity, entryPaisa: p.avgPricePaisa, lastPaisa: last, investedPaisa: invested, marketPaisa: exposure, unrealPaisa: u };
     });
     const equity = cash + posVal;
     const sTrades = trades.filter((t) => t.sleeveId === s.id);
