@@ -66,7 +66,7 @@ export async function GET() {
 
     return {
       key: s.key, name: s.name, type: intraday ? 'intraday' as const : 'swing' as const,
-      corpusPaisa: corpus, cashPaisa: cash, positionsValuePaisa: positionsEquityPaisa, equityPaisa: equity,
+      corpusPaisa: corpus, cashPaisa: cash, positionsValuePaisa: posVal, equityPaisa: equity,
       openingPaisa: opening, realizedTodayPaisa: realizedToday, realizedAllPaisa: realizedAll, unrealizedPaisa: unreal,
       dailyPnlPaisa: equity - opening, overallPnlPaisa: equity - corpus,
       openCount: sPos.length, inflight, ledger,
