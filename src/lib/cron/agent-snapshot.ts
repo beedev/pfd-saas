@@ -63,7 +63,6 @@ export async function recordDailySnapshot(userId: string): Promise<SnapshotResul
   const todaysCloses = await db.select({ sleeveId: agentTrades.sleeveId, pnl: agentTrades.realizedPnlPaisa })
     .from(agentTrades).where(and(eq(agentTrades.userId, userId), eq(agentTrades.tradeDate, date), isNotNull(agentTrades.realizedPnlPaisa)));
   for (const s of sleeves) {
-    const intraday = s.cadence === 'INTRADAY';
     const sPos = positions.filter((p) => p.sleeveId === s.id);
     let posVal = 0, unreal = 0;
     for (const p of sPos) {
@@ -72,8 +71,9 @@ export async function recordDailySnapshot(userId: string): Promise<SnapshotResul
       const dir = p.side === 'SHORT' ? -1 : 1;
       const u = Math.round((last - p.avgPricePaisa) * p.quantity * p.contractMultiplier * dir);   // side-aware
       unreal += u;
-      // Intraday settles to cash (posVal 0); swing: long = market value, short = its P&L.
-      if (!intraday) posVal += p.side === 'SHORT' ? u : Math.round(last * p.quantity * p.contractMultiplier);
+      // In-flight equity: LONG = market value (cash spent at entry); SHORT = P&L only.
+      // Intraday ends flat → posVal 0 → equity = cash.
+      posVal += p.side === 'SHORT' ? u : Math.round(last * p.quantity * p.contractMultiplier);
     }
     const sCash = s.cashBalancePaisa ?? 0;
     const sEquity = sCash + posVal;

@@ -40,7 +40,7 @@ export async function GET() {
     const corpus = s.allocationPaisa;
     const cash = s.cashBalancePaisa ?? 0;
     const sPos = positions.filter((p) => p.sleeveId === s.id);
-    let swingPosVal = 0, unreal = 0;
+    let posVal = 0, unreal = 0;
     const inflight = sPos.map((p) => {
       const cur = px.get(p.symbol);
       const last = cur != null ? Math.round(cur * 100) : null;
@@ -49,13 +49,12 @@ export async function GET() {
       const u = last != null ? Math.round((last - p.avgPricePaisa) * p.quantity * p.contractMultiplier * dir) : 0;
       const exposure = last != null ? Math.round(last * p.quantity * p.contractMultiplier) : Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier);
       unreal += u;
-      // Swing equity contribution: long = market value (cash was spent at entry); short =
-      // just its P&L (no cash spent at entry). Intraday adds NOTHING — it settles to cash.
-      if (!intraday) swingPosVal += p.side === 'SHORT' ? u : exposure;
+      // Equity contribution: LONG = market value (cash WAS spent at entry, so add it back);
+      // SHORT = P&L only (no cash spent). At EOD intraday is flat → posVal 0 → equity = cash.
+      posVal += p.side === 'SHORT' ? u : exposure;
       return { symbol: p.symbol, name: p.name, side: p.side, qty: p.quantity, entryPaisa: p.avgPricePaisa, lastPaisa: last, marketPaisa: exposure, unrealPaisa: u };
     });
-    const positionsEquityPaisa = intraday ? 0 : swingPosVal;   // intraday balance = cash only
-    const equity = cash + positionsEquityPaisa;
+    const equity = cash + posVal;
     const sTrades = trades.filter((t) => t.sleeveId === s.id);
     const realizedToday = sTrades.filter((t) => t.tradeDate === today).reduce((a, t) => a + (t.realizedPnlPaisa ?? 0), 0);
     const realizedAll = sTrades.reduce((a, t) => a + (t.realizedPnlPaisa ?? 0), 0);

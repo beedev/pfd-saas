@@ -44,7 +44,7 @@ export default function PnlPage() {
         <Button variant="ghost" size="sm" onClick={load} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh</Button>
       </div>
       <h1 className="text-2xl font-bold text-slate-900">P&amp;L by bucket</h1>
-      <p className="mt-1 text-sm text-slate-500">Equity = cash + positions marked live. <b>Daily</b> = equity − opening (prior close); <b>Overall</b> = equity − corpus. Intraday buckets settle to cash each day; open trades show as <i>in-flight</i>. {data?.asOf ? `As of ${data.asOf}.` : ''}</p>
+      <p className="mt-1 text-sm text-slate-500"><b>Started</b> = opening · <b>In-flight</b> = equity invested in open positions (live) · <b>Remaining</b> = cash left · <b>P&amp;L</b> = (In-flight + Remaining) − Started. In-flight + Remaining is your equity now; it settles to cash at the 15:15 close and the 16:10 run locks the day&apos;s P&amp;L. {data?.asOf ? `As of ${data.asOf}.` : ''}</p>
 
       {loading && !data ? <div className="mt-10 flex justify-center text-slate-400"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
         <div className="mt-6 space-y-6">
@@ -68,7 +68,7 @@ export default function PnlPage() {
             <CardContent>
               <div className="overflow-x-auto"><table className="w-full text-sm">
                 <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
-                  <th className="py-2 pr-2">Bucket</th><th className="pr-2 text-right">Corpus</th><th className="pr-2 text-right">Cash</th><th className="pr-2 text-right">Positions</th><th className="pr-2 text-right">Equity</th><th className="pr-2 text-right">Realized today</th><th className="pr-2 text-right">Daily P&amp;L</th><th className="pr-2 text-right">Overall</th><th className="pr-1"></th>
+                  <th className="py-2 pr-2">Bucket</th><th className="pr-2 text-right">Started</th><th className="pr-2 text-right">In-flight</th><th className="pr-2 text-right">Remaining</th><th className="pr-2 text-right">P&amp;L</th><th className="pr-1"></th>
                 </tr></thead>
                 <tbody>{(data?.buckets ?? []).map((b) => {
                   const isOpen = open === b.key;
@@ -77,17 +77,14 @@ export default function PnlPage() {
                     <Fragment key={b.key}>
                       <tr className={`border-b border-slate-100 ${hasDetail ? 'cursor-pointer hover:bg-slate-50' : ''}`} onClick={() => hasDetail && setOpen(isOpen ? null : b.key)}>
                         <td className="py-2 pr-2"><span className="font-semibold text-slate-800">{b.name}</span> <Badge variant="default">{b.type}</Badge></td>
-                        <td className="pr-2 text-right text-slate-500">{inr(b.corpusPaisa)}</td>
+                        <td className="pr-2 text-right text-slate-500">{inr(b.openingPaisa)}</td>
+                        <td className="pr-2 text-right">{b.positionsValuePaisa ? inr(b.positionsValuePaisa) : '—'}{b.openCount > 0 ? <span className="ml-1 text-[10px] text-amber-500">live·{b.openCount}</span> : ''}</td>
                         <td className="pr-2 text-right">{inr(b.cashPaisa)}</td>
-                        <td className="pr-2 text-right">{b.positionsValuePaisa ? inr(b.positionsValuePaisa) : '—'}{b.type === 'intraday' && b.openCount > 0 ? <span className="ml-1 text-[10px] text-amber-500">in-flight</span> : ''}</td>
-                        <td className="pr-2 text-right font-medium">{inr(b.equityPaisa)}</td>
-                        <td className={`pr-2 text-right ${col(b.realizedTodayPaisa)}`}>{b.realizedTodayPaisa ? signed(b.realizedTodayPaisa) : '—'}</td>
                         <td className={`pr-2 text-right font-semibold ${col(b.dailyPnlPaisa)}`}>{signed(b.dailyPnlPaisa)}</td>
-                        <td className={`pr-2 text-right font-semibold ${col(b.overallPnlPaisa)}`}>{signed(b.overallPnlPaisa)}</td>
                         <td className="pr-1 text-slate-400">{hasDetail ? (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : null}</td>
                       </tr>
                       {isOpen && (
-                        <tr key={b.key + '-d'} className="bg-slate-50/60"><td colSpan={9} className="px-3 py-3">
+                        <tr key={b.key + '-d'} className="bg-slate-50/60"><td colSpan={6} className="px-3 py-3">
                           {b.inflight.length > 0 && (
                             <div className="mb-3">
                               <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">{b.type === 'intraday' ? 'In-flight (open trades)' : 'Held positions'}</div>
