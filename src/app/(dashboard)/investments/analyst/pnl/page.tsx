@@ -101,8 +101,10 @@ export default function PnlPage() {
                       )}
                       {isOpen && b.ledger.map((l, i) => (
                         <tr key={b.key + '-l-' + i} className="border-b border-slate-100 bg-slate-50/40 text-xs">
-                          <td className="py-1.5 pl-6 pr-2"><span className="font-medium text-slate-700">{l.name}</span> <span className="text-slate-400">(Exit {inr(l.exitPaisa)}) · {l.side} ×{l.qty}</span></td>
-                          <td className="pr-2"></td><td className="pr-2"></td><td className="pr-2"></td>
+                          <td className="py-1.5 pl-6 pr-2"><span className="font-medium text-slate-700">{l.name}</span> <span className="text-slate-400">{l.side} ×{l.qty} @ exit {inr(l.exitPaisa)}</span></td>
+                          <td className="pr-2"></td>
+                          <td className="pr-2 text-right text-slate-500"><span className="font-medium text-slate-700">{inr(l.exitPaisa * l.qty)}</span> <span className="text-slate-400">· {l.qty} sh</span></td>
+                          <td className="pr-2"></td>
                           <td className={`pr-2 text-right font-semibold ${col(l.realizedPaisa)}`}>{signed(l.realizedPaisa)}</td>
                           <td className="pr-1"></td>
                         </tr>
