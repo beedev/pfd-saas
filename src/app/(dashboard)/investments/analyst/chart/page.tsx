@@ -35,12 +35,6 @@ const clock = (sec?: number | null) => (sec ? new Date(sec * 1000).toLocaleTimeS
 
 export default function ChartPage() {
   const [symbol, setSymbol] = useState('RELIANCE.NS');
-  // Deep-link: /investments/analyst/chart?symbol=ACUTAAS.NS (e.g. from the watchlist)
-  // → jump straight to that stock AND auto-enable live so you don't have to click it.
-  useEffect(() => {
-    const s = new URLSearchParams(window.location.search).get('symbol');
-    if (s) { setSymbol(s); setLive(true); }
-  }, []);
   const [range, setRange] = useState('1y');
   const [live, setLive] = useState(false);
   const [bars, setBars] = useState<Bar[]>([]);
@@ -81,17 +75,27 @@ export default function ChartPage() {
     return { bars: out, sym };
   }, [range, liveInterval]);
 
-  const load = useCallback(async (override?: string) => {
+  const load = useCallback(async (override?: string, forceLive?: boolean) => {
     const want = (override ?? symbol).trim();
     if (!want) { toast.info('Enter a symbol or company name'); return; }
     setShowHits(false); setIsLoading(true);
     try {
-      const { bars: out, sym } = await loadCandles(want, live);
+      const useLive = forceLive ?? live;
+      const { bars: out, sym } = await loadCandles(want, useLive);
       setBars(out); setLoaded(sym.toUpperCase()); loadedRef.current = sym.toUpperCase();
-      if (!out.length) toast.info(live ? 'No intraday data (market may be closed)' : 'No data — try the search suggestions');
+      if (!out.length) toast.info(useLive ? 'No intraday data (market may be closed)' : 'No data — try the search suggestions');
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed to load'); }
     finally { setIsLoading(false); }
   }, [symbol, live, loadCandles]);
+
+  // Deep-link (?symbol=…, e.g. from the watchlist) → jump to that stock, turn on
+  // live, and LOAD the chart automatically — no manual "Load" click needed.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current) return;
+    const s = new URLSearchParams(window.location.search).get('symbol');
+    if (s) { deepLinked.current = true; setSymbol(s); setLive(true); load(s, true); }
+  }, [load]);
 
   // Live polling: price banner + DOM + refreshing 5-min candles, every 15s.
   useEffect(() => {
