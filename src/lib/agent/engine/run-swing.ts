@@ -23,6 +23,7 @@ import { atr } from '../signals/indicators';
 import type { SleeveRunResult } from './run-sleeve';
 
 export type SwingHorizon = 'INTRADAY' | 'SHORT' | 'LONG';
+const VALIDATION_MIN_QTY = 4;   // paper: bump high-priced picks to ≥4 shares (never drop a leader for price)
 const istDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const daysBetween = (fromIso: string, toIso: string) => Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
 
@@ -139,9 +140,13 @@ export async function runSwing(
     }
     // Validation target = clean 2:1 reward:risk off the actual stop distance; else the horizon %.
     const target = fixedNotional > 0 ? entry + 2 * (entry - stopPaisa) : entry + Math.round((entry * p.targetPct) / 100);
-    const qty = fixedNotional > 0
+    let qty = fixedNotional > 0
       ? Math.floor(fixedNotional / entry)
       : sizeQty(entry, stopPaisa, 'LONG', { allocationPaisa: sleeve.allocationPaisa, cashBalancePaisa: cash, grossDeployedPaisa: grossDeployed, riskPctPerTrade: p.riskPctPerTrade });
+    // Paper money: BUMP high-priced names up to a minimum quantity rather than dropping
+    // them — so even a ₹14k share gets a real position. We score by per-pick return %
+    // (size-independent), so keeping every leader beats a clean-but-partial book.
+    if (fixedNotional > 0) qty = Math.max(qty, VALIDATION_MIN_QTY);
     if (qty < 1 || entry * qty > cash) continue;
     const label = opts.horizon === 'INTRADAY' ? 'intraday pick' : opts.horizon === 'LONG' ? '2-3mo pick' : '2-3d pick';
     const rationale = `${label} → LONG ${c.symbol} @ ₹${(entry / 100).toFixed(2)} — ${rule}; target ₹${(target / 100).toFixed(2)} (+${p.targetPct}%), stop ₹${(stopPaisa / 100).toFixed(2)}.`;

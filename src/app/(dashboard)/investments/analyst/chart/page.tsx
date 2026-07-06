@@ -35,6 +35,11 @@ const clock = (sec?: number | null) => (sec ? new Date(sec * 1000).toLocaleTimeS
 
 export default function ChartPage() {
   const [symbol, setSymbol] = useState('RELIANCE.NS');
+  // Deep-link: /investments/analyst/chart?symbol=ACUTAAS.NS (e.g. from the watchlist).
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get('symbol');
+    if (s) setSymbol(s);
+  }, []);
   const [range, setRange] = useState('1y');
   const [live, setLive] = useState(false);
   const [bars, setBars] = useState<Bar[]>([]);

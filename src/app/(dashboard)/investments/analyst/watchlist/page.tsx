@@ -67,7 +67,7 @@ export default function WatchlistPage() {
                   <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500"><th className="py-2 pr-3">Name</th><th className="pr-3">Sector</th><th className="pr-3">Added</th><th className="pr-3 text-right">Entry</th><th className="pr-3 text-right">Current</th><th className="pr-3 text-right">Growth/Loss</th><th className="pr-3 text-right">Tgt / Stop</th></tr></thead>
                   <tbody>{held.map((h) => (
                     <tr key={h.symbol} className="border-b border-slate-100">
-                      <td className="py-2 pr-3"><span className="font-semibold text-slate-900">{h.name}</span> <span className="text-xs text-slate-400">×{h.quantity}</span></td>
+                      <td className="py-2 pr-3"><Link href={`/investments/analyst/chart?symbol=${h.symbol}`} className="font-semibold text-indigo-700 hover:underline">{h.name}</Link> <span className="text-xs text-slate-400">×{h.quantity}</span></td>
                       <td className="pr-3 text-xs text-slate-500">{sec(h.sector)}</td>
                       <td className="pr-3 text-xs text-slate-500">{h.entryDate} <span className="text-slate-400">({h.daysHeld}d)</span></td>
                       <td className="pr-3 text-right">{inr(h.entryPrice)}</td>
@@ -89,7 +89,7 @@ export default function WatchlistPage() {
                   <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500"><th className="py-2 pr-3">Name</th><th className="pr-3">Sector</th><th className="pr-3 text-right">Score</th><th className="pr-3 text-right">Buy ~</th><th className="pr-3 text-right">Target</th><th className="pr-3 text-right">Stop</th><th className="pr-3">Src</th></tr></thead>
                   <tbody>{toBuy.map((p) => (
                     <tr key={p.symbol} className="border-b border-slate-100">
-                      <td className="py-2 pr-3 font-semibold text-slate-900">{p.name}</td>
+                      <td className="py-2 pr-3"><Link href={`/investments/analyst/chart?symbol=${p.symbol}`} className="font-semibold text-indigo-700 hover:underline">{p.name}</Link></td>
                       <td className="pr-3 text-xs text-slate-500">{sec(p.sector)}</td>
                       <td className="pr-3 text-right">{p.score != null ? <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700">{p.score}</span> : '—'}</td>
                       <td className="pr-3 text-right">{inr(p.suggestedBuy)}</td>
