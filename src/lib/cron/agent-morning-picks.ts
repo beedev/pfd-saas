@@ -24,6 +24,7 @@ import { sendTelegramToUser } from '@/lib/services/telegram';
 
 const MIN_LIQUIDITY_CR = 5;      // hard gate: untradeable below ₹5 cr/day
 const DELIV_FLOOR = 25;          // hard gate: kill pure intraday froth (delivery < 25%)
+const MAX_PICK_PRICE = 5000;     // hard gate: too pricey to equal-weight at ₹20K (≥4 shares) — skip
 const MAX_CANDIDATES = 40;
 const MAX_MULTIDAY = 15;         // top-scored 2-3mo picks per day
 const MAX_PER_SECTOR = 3;        // concentration cap — momentum clusters, but don't over-bet one sector
@@ -95,12 +96,14 @@ export async function runMorningPicks(userId: string): Promise<MorningPicksResul
     }
     if (r.stage !== 'STAGE2') continue;                                  // hard gate: must be advancing
     if (deliv != null && deliv < DELIV_FLOOR) continue;                  // hard gate: kill pure froth
+    const buyPx = priceOf(sym);
+    if (buyPx != null && buyPx > MAX_PICK_PRICE) continue;               // hard gate: too pricey to equal-weight at ₹20K
     momentum.push({
       sym, name: r.symbol,
       rsExcess: ret6mo(bars.map((b) => b.close)) - idxRet,
       spikeRatio: deliverySpike(deliv, normOf(sym)).ratio,
       relVol: relativeVolume(volOf(sym), normOf(sym)),
-      deliv, buy: priceOf(sym), atrFrac: atrStopFrac(bars.map((b) => ({ high: b.high, low: b.low, close: b.close }))),
+      deliv, buy: buyPx, atrFrac: atrStopFrac(bars.map((b) => ({ high: b.high, low: b.low, close: b.close }))),
       source: screenSet.has(sym) ? 'screen' : announcedSet.has(sym) ? 'announcement' : 'news',
       sector: sectorOf(sym), score: 0,
     });
