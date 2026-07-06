@@ -125,6 +125,7 @@ export async function runSwing(
       const closes = bars.map((b) => b.close);
       if (closes.length < 60 || !isStage2(closes)) continue;
       const px = closes[closes.length - 1];
+      if (px > 5000) continue;   // ₹5k price cap — pricier names can't be equal-weighted at ₹20K (belt to the pipeline cap)
       const a = atr(bars.map((b) => ({ high: b.high, low: b.low, close: b.close })), 14);
       const rawStop = a != null && a > 0 ? px - 2 * a : px * 0.92;
       const stopPx = Math.min(Math.max(rawStop, px * 0.90), px * 0.96);   // clamp: never risk >10% or <4%

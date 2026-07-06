@@ -35,10 +35,11 @@ const clock = (sec?: number | null) => (sec ? new Date(sec * 1000).toLocaleTimeS
 
 export default function ChartPage() {
   const [symbol, setSymbol] = useState('RELIANCE.NS');
-  // Deep-link: /investments/analyst/chart?symbol=ACUTAAS.NS (e.g. from the watchlist).
+  // Deep-link: /investments/analyst/chart?symbol=ACUTAAS.NS (e.g. from the watchlist)
+  // → jump straight to that stock AND auto-enable live so you don't have to click it.
   useEffect(() => {
     const s = new URLSearchParams(window.location.search).get('symbol');
-    if (s) setSymbol(s);
+    if (s) { setSymbol(s); setLive(true); }
   }, []);
   const [range, setRange] = useState('1y');
   const [live, setLive] = useState(false);
