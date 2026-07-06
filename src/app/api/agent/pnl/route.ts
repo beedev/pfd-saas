@@ -40,16 +40,22 @@ export async function GET() {
     const corpus = s.allocationPaisa;
     const cash = s.cashBalancePaisa ?? 0;
     const sPos = positions.filter((p) => p.sleeveId === s.id);
-    let posVal = 0, unreal = 0;
+    let swingPosVal = 0, unreal = 0;
     const inflight = sPos.map((p) => {
       const cur = px.get(p.symbol);
       const last = cur != null ? Math.round(cur * 100) : null;
-      const mkt = last != null ? Math.round(last * p.quantity * p.contractMultiplier) : Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier);
-      const u = last != null ? Math.round((last - p.avgPricePaisa) * p.quantity * p.contractMultiplier) : 0;
-      posVal += mkt; unreal += u;
-      return { symbol: p.symbol, name: p.name, side: p.side, qty: p.quantity, entryPaisa: p.avgPricePaisa, lastPaisa: last, marketPaisa: mkt, unrealPaisa: u };
+      const dir = p.side === 'SHORT' ? -1 : 1;
+      // Side-aware unrealized: long = (last − avg); short = (avg − last).
+      const u = last != null ? Math.round((last - p.avgPricePaisa) * p.quantity * p.contractMultiplier * dir) : 0;
+      const exposure = last != null ? Math.round(last * p.quantity * p.contractMultiplier) : Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier);
+      unreal += u;
+      // Swing equity contribution: long = market value (cash was spent at entry); short =
+      // just its P&L (no cash spent at entry). Intraday adds NOTHING — it settles to cash.
+      if (!intraday) swingPosVal += p.side === 'SHORT' ? u : exposure;
+      return { symbol: p.symbol, name: p.name, side: p.side, qty: p.quantity, entryPaisa: p.avgPricePaisa, lastPaisa: last, marketPaisa: exposure, unrealPaisa: u };
     });
-    const equity = cash + posVal;
+    const positionsEquityPaisa = intraday ? 0 : swingPosVal;   // intraday balance = cash only
+    const equity = cash + positionsEquityPaisa;
     const sTrades = trades.filter((t) => t.sleeveId === s.id);
     const realizedToday = sTrades.filter((t) => t.tradeDate === today).reduce((a, t) => a + (t.realizedPnlPaisa ?? 0), 0);
     const realizedAll = sTrades.reduce((a, t) => a + (t.realizedPnlPaisa ?? 0), 0);
@@ -61,7 +67,7 @@ export async function GET() {
 
     return {
       key: s.key, name: s.name, type: intraday ? 'intraday' as const : 'swing' as const,
-      corpusPaisa: corpus, cashPaisa: cash, positionsValuePaisa: posVal, equityPaisa: equity,
+      corpusPaisa: corpus, cashPaisa: cash, positionsValuePaisa: positionsEquityPaisa, equityPaisa: equity,
       openingPaisa: opening, realizedTodayPaisa: realizedToday, realizedAllPaisa: realizedAll, unrealizedPaisa: unreal,
       dailyPnlPaisa: equity - opening, overallPnlPaisa: equity - corpus,
       openCount: sPos.length, inflight, ledger,
