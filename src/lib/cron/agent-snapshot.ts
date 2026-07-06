@@ -7,7 +7,7 @@
  */
 
 import { and, eq, isNotNull } from 'drizzle-orm';
-import { db, agentPortfolios, agentSleeves, agentPositions, agentTrades, agentDailySnapshots } from '@/db';
+import { db, agentPortfolios, agentSleeves, agentPositions, agentTrades, agentDailySnapshots, agentSleeveSnapshots } from '@/db';
 import { getQuotes } from '@/lib/services/yahoo-finance';
 import { isTradingDayNow } from '@/lib/agent/trading-calendar';
 import { sendTelegramToUser } from '@/lib/services/telegram';
@@ -55,6 +55,31 @@ export async function recordDailySnapshot(userId: string): Promise<SnapshotResul
 
   await db.insert(agentDailySnapshots).values({ userId, snapshotDate: date, equityPaisa: equity, cashPaisa: cash, unrealizedPaisa: unrealized, realizedCumPaisa: realizedCum, openPositions: positions.length, closedTrades, winRatePct, peakEquityPaisa: peak, drawdownPct })
     .onConflictDoUpdate({ target: [agentDailySnapshots.userId, agentDailySnapshots.snapshotDate], set: { equityPaisa: equity, cashPaisa: cash, unrealizedPaisa: unrealized, realizedCumPaisa: realizedCum, openPositions: positions.length, closedTrades, winRatePct, peakEquityPaisa: peak, drawdownPct } });
+
+  // ---- Per-sleeve closing balances (roll-forward ledger for the P&L panel) ----
+  // Each sleeve's closing equity becomes its next-day opening. Opening at inception
+  // (no prior snapshot) = corpus. Intraday sleeves end flat so equity = cash.
+  const priorSleeveSnaps = await db.select().from(agentSleeveSnapshots).where(eq(agentSleeveSnapshots.userId, userId));
+  const todaysCloses = await db.select({ sleeveId: agentTrades.sleeveId, pnl: agentTrades.realizedPnlPaisa })
+    .from(agentTrades).where(and(eq(agentTrades.userId, userId), eq(agentTrades.tradeDate, date), isNotNull(agentTrades.realizedPnlPaisa)));
+  for (const s of sleeves) {
+    const sPos = positions.filter((p) => p.sleeveId === s.id);
+    let posVal = 0, unreal = 0;
+    for (const p of sPos) {
+      const cur = px.get(p.symbol);
+      if (cur == null) { posVal += Math.round(p.avgPricePaisa * p.quantity * p.contractMultiplier); continue; }
+      posVal += Math.round(cur * 100 * p.quantity * p.contractMultiplier);
+      unreal += Math.round((cur * 100 - p.avgPricePaisa) * p.quantity * p.contractMultiplier);
+    }
+    const sCash = s.cashBalancePaisa ?? 0;
+    const sEquity = sCash + posVal;
+    const corpus = s.allocationPaisa;
+    const dailyRealized = todaysCloses.filter((t) => t.sleeveId === s.id).reduce((a, t) => a + (t.pnl ?? 0), 0);
+    const priorForSleeve = priorSleeveSnaps.filter((x) => x.sleeveId === s.id && x.snapshotDate < date).sort((a, b) => (a.snapshotDate < b.snapshotDate ? 1 : -1));
+    const opening = priorForSleeve.length ? priorForSleeve[0].equityPaisa : corpus;
+    const row = { userId, sleeveId: s.id, snapshotDate: date, corpusPaisa: corpus, openingPaisa: opening, cashPaisa: sCash, positionsValuePaisa: posVal, equityPaisa: sEquity, dailyRealizedPaisa: dailyRealized, dailyUnrealizedPaisa: unreal, dailyPnlPaisa: sEquity - opening, overallPnlPaisa: sEquity - corpus, openPositions: sPos.length };
+    await db.insert(agentSleeveSnapshots).values(row).onConflictDoUpdate({ target: [agentSleeveSnapshots.sleeveId, agentSleeveSnapshots.snapshotDate], set: row });
+  }
 
   const msg = `📊 *Artha EOD · ${date}*\nEquity *${rup(equity)}*  (${totalReturnPct >= 0 ? '+' : ''}${totalReturnPct}% since start)\n${positions.length} open · unrealized ${rup(unrealized)} · realized ${rup(realizedCum)}\n${closedTrades} closed · win ${winRatePct}% · drawdown ${drawdownPct}%`;
   await sendTelegramToUser(userId, msg).catch(() => {});

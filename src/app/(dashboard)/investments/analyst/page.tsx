@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 
 import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay } from '@dxp/ui';
-import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, FlaskConical, CandlestickChart, Receipt, Sparkles } from 'lucide-react';
+import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, FlaskConical, CandlestickChart, Receipt, Sparkles, Wallet } from 'lucide-react';
 
 import { Disclaimer } from './_components/Disclaimer';
 import { EquityCurveChart } from './_components/EquityCurveChart';
@@ -113,6 +113,7 @@ export default function AnalystPage() {
         <div className="flex gap-2">
           <Link href="/investments/analyst/picks"><Button variant="secondary"><Sparkles className="mr-2 h-4 w-4" />Today&apos;s Picks</Button></Link>
           <Link href="/investments/analyst/study"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Study</Button></Link>
+          <Link href="/investments/analyst/pnl"><Button variant="secondary"><Wallet className="mr-2 h-4 w-4" />P&amp;L</Button></Link>
           <Link href="/investments/analyst/exit-review"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Exit Review</Button></Link>
           <Link href="/investments/analyst/watchlist"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Watchlist</Button></Link>
           <Link href="/investments/analyst/backtest"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Backtest</Button></Link>

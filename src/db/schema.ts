@@ -3664,6 +3664,30 @@ export const agentDailySnapshots = pgTable('agent_daily_snapshots', {
 }, (table) => [uniqueIndex('agent_daily_snap_unique_idx').on(table.userId, table.snapshotDate)]);
 export type AgentDailySnapshot = typeof agentDailySnapshots.$inferSelect;
 
+// Per-SLEEVE daily closing balance — the roll-forward ledger behind the per-bucket
+// P&L panel. Each day at EOD we stamp every sleeve's closing equity; that becomes
+// the next day's OPENING balance. Daily P&L = equity − opening; overall = equity −
+// corpus. Intraday sleeves end flat so equity = cash; swing sleeves carry positions
+// so equity = cash + marked positions. Read-only reporting; drives no strategy.
+export const agentSleeveSnapshots = pgTable('agent_sleeve_snapshots', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sleeveId: integer('sleeve_id').notNull().references(() => agentSleeves.id, { onDelete: 'cascade' }),
+  snapshotDate: text('snapshot_date').notNull(),                          // YYYY-MM-DD IST (closing day)
+  corpusPaisa: bigint('corpus_paisa', { mode: 'number' }).notNull(),      // sleeve allocation (constant)
+  openingPaisa: bigint('opening_paisa', { mode: 'number' }).notNull(),    // prior close (corpus at inception)
+  cashPaisa: bigint('cash_paisa', { mode: 'number' }).notNull(),          // closing cash (undeployed + settled)
+  positionsValuePaisa: bigint('positions_value_paisa', { mode: 'number' }).notNull().default(0), // marked positions
+  equityPaisa: bigint('equity_paisa', { mode: 'number' }).notNull(),      // closing balance = cash + positions
+  dailyRealizedPaisa: bigint('daily_realized_paisa', { mode: 'number' }).notNull().default(0),
+  dailyUnrealizedPaisa: bigint('daily_unrealized_paisa', { mode: 'number' }).notNull().default(0),
+  dailyPnlPaisa: bigint('daily_pnl_paisa', { mode: 'number' }).notNull().default(0),      // equity − opening
+  overallPnlPaisa: bigint('overall_pnl_paisa', { mode: 'number' }).notNull().default(0),  // equity − corpus
+  openPositions: integer('open_positions').notNull().default(0),
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow(),
+}, (table) => [uniqueIndex('agent_sleeve_snap_unique_idx').on(table.sleeveId, table.snapshotDate)]);
+export type AgentSleeveSnapshot = typeof agentSleeveSnapshots.$inferSelect;
+
 // Run-health (1 row/day/user) — did the morning pipeline actually run, and was the
 // data good? Distinguishes "no trade because no signal" from "no trade because a
 // data source failed" — essential so a silent breakage doesn't corrupt the study.
