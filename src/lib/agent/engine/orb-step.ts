@@ -37,8 +37,17 @@ export interface OrbParams {
   riskPctPerTrade: number;
   targetR: number;
   maxConcurrent: number;
+  trailAfterTarget?: boolean;   // once the target is hit, DON'T exit — trail a stop up instead (momentum: ride trend days)
+  trailAtrMult?: number;        // trailing distance = N × intraday ATR below the running high (floored at the target)
 }
-export const ORB_DEFAULTS: OrbParams = { openingRangeMins: 30, riskPctPerTrade: 0.75, targetR: 1.5, maxConcurrent: 5 };
+export const ORB_DEFAULTS: OrbParams = { openingRangeMins: 30, riskPctPerTrade: 0.75, targetR: 1.5, maxConcurrent: 5, trailAfterTarget: true, trailAtrMult: 1.5 };
+
+/** Simple intraday ATR proxy (avg high-low over the last ~14 bars), in paisa. */
+function intradayAtrPaisa(bars: IntradayBar[]): number {
+  const recent = bars.slice(-14);
+  if (!recent.length) return 0;
+  return Math.round((recent.reduce((a, b) => a + (b.high - b.low), 0) / recent.length) * 100);
+}
 
 /** Resolve a sleeve's stored params over the defaults. */
 export function resolveOrbParams(paramsJson: Record<string, unknown> | null | undefined): OrbParams {
@@ -141,18 +150,34 @@ export function planIntradayTick(snap: TickSnapshot): TickPlan {
       const orHigh = orBars.length ? Math.round(Math.max(...orBars.map((b) => b.high)) * 100) : existing.avgPricePaisa;
       const orLow = orBars.length ? Math.round(Math.min(...orBars.map((b) => b.low)) * 100) : existing.avgPricePaisa;
       const long = existing.side === 'LONG';
-      const stop = long ? orLow : orHigh;
+      const origStop = long ? orLow : orHigh;
       const target = long
         ? existing.avgPricePaisa + Math.round((existing.avgPricePaisa - orLow) * p.targetR)
         : existing.avgPricePaisa - Math.round((orHigh - existing.avgPricePaisa) * p.targetR);
+      // Trailing after target (momentum): once the session has REACHED the target, stop
+      // exiting at it — trail a stop N×ATR below the running high (above the low for shorts),
+      // floored at the target so the gain is locked but trend days can run to square-off.
+      const sessHigh = Math.round(Math.max(...bars.map((b) => b.high)) * 100);
+      const sessLow = Math.round(Math.min(...bars.map((b) => b.low)) * 100);
+      const targetHit = long ? sessHigh >= target : sessLow <= target;
+      const trailing = !!p.trailAfterTarget && targetHit;
+      const trailStop = trailing
+        ? (long ? Math.max(target, sessHigh - Math.round((p.trailAtrMult ?? 1.5) * intradayAtrPaisa(bars)))
+                : Math.min(target, sessLow + Math.round((p.trailAtrMult ?? 1.5) * intradayAtrPaisa(bars))))
+        : null;
+      const stop = trailStop ?? origStop;
       const stale = existing.openedDate !== snap.runDate;
       const forceOut = now >= SQUARE_OFF || !snap.marketOpen || stale;
       const hitStop = long ? lastPx <= stop : lastPx >= stop;
-      const hitTarget = long ? lastPx >= target : lastPx <= target;
+      // With trailing ON the target no longer triggers an exit — it only arms the trail.
+      const hitTarget = !p.trailAfterTarget && (long ? lastPx >= target : lastPx <= target);
 
       if (forceOut || hitStop || hitTarget) {
         const reason = stale ? 'overnight safety square-off' : !snap.marketOpen ? 'market closed — square-off'
-          : now >= SQUARE_OFF ? '15:15 square-off' : hitStop ? 'stop hit' : 'target hit';
+          : now >= SQUARE_OFF ? '15:15 square-off'
+          : hitTarget ? 'target hit'
+          : trailing ? 'trailing stop hit (rode past target)'
+          : 'stop hit';
         const qty = existing.quantity;
         const notional = Math.round(lastPx * qty * existing.contractMultiplier);
         const grossPnl = Math.round((long ? lastPx - existing.avgPricePaisa : existing.avgPricePaisa - lastPx) * qty * existing.contractMultiplier);
