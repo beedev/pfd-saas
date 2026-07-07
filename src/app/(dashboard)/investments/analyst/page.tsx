@@ -14,10 +14,8 @@ import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay } from '@dxp
 import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, FlaskConical, CandlestickChart, Receipt, Sparkles, Wallet } from 'lucide-react';
 
 import { Disclaimer } from './_components/Disclaimer';
-import { EquityCurveChart } from './_components/EquityCurveChart';
 import { NewsPanel } from './_components/NewsPanel';
 import { BriefPanel } from './_components/BriefPanel';
-import { HoldingsTable, type Position } from './_components/HoldingsTable';
 
 interface Sleeve {
   id: number; key: string; name: string; strategy: string; cadence: string;
@@ -37,7 +35,6 @@ interface Decision {
   id: number; sleeveId: number | null; action: string; assetClass: string; symbol: string; name: string;
   amountPaisa: number | null; rationale: string | null; evidenceJson: Evidence | null;
 }
-interface CurvePoint { date: string; price: number }
 
 const inr = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
 const actionVariant = (a: string): 'success' | 'warning' | 'info' => (a === 'BUY' ? 'success' : a === 'SELL' ? 'warning' : 'info');
@@ -45,10 +42,7 @@ const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'My picks · co
 
 export default function AnalystPage() {
   const [sleeves, setSleeves] = useState<Sleeve[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [equity, setEquity] = useState<CurvePoint[]>([]);
-  const [benchmark, setBenchmark] = useState<CurvePoint[]>([]);
   const [startingCapitalPaisa, setStarting] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -56,18 +50,13 @@ export default function AnalystPage() {
 
   const load = useCallback(async () => {
     try {
-      const [sl, pos, dec, curve] = await Promise.all([
+      const [sl, dec] = await Promise.all([
         fetch('/api/agent/sleeves').then((r) => r.json()),
-        fetch('/api/agent/positions').then((r) => r.json()),
         fetch('/api/agent/decisions').then((r) => r.json()),
-        fetch('/api/agent/portfolio/equity-curve').then((r) => r.json()),
       ]);
       setSleeves(sl.sleeves ?? []);
       setStarting(sl.portfolio?.startingCapitalPaisa ?? 0);
-      setPositions(pos.positions ?? []);
       setDecisions(dec.decisions ?? []);
-      setEquity(curve.equity ?? []);
-      setBenchmark(curve.benchmark ?? []);
     } catch (e) {
       console.error(e);
       toast.error('Failed to load analyst data');
@@ -111,11 +100,10 @@ export default function AnalystPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Link href="/investments/analyst/picks"><Button variant="secondary"><Sparkles className="mr-2 h-4 w-4" />Today&apos;s Picks</Button></Link>
+          <Link href="/investments/analyst/watchlist"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Watchlist · Picks</Button></Link>
           <Link href="/investments/analyst/study"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Study</Button></Link>
           <Link href="/investments/analyst/pnl"><Button variant="secondary"><Wallet className="mr-2 h-4 w-4" />P&amp;L</Button></Link>
           <Link href="/investments/analyst/exit-review"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Exit Review</Button></Link>
-          <Link href="/investments/analyst/watchlist"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Watchlist</Button></Link>
           <Link href="/investments/analyst/backtest"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Backtest</Button></Link>
           <Link href="/investments/analyst/workbench"><Button variant="secondary"><Sparkles className="mr-2 h-4 w-4" />Workbench</Button></Link>
           <Link href="/investments/analyst/chart"><Button variant="secondary"><CandlestickChart className="mr-2 h-4 w-4" />Chart</Button></Link>
@@ -165,13 +153,6 @@ export default function AnalystPage() {
           );
         })}
       </div>
-
-      <HoldingsTable sleeves={sleeves} positions={positions} decisions={decisions} />
-
-      <Card>
-        <CardHeader><h3 className="text-base font-bold text-[var(--dxp-text)]">Total equity vs benchmark (rebased to 100)</h3></CardHeader>
-        <CardContent><EquityCurveChart equity={equity} benchmark={benchmark} /></CardContent>
-      </Card>
 
       <BriefPanel />
 

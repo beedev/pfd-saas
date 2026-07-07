@@ -53,6 +53,7 @@ export async function GET() {
         gainPct: current != null && entry > 0 ? +(((current - entry) / entry) * 100).toFixed(2) : null,
         target: p.targetPaisa != null ? p.targetPaisa / 100 : null, stop: p.stopPaisa != null ? p.stopPaisa / 100 : null,
         entryDate: p.openedDate, daysHeld: daysBetween(p.openedDate), quantity: p.quantity,
+        addedToday: p.openedDate === today,   // distinguish today's fresh entries from existing holds
       };
     });
 
@@ -70,7 +71,16 @@ export async function GET() {
       toBuy.push({ symbol: m.symbol, name: m.name, sector: m.sector ?? null, source: 'manual', score: null, suggestedBuy: m.entryPricePaisa != null ? m.entryPricePaisa / 100 : null, target: null, stop: null, currentPrice: px.get(m.symbol) ?? null });
     }
 
-    return NextResponse.json({ held, toBuy });
+    // Today's INTRADAY signals (folded in from the retired Daily Picks page — kept
+    // compact + separate from the 2-3mo book).
+    const intraday = picks
+      .filter((p) => p.horizon === 'INTRADAY')
+      .map((p) => {
+        const rep = (p.reportJson ?? {}) as Record<string, unknown>;
+        return { symbol: p.symbol, name: p.name, sector: (rep.sector as string) ?? null, source: p.source, score: typeof rep.score === 'number' ? Math.round(rep.score * 100) : null, suggestedBuy: rep.suggestedBuy ?? null, target: rep.targetPrice ?? null, stop: rep.stopPrice ?? null, currentPrice: px.get(p.symbol) ?? null };
+      });
+
+    return NextResponse.json({ held, toBuy, intraday });
   } catch (err) {
     console.error('GET agent/watchlist:', err);
     return NextResponse.json({ error: 'Failed to load watchlist' }, { status: 500 });
