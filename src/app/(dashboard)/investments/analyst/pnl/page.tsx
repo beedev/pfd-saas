@@ -72,17 +72,19 @@ export default function PnlPage() {
                 </tr></thead>
                 <tbody>{(data?.buckets ?? []).map((b) => {
                   const isOpen = open === b.key;
-                  const hasDetail = b.inflight.length > 0 || b.ledger.length > 0;
                   return (
                     <Fragment key={b.key}>
-                      <tr className={`border-b border-slate-100 ${hasDetail ? 'cursor-pointer hover:bg-slate-50' : ''}`} onClick={() => hasDetail && setOpen(isOpen ? null : b.key)}>
+                      <tr className="cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={() => setOpen(isOpen ? null : b.key)}>
                         <td className="py-2 pr-2"><span className="font-semibold text-slate-800">{b.name}</span> <Badge variant="default">{b.type}</Badge></td>
                         <td className="pr-2 text-right text-slate-500">{inr(b.openingPaisa)}</td>
                         <td className="pr-2 text-right">{b.positionsValuePaisa ? inr(b.positionsValuePaisa) : '—'}{b.openCount > 0 ? <span className="ml-1 text-[10px] text-amber-500">live·{b.openCount}</span> : ''}</td>
                         <td className="pr-2 text-right">{inr(b.cashPaisa)}</td>
                         <td className={`pr-2 text-right font-semibold ${col(b.dailyPnlPaisa)}`}>{signed(b.dailyPnlPaisa)}</td>
-                        <td className="pr-1 text-slate-400">{hasDetail ? (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : null}</td>
+                        <td className="pr-1 text-slate-400">{isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
                       </tr>
+                      {isOpen && b.inflight.length === 0 && b.ledger.length === 0 && (
+                        <tr key={b.key + '-empty'} className="bg-slate-50/40 text-xs"><td className="py-2 pl-6 text-slate-400" colSpan={6}>No positions in this basket — all cash ({inr(b.cashPaisa)}).</td></tr>
+                      )}
                       {isOpen && b.inflight.length > 0 && (
                         <tr key={b.key + '-hh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={6}>{b.type === 'intraday' ? 'In-flight — open trades' : 'Held positions'}</td></tr>
                       )}
