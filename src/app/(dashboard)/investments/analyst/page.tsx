@@ -10,12 +10,13 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
-import { Button, Card, CardHeader, CardContent, Badge, StatsDisplay } from '@dxp/ui';
-import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, FlaskConical, CandlestickChart, Receipt, Sparkles, Wallet } from 'lucide-react';
+import { Button, Card, CardHeader, CardContent, Badge } from '@dxp/ui';
+import { Bot, Play, Loader2, ListPlus, Settings, ChevronDown, ChevronRight, FlaskConical, CandlestickChart, Receipt, Sparkles } from 'lucide-react';
 
 import { Disclaimer } from './_components/Disclaimer';
 import { NewsPanel } from './_components/NewsPanel';
 import { BriefPanel } from './_components/BriefPanel';
+import { BucketPnl } from './_components/BucketPnl';
 
 interface Sleeve {
   id: number; key: string; name: string; strategy: string; cadence: string;
@@ -38,12 +39,10 @@ interface Decision {
 
 const inr = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p / 100);
 const actionVariant = (a: string): 'success' | 'warning' | 'info' => (a === 'BUY' ? 'success' : a === 'SELL' ? 'warning' : 'info');
-const STRATEGY_LABEL: Record<string, string> = { MEAN_REVERSION: 'My picks · combined trigger', XS_MOMENTUM: 'My picks · combined trigger', TREND: 'Trend / breakout', RS_ROTATION: 'RS rotation', INTRADAY_ORB: 'Intraday ORB (same-day)', VWAP_REVERSION: 'VWAP reversion', GAP_AND_GO: 'Gap-and-go', NEWS_SIGNAL: 'News signal', WATCHLIST: 'My picks · combined trigger' };
 
 export default function AnalystPage() {
   const [sleeves, setSleeves] = useState<Sleeve[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
-  const [startingCapitalPaisa, setStarting] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -55,7 +54,6 @@ export default function AnalystPage() {
         fetch('/api/agent/decisions').then((r) => r.json()),
       ]);
       setSleeves(sl.sleeves ?? []);
-      setStarting(sl.portfolio?.startingCapitalPaisa ?? 0);
       setDecisions(dec.decisions ?? []);
     } catch (e) {
       console.error(e);
@@ -79,12 +77,6 @@ export default function AnalystPage() {
     finally { setIsRunning(false); }
   };
 
-  // Only ACTIVE buckets count — retired (disabled) sleeves drop off the dashboard
-  // and out of the totals, so equity/return reflect the live portfolio.
-  const active = sleeves.filter((s) => s.enabled);
-  const totalEquity = active.reduce((s, x) => s + x.equityPaisa, 0);
-  const totalAllocation = active.reduce((s, x) => s + x.allocationPaisa, 0);
-  const totalReturn = totalAllocation > 0 ? ((totalEquity - totalAllocation) / totalAllocation) * 100 : 0;
   const sleeveName = (id: number | null) => sleeves.find((s) => s.id === id)?.name ?? '—';
 
   if (isLoading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dxp-text-muted)]" /></div>;
@@ -102,7 +94,6 @@ export default function AnalystPage() {
         <div className="flex gap-2">
           <Link href="/investments/analyst/watchlist"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Watchlist · Picks</Button></Link>
           <Link href="/investments/analyst/study"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Study</Button></Link>
-          <Link href="/investments/analyst/pnl"><Button variant="secondary"><Wallet className="mr-2 h-4 w-4" />P&amp;L</Button></Link>
           <Link href="/investments/analyst/exit-review"><Button variant="secondary"><ListPlus className="mr-2 h-4 w-4" />Exit Review</Button></Link>
           <Link href="/investments/analyst/backtest"><Button variant="secondary"><FlaskConical className="mr-2 h-4 w-4" />Backtest</Button></Link>
           <Link href="/investments/analyst/workbench"><Button variant="secondary"><Sparkles className="mr-2 h-4 w-4" />Workbench</Button></Link>
@@ -117,42 +108,7 @@ export default function AnalystPage() {
 
       <Disclaimer />
 
-      <StatsDisplay currency="INR" locale="en-IN" columns={3} stats={[
-        { label: 'Total equity', value: totalEquity / 100, format: 'currency' },
-        { label: 'Total P&L', value: (totalEquity - totalAllocation) / 100, format: 'currency' },
-        { label: 'Return %', value: Number(totalReturn.toFixed(2)), format: 'number' },
-      ]} />
-
-      {/* Sleeve cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {active.map((s) => {
-          // Bucket equity (cash + positions) and P&L vs its allocation — one
-          // consistent base across ALL buckets, so the numbers compare cleanly.
-          const equity = s.equityPaisa;
-          const pnl = equity - s.allocationPaisa;               // realized + unrealized since inception
-          const pnlPct = s.allocationPaisa > 0 ? (pnl / s.allocationPaisa) * 100 : 0;
-          const idle = s.openPositions === 0;
-          return (
-            <Card key={s.id}>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-[var(--dxp-text)]">{s.name}</span>
-                  <Badge variant="info" className="text-[10px]">{s.cadence === 'INTRADAY' ? 'intraday' : 'daily'}</Badge>
-                </div>
-                <p className="text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">{STRATEGY_LABEL[s.strategy] ?? s.strategy}</p>
-                <p className="mt-2 text-[10px] uppercase tracking-wider text-[var(--dxp-text-muted)]">Value</p>
-                <p className="font-mono text-lg font-bold text-[var(--dxp-text)]">{inr(equity)}</p>
-                <p className={`font-mono text-sm ${pnl > 0 ? 'text-emerald-700' : pnl < 0 ? 'text-rose-600' : 'text-[var(--dxp-text-muted)]'}`}>
-                  {pnl >= 0 ? '+' : ''}{inr(pnl)} ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)
-                </p>
-                <p className="mt-1 text-xs text-[var(--dxp-text-muted)]">
-                  {s.openPositions} pos{idle ? ' · idle' : ''} · cash {inr(s.cashPaisa)} of {inr(s.allocationPaisa)}
-                </p>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+      <BucketPnl />
 
       <BriefPanel />
 
