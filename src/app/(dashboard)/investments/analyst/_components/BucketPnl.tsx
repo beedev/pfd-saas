@@ -42,7 +42,7 @@ export function BucketPnl() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-base font-bold text-[var(--dxp-text)]">P&amp;L by bucket</h3>
-          <p className="text-xs text-[var(--dxp-text-muted)]">Started = opening · In-flight = invested (live) · Remaining = cash · P&amp;L = equity − Started. Click a bucket for its stocks. {data?.asOf ? `As of ${data.asOf}.` : ''}</p>
+          <p className="text-xs text-[var(--dxp-text-muted)]">Started = opening · In-flight = invested (live) · Remaining = cash · <b>Daily</b> = equity − Started · <b>Overall</b> = equity − corpus. The two P&amp;L columns sum to the Daily &amp; Overall headlines. Click a bucket for its stocks. {data?.asOf ? `As of ${data.asOf}.` : ''}</p>
         </div>
         <Button variant="ghost" size="sm" onClick={load} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh</Button>
       </div>
@@ -67,7 +67,7 @@ export function BucketPnl() {
             <CardContent>
               <div className="overflow-x-auto"><table className="w-full text-sm">
                 <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
-                  <th className="py-2 pr-2">Bucket</th><th className="pr-2 text-right">Started</th><th className="pr-2 text-right">In-flight</th><th className="pr-2 text-right">Remaining</th><th className="pr-2 text-right">P&amp;L</th><th className="pr-1"></th>
+                  <th className="py-2 pr-2">Bucket</th><th className="pr-2 text-right">Started</th><th className="pr-2 text-right">In-flight</th><th className="pr-2 text-right">Remaining</th><th className="pr-2 text-right">Daily</th><th className="pr-2 text-right">Overall</th><th className="pr-1"></th>
                 </tr></thead>
                 <tbody>{(data?.buckets ?? []).map((b) => {
                   const isOpen = open === b.key;
@@ -79,13 +79,14 @@ export function BucketPnl() {
                         <td className="pr-2 text-right">{b.positionsValuePaisa ? inr(b.positionsValuePaisa) : '—'}{b.openCount > 0 ? <span className="ml-1 text-[10px] text-amber-500">live·{b.openCount}</span> : ''}</td>
                         <td className="pr-2 text-right">{inr(b.cashPaisa)}</td>
                         <td className={`pr-2 text-right font-semibold ${col(b.dailyPnlPaisa)}`}>{signed(b.dailyPnlPaisa)}</td>
+                        <td className={`pr-2 text-right font-semibold ${col(b.overallPnlPaisa)}`}>{signed(b.overallPnlPaisa)}</td>
                         <td className="pr-1 text-slate-400">{isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
                       </tr>
                       {isOpen && b.inflight.length === 0 && b.ledger.length === 0 && (
-                        <tr key={b.key + '-empty'} className="bg-slate-50/40 text-xs"><td className="py-2 pl-6 text-slate-400" colSpan={6}>No positions in this basket — all cash ({inr(b.cashPaisa)}).</td></tr>
+                        <tr key={b.key + '-empty'} className="bg-slate-50/40 text-xs"><td className="py-2 pl-6 text-slate-400" colSpan={7}>No positions in this basket — all cash ({inr(b.cashPaisa)}).</td></tr>
                       )}
                       {isOpen && b.inflight.length > 0 && (
-                        <tr key={b.key + '-hh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={6}>{b.type === 'intraday' ? 'In-flight — open trades' : 'Held positions'}</td></tr>
+                        <tr key={b.key + '-hh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={7}>{b.type === 'intraday' ? 'In-flight — open trades' : 'Held positions'}</td></tr>
                       )}
                       {isOpen && b.inflight.map((f) => (
                         <tr key={b.key + '-p-' + f.symbol} className="border-b border-slate-100 bg-slate-50/40 text-xs">
@@ -94,11 +95,12 @@ export function BucketPnl() {
                           <td className="pr-2 text-right"><span className="font-medium text-slate-700">{inr(f.marketPaisa)}</span> <span className="text-slate-400">· now {f.lastPaisa != null ? inr(f.lastPaisa) : '—'}</span></td>
                           <td className="pr-2 text-right text-slate-300">—</td>
                           <td className={`pr-2 text-right font-semibold ${col(f.unrealPaisa)}`}>{signed(f.unrealPaisa)}</td>
+                          <td className="pr-2"></td>
                           <td className="pr-1"></td>
                         </tr>
                       ))}
                       {isOpen && b.ledger.length > 0 && (
-                        <tr key={b.key + '-lh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={6}>Closed round-trips today → <span className={col(b.realizedTodayPaisa)}>{signed(b.realizedTodayPaisa)}</span></td></tr>
+                        <tr key={b.key + '-lh'} className="bg-slate-50/70 text-[10px] uppercase tracking-wider text-slate-400"><td className="py-1 pl-6" colSpan={7}>Closed round-trips today → <span className={col(b.realizedTodayPaisa)}>{signed(b.realizedTodayPaisa)}</span></td></tr>
                       )}
                       {isOpen && b.ledger.map((l, i) => (
                         <tr key={b.key + '-l-' + i} className="border-b border-slate-100 bg-slate-50/40 text-xs">
@@ -107,6 +109,7 @@ export function BucketPnl() {
                           <td className="pr-2 text-right text-slate-500"><span className="font-medium text-slate-700">{inr(l.exitPaisa * l.qty)}</span> <span className="text-slate-400">· {l.qty} sh</span></td>
                           <td className="pr-2"></td>
                           <td className={`pr-2 text-right font-semibold ${col(l.realizedPaisa)}`}>{signed(l.realizedPaisa)}</td>
+                          <td className="pr-2"></td>
                           <td className="pr-1"></td>
                         </tr>
                       ))}
