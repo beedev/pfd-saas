@@ -67,6 +67,7 @@ export interface FyTaxComparison {
     salarySource: string;
     salaryDetail: string;
     hraExemption: number;
+    exemptAllowances: number;
     other: number;
     business: number;
     rentalGross: number;
@@ -240,6 +241,18 @@ export async function computeFyTaxComparison(
   const hraExemptionPaisa =
     hraFromBooksPaisa > 0 ? hraFromBooksPaisa : (salaryResolved.hraExemptionPaisa ?? 0);
 
+  // Exempt salary allowances BEYOND HRA — chiefly leave encashment on
+  // retirement/resignation (sec 10(10AA), cap ₹25L since Aug-2023), also gratuity /
+  // commuted pension. Crucially, the NEW regime KEEPS these retirement exemptions (it
+  // strips HRA/LTA/most Ch.VI-A, not 10(10AA)). The employer nets them out of the
+  // *taxable* salary figure but they still sit in *gross*; the engine was using gross,
+  // so it silently taxed them. Recover them as (gross − taxable − employer-HRA), and
+  // only from the Form 16 split (books lump exemptions ambiguously). Applies to BOTH
+  // regimes.
+  const exemptAllowancesPaisa = salaryResolved.source === 'form16'
+    ? Math.max(0, salaryPaisa - salaryResolved.valuePaisa - (salaryResolved.hraExemptionPaisa ?? 0))
+    : 0;
+
   // ─── Other sources ───────────────────────────────────────────────
   const otherPaisa = others
     .filter((r) => !r.isTaxExempt)
@@ -321,8 +334,8 @@ export async function computeFyTaxComparison(
 
   // ─── Slab-able gross (per regime) ────────────────────────────────
   const oldGrossSlab =
-    salaryPaisa - hraExemptionPaisa + otherPaisa + businessPaisa + oldHpForSlab;
-  const newGrossSlab = salaryPaisa + otherPaisa + businessPaisa + newHpForSlab;
+    salaryPaisa - hraExemptionPaisa - exemptAllowancesPaisa + otherPaisa + businessPaisa + oldHpForSlab;
+  const newGrossSlab = salaryPaisa - exemptAllowancesPaisa + otherPaisa + businessPaisa + newHpForSlab;
 
   // ─── Chapter VI-A via shared deduction engine ────────────────────
   const engineDeductions = await deriveDeductions(userId, fy, {
@@ -392,6 +405,7 @@ export async function computeFyTaxComparison(
       salarySource: salaryResolved.source,
       salaryDetail: salaryResolved.detail,
       hraExemption: hraExemptionPaisa,
+      exemptAllowances: exemptAllowancesPaisa,   // leave encashment 10(10AA) etc. (both regimes)
       other: otherPaisa,
       business: businessPaisa,
       rentalGross: rentalGrossPaisa,
