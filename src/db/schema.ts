@@ -3465,7 +3465,7 @@ export type AgentTradeStatus = 'FILLED' | 'PENDING';
 export type AgentSide = 'LONG' | 'SHORT';
 
 // v2 — strategy sleeves (each a slice of capital with its own quant strategy).
-export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION' | 'INTRADAY_ORB' | 'VWAP_REVERSION' | 'GAP_AND_GO' | 'NEWS_SIGNAL' | 'WATCHLIST';
+export type AgentStrategy = 'MEAN_REVERSION' | 'XS_MOMENTUM' | 'TREND' | 'RS_ROTATION' | 'INTRADAY_ORB' | 'VWAP_REVERSION' | 'GAP_AND_GO' | 'NEWS_SIGNAL' | 'WATCHLIST' | 'PULLBACK_LONG';
 export type AgentSleeveKey = 'STK_FAST' | 'STK_SHORT' | 'FUT' | 'MF' | 'STK_INTRADAY' | 'STK_VWAP' | 'STK_GAP' | 'STK_NEWS' | 'STK_WATCH' | 'STK_RS';
 export type AgentCadence = 'DAILY_OPEN' | 'INTRADAY';
 export type AgentWatchlistHorizon = 'INTRADAY' | 'MULTIDAY'; // "My Picks" per-entry hold horizon

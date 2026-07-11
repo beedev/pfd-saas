@@ -10,6 +10,7 @@
 import type { IntradayBar } from '@/lib/services/yahoo-finance';
 import type { AgentDecisionEvidence, AgentSide, AgentStrategy } from '@/db';
 import { atr, vwap } from '../signals/indicators';
+import { OR_END, LAST_ENTRY } from '../engine/orb-step';
 
 export interface ScanInput {
   bars: IntradayBar[];          // session bars (rupees), ascending
@@ -98,7 +99,50 @@ function mkGap(side: AgentSide, entry: number, stop: number, target: number, rul
   };
 }
 
+// ---- Pullback-buy (LONG-ONLY) ---------------------------------------------
+// The evidence-backed replacement for VWAP/ORB: don't fade, don't chase — buy a
+// name showing intraday STRENGTH (led above VWAP) that PULLS BACK to VWAP and then
+// RECLAIMS it (a reversal trigger, not a falling knife), with a ≥2:1 target. This is
+// what our only intraday winner (My-Picks: CEMPRO, ASTERDM) actually did; it fixes
+// ORB's inverted reward:risk (winners < losers) and never shorts.
+export const pullbackLong: ScanStrategy = {
+  strategy: 'PULLBACK_LONG',
+  defaults: { atrPeriod: 14, rewardRisk: 2.0, minStrengthPct: 0.4, maxStopAtr: 2.5, riskPctPerTrade: 0.75, maxConcurrent: 3 },
+  entry({ bars, nowIstMin, params }) {
+    const atrPeriod = params.atrPeriod ?? 14;
+    if (bars.length < atrPeriod + 4) return null;
+    // Fresh entries only mid-session: after VWAP has formed, before the last-entry cutoff.
+    if (nowIstMin < OR_END || nowIstMin >= LAST_ENTRY) return null;
+    const vw = vwap(bars);
+    const a = atr(bars, atrPeriod);
+    if (vw == null || a == null || a <= 0) return null;
+    const last = bars[bars.length - 1], prev = bars[bars.length - 2];
+    const px = last.close;
+    // STRENGTH — the name led earlier: session high meaningfully above VWAP.
+    const sessHigh = Math.max(...bars.map((b) => b.high));
+    const wasStrong = sessHigh >= vw * (1 + (params.minStrengthPct ?? 0.4) / 100);
+    // PULLBACK — dipped to/below VWAP in the last few bars.
+    const recent = bars.slice(-6);
+    const dipped = recent.some((b) => b.low <= vw);
+    // RECLAIM (the trigger) — now back above VWAP on an up bar; the prior bar was still at/below.
+    const reclaim = px > vw && last.close > prev.close && prev.close <= vw * 1.001;
+    if (!(wasStrong && dipped && reclaim)) return null;
+    // Stop just under the pullback swing low; target ≥2:1 off that risk.
+    const pullbackLow = Math.min(...recent.map((b) => b.low));
+    const stop = pullbackLow - 0.05 * a;
+    const risk = px - stop;
+    if (risk <= 0 || risk > (params.maxStopAtr ?? 2.5) * a) return null;   // skip deep/dirty pullbacks
+    const target = px + (params.rewardRisk ?? 2.0) * risk;
+    const rule = `Pullback-buy: led +${(((sessHigh / vw) - 1) * 100).toFixed(1)}% then reclaimed VWAP off a dip (2:1)`;
+    return {
+      side: 'LONG', entryPaisa: P(px), stopPaisa: P(stop), targetPaisa: P(target), rule,
+      evidence: { rule, inputs: { entry: +px.toFixed(2), vwap: +vw.toFixed(2), atr: +a.toFixed(2), pullbackLow: +pullbackLow.toFixed(2), sessHigh: +sessHigh.toFixed(2) }, thresholds: { stopPaisa: P(stop), targetPaisa: P(target) }, source: 'YAHOO' },
+    };
+  },
+};
+
 export const SCAN_STRATEGIES: Record<string, ScanStrategy> = {
   VWAP_REVERSION: vwapReversion,
   GAP_AND_GO: gapAndGo,
+  PULLBACK_LONG: pullbackLong,
 };

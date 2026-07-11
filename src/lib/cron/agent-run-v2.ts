@@ -17,6 +17,7 @@ import { isMarketOpen } from '@/lib/agent/market-data';
 import { runSleeve } from '@/lib/agent/engine/run-sleeve';
 import { runIntradayOrb } from '@/lib/agent/engine/run-intraday';
 import { runIntradayScan, type ScanUniverseItem } from '@/lib/agent/engine/run-intraday-scan';
+import { minOfDay, OR_END } from '@/lib/agent/engine/orb-step';
 import { runNewsSignal } from '@/lib/agent/engine/run-news-signal';
 import { runSwing } from '@/lib/agent/engine/run-swing';
 import { emitSleeveSignals } from '@/lib/agent/engine/signal-feed';
@@ -185,7 +186,7 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
   const all = await db.select().from(agentSleeves).where(eq(agentSleeves.portfolioId, portfolio.id));
   // Intraday-cadence sleeves + the two swing buckets (managed intraday for stop/
   // target, held multi-day — run-swing owns them; the daily run skips them).
-  const sleeves = all.filter((s) => s.enabled && (s.cadence === 'INTRADAY' || s.key === 'STK_SHORT'));
+  const sleeves = all.filter((s) => s.enabled && (s.cadence === 'INTRADAY' || s.key === 'STK_SHORT' || s.key === 'STK_RS'));
   if (!sleeves.length) return { status: 'SKIPPED', reason: 'no-intraday-sleeves', runDate };
   // When the market is closed we still run intraday sleeves that hold positions
   // (to square them off — never overnight); pure entry sleeves wait for open.
@@ -208,7 +209,7 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
     const results: Array<{ key: string; equityPaisa: number; trades: number }> = [];
     // Shared liquid universe for the algo scan baskets (ORB + VWAP + gap),
     // built once when open = today's Nifty-500 in-play movers.
-    const needScan = sleeves.some((s) => s.strategy === 'VWAP_REVERSION' || s.strategy === 'GAP_AND_GO' || s.strategy === 'INTRADAY_ORB');
+    const needScan = sleeves.some((s) => s.strategy === 'VWAP_REVERSION' || s.strategy === 'GAP_AND_GO' || s.strategy === 'INTRADAY_ORB' || s.strategy === 'PULLBACK_LONG');
     const scanUniverse = needScan && marketOpen ? await buildScanUniverse(userId, portfolio.id) : [];
     for (const sleeve of sleeves) {
       const hasOpen = (openBySleeve.get(sleeve.id) ?? 0) > 0;
@@ -220,12 +221,21 @@ export async function runAgentIntraday(userId: string): Promise<AgentV2Result> {
         r = await runSwing(userId, sleeve, run.id, runDate, { marketOpen, horizon });
       } else if (sleeve.strategy === 'INTRADAY_ORB') {
         r = await runIntradayOrb(userId, sleeve, run.id, runDate, { marketOpen, universe: scanUniverse });
-      } else if (sleeve.strategy === 'VWAP_REVERSION' || sleeve.strategy === 'GAP_AND_GO') {
+      } else if (sleeve.strategy === 'VWAP_REVERSION' || sleeve.strategy === 'GAP_AND_GO' || sleeve.strategy === 'PULLBACK_LONG') {
         if (!marketOpen && !hasOpen) continue; // no entries + nothing to square off
         r = await runIntradayScan(userId, sleeve, SCAN_STRATEGIES[sleeve.strategy], run.id, runDate, { marketOpen, universe: scanUniverse });
       } else if (sleeve.strategy === 'NEWS_SIGNAL') {
         if (!marketOpen && !hasOpen) continue;
         r = await runNewsSignal(userId, sleeve, run.id, runDate, { marketOpen });
+      } else if (sleeve.strategy === 'RS_ROTATION') {
+        // Swing RS rotation over Nifty-500 (runSleeve accepts the injected universe).
+        // Ranking 500 names needs 500 history fetches, so rebalance ONCE in a narrow
+        // morning window — then just hold + mark. Keeps it from hammering the shared
+        // Yahoo layer (which the forward-test book depends on). Positions carry multi-day.
+        const nowMin = minOfDay(Math.floor(Date.now() / 1000));
+        r = (marketOpen && nowMin >= OR_END && nowMin <= OR_END + 12)
+          ? await runSleeve(userId, sleeve, run.id, runDate, { execute: true, universeSymbols: [...NIFTY_500] })
+          : { sleeveKey: sleeve.key, quotesFetched: 0, decisions: 0, tradesExecuted: 0, cashBalancePaisa: sleeve.cashBalancePaisa };
       } else {
         if (!marketOpen) continue; // legacy intraday sleeves only fill during hours
         r = await runSleeve(userId, sleeve, run.id, runDate, { execute: true });
