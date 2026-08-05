@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db, budgetCategories, budgetEntries, creditCardExpenses, liabilities, investmentTransactions, chitFundInstallments } from '@/db';
-import { eq, and, gte, lte, lt, asc, sql } from 'drizzle-orm';
+import { eq, and, gte, lt, asc, sql, inArray } from 'drizzle-orm';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { parseBody } from '@/lib/api/parse-body';
 
@@ -41,6 +41,31 @@ export async function GET(request: NextRequest) {
       .where(and(eq(budgetCategories.isActive, true), eq(budgetCategories.userId, userId)))
       .orderBy(asc(budgetCategories.type), asc(budgetCategories.sortOrder));
 
+    // Build the explicit list of MMYYYY periods in [from, to] (inclusive).
+    // MMYYYY is NOT lexicographically orderable across a year boundary
+    // ('122026' > '012027' as text), so a string BETWEEN filter silently
+    // returns nothing for any window that spans Dec→Jan — which is every
+    // window from Aug onward in the 6-month grid. Enumerate the periods by
+    // stepping month-by-month with a numeric (year*100 + month) key, then
+    // match with inArray instead of a string range.
+    const periodsInRange: string[] = [];
+    if (from && to) {
+      const periodKey = (p: string) =>
+        parseInt(p.substring(2, 6), 10) * 100 + parseInt(p.substring(0, 2), 10);
+      const toKey = periodKey(to);
+      let cur = from;
+      let safety = 0;
+      while (periodKey(cur) <= toKey && safety < 36) {
+        periodsInRange.push(cur);
+        const m = parseInt(cur.substring(0, 2), 10);
+        const y = parseInt(cur.substring(2, 6), 10);
+        const nm = m === 12 ? 1 : m + 1;
+        const ny = m === 12 ? y + 1 : y;
+        cur = `${String(nm).padStart(2, '0')}${ny}`;
+        safety += 1;
+      }
+    }
+
     // Get budget entries with optional period filter
     let entriesQuery = db
       .select({
@@ -56,8 +81,7 @@ export async function GET(request: NextRequest) {
     if (from && to) {
       entriesQuery = entriesQuery.where(
         and(
-          gte(budgetEntries.period, from),
-          lte(budgetEntries.period, to),
+          inArray(budgetEntries.period, periodsInRange),
           eq(budgetEntries.userId, userId),
         )
       ) as typeof entriesQuery;
@@ -78,8 +102,7 @@ export async function GET(request: NextRequest) {
     const ccConditions = from && to
       ? and(
           eq(liabilities.type, 'CREDIT_CARD'),
-          gte(creditCardExpenses.period, from),
-          lte(creditCardExpenses.period, to),
+          inArray(creditCardExpenses.period, periodsInRange),
           eq(creditCardExpenses.userId, userId),
           eq(liabilities.userId, userId),
         )
@@ -113,27 +136,9 @@ export async function GET(request: NextRequest) {
     // SIP actuals = SUM(SIP_EXECUTION) for the month
     // Chit actuals = SUM(installment_paid) for the month
     // Manual actuals = budget_entries.actual_amount (Option C — user marks paid by entering an actual)
+    // periodsInRange is built once near the top of this handler and reused
+    // here for the per-period SIP / Chit / manual status computation.
     const expenseStatuses: Record<string, Record<string, CardStatus>> = {};
-    const periodsInRange: string[] = [];
-    if (from && to) {
-      // Build list of periods from..to inclusive. MMYYYY isn't lex-orderable
-      // across year boundaries, so step month-by-month and compare numeric
-      // (year*100 + month) instead.
-      const periodKey = (p: string) =>
-        parseInt(p.substring(2, 6), 10) * 100 + parseInt(p.substring(0, 2), 10);
-      const toKey = periodKey(to);
-      let cur = from;
-      let safety = 0;
-      while (periodKey(cur) <= toKey && safety < 36) {
-        periodsInRange.push(cur);
-        const m = parseInt(cur.substring(0, 2), 10);
-        const y = parseInt(cur.substring(2, 6), 10);
-        const nm = m === 12 ? 1 : m + 1;
-        const ny = m === 12 ? y + 1 : y;
-        cur = `${String(nm).padStart(2, '0')}${ny}`;
-        safety += 1;
-      }
-    }
 
     for (const p of periodsInRange) {
       const [fromDate, toDate] = periodToDateRange(p);
