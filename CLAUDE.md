@@ -43,6 +43,23 @@ docker run -d --name vaspar-pfd --restart unless-stopped -p 9999:3000 \
   vaspar-pfd:latest
 ```
 
+**⚠️ Which branch is prod built from? `feat/analyst-agent`, NOT `main`.**
+This is the deploy gotcha to remember:
+
+| Target | Built from | Has the analyst (Artha)? |
+|--------|-----------|--------------------------|
+| **Everyone / self-host** (GHCR image, built on `git push` of `main`) | `main` | ❌ no — analyst is never merged to main |
+| **vaspar-pfd (Bharath's prod)** | local `docker build` on the `feat/analyst-agent` working tree | ✅ yes |
+
+The analyst code lives ONLY on `feat/analyst-agent` (isolated to `api/agent/**`,
+`lib/agent/**`, `investments/analyst/**`) and stays out of `main` on purpose, so
+the public image never ships it. Consequence: **a core (non-analyst) fix must be
+committed on `feat/analyst-agent` too — not just `main` — or the next prod
+rebuild silently drops it**, because prod is built from that branch. Standard
+flow for a core fix: commit to `main` → `git merge main` into
+`feat/analyst-agent` → rebuild vaspar-pfd. (Example: budget cross-year fix
+`9ec488d`, 2026-08-05 — landed on main, merged into analyst, then prod rebuilt.)
+
 **Telegram + cron run automatically ONLY in vaspar-pfd.** Dev never auto-sends:
 `npm run dev` has no scheduler, and any throwaway Docker test container must run
 with `-e DISABLE_CRON=true`.
