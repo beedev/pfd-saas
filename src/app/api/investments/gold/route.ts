@@ -4,6 +4,7 @@ import { db, goldHoldings, type GoldType, type GoldPurity } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 import { getCurrentGoldRate, calculateValue } from '@/lib/services/ibja';
 import { getQuote } from '@/lib/services/yahoo-finance';
+import { valueGoldRow } from '@/lib/services/gold-valuation';
 
 // GOLDBEES and similar Indian gold ETFs hold ~0.01g of gold per unit.
 // We use this as a default when computing "effective grams" for ETFs.
@@ -22,7 +23,44 @@ export async function GET() {
       .from(goldHoldings)
       .where(eq(goldHoldings.userId, userId))
       .orderBy(desc(goldHoldings.createdAt));
-    return NextResponse.json({ gold: rows });
+
+    // Recompute value on read so net worth + retirement reports reflect the
+    // LIVE gold rate — matching what the gold page already shows (it recomputes
+    // client-side off the banner rate). The stored `current_value` column is
+    // only written on create / "Refresh rates", so trusting it here made the
+    // overview drift stale whenever the price moved. Read-only: we do NOT
+    // persist — /refresh-rates owns persistence. Fully guarded: any rate-service
+    // failure returns the stored rows so the list never hangs or blanks.
+    try {
+      const ibjaRate = await getCurrentGoldRate();
+      // ETF rows need a live per-unit price from Yahoo; resolve each once.
+      const etfPrices = new Map<string, number>();
+      await Promise.all(
+        rows
+          .filter((r) => r.type === 'ETF' && r.etfSymbol)
+          .map(async (r) => {
+            const q = await getQuote(r.etfSymbol as string);
+            if (q?.regularMarketPrice) etfPrices.set(r.etfSymbol as string, q.regularMarketPrice);
+          }),
+      );
+      const priced = rows.map((r) => {
+        const v = valueGoldRow(r, ibjaRate, r.etfSymbol ? etfPrices.get(r.etfSymbol) : undefined);
+        return {
+          ...r,
+          currentRatePerGram: v.currentRatePerGramPaisa,
+          currentPrice: v.currentRatePerGramPaisa,
+          currentValue: v.currentValuePaisa,
+          totalValue: v.currentValuePaisa,
+          gainLoss: v.gainLossPaisa,
+          gainLossPercent: v.gainLossPercent,
+          lastRateUpdate: v.lastRateUpdate,
+        };
+      });
+      return NextResponse.json({ gold: priced });
+    } catch (rateErr) {
+      console.error('gold GET: live revalue failed, returning stored values:', rateErr);
+      return NextResponse.json({ gold: rows });
+    }
   } catch (err) {
     console.error('Failed to fetch gold holdings:', err);
     return NextResponse.json(

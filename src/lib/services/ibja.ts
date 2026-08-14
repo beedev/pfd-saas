@@ -58,6 +58,13 @@ const MANUAL_FALLBACK_24K = 15500;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const USER_AGENT = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const CHART_ENDPOINT = 'https://query1.finance.yahoo.com/v8/finance/chart';
+// Hard cap on outbound rate-source calls so a stalled connection / dead DNS
+// can't make getCurrentGoldRate() hang (it's now called from the gold GET
+// recompute path). On timeout the fetch throws → caught → fallback chain →
+// stale cache / manual fallback, so the rate is never blank. Bankbazaar is an
+// HTML page (heavier), so it gets a slightly longer budget than the JSON quote.
+const BANKBAZAAR_TIMEOUT_MS = 9000;
+const YAHOO_TIMEOUT_MS = 8000;
 
 let cache: { rate: GoldRate; timestamp: number } | null = null;
 
@@ -78,6 +85,7 @@ async function fetchYahooMeta(symbol: string): Promise<YahooChartMeta | null> {
     const res = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
       cache: 'no-store',
+      signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as YahooChartResponse;
@@ -127,6 +135,7 @@ async function fetchFromBankBazaarChennai(): Promise<GoldRate | null> {
         'Accept-Language': 'en-US,en;q=0.9',
       },
       cache: 'no-store',
+      signal: AbortSignal.timeout(BANKBAZAAR_TIMEOUT_MS),
     });
     if (!res.ok) {
       console.error(`ibja: bankbazaar HTTP ${res.status}`);
