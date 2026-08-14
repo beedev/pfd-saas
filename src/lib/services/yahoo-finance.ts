@@ -46,6 +46,14 @@ const USER_AGENT = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const CHART_ENDPOINT = 'https://query1.finance.yahoo.com/v8/finance/chart';
 const SEARCH_ENDPOINT = 'https://query2.finance.yahoo.com/v1/finance/search';
 
+// Hard cap on every outbound Yahoo call. Without this, a stalled connection or
+// a dead DNS resolver (as happened when the Docker VM wedged and killed the
+// container's nameserver) makes fetch hang for the OS-level timeout — which
+// froze the overview page on its spinner because its Promise.all waited on a
+// stock quote that never returned. AbortSignal.timeout fails the request fast;
+// callers already handle the error by returning stale cache / empty.
+const FETCH_TIMEOUT_MS = 8000;
+
 // Yahoo's v8 chart response shape
 interface YahooChartMeta {
   symbol: string;
@@ -108,6 +116,7 @@ async function getQuote(symbol: string): Promise<YahooQuote | null> {
     const response = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
       cache: 'no-store',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -153,6 +162,7 @@ async function searchSymbol(query: string): Promise<YahooSearchResult[]> {
     const response = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
       cache: 'no-store',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {

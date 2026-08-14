@@ -133,49 +133,40 @@ export default function NetWorthDashboard() {
   }, []);
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/investments/stocks').then((r) => r.json()),
-      fetch('/api/investments/mutual-funds').then((r) => r.json()),
-      fetch('/api/investments/gold').then((r) => r.json()),
-      fetch('/api/investments/nps').then((r) => r.json()),
-      fetch('/api/investments/pf').then((r) => r.json()),
-      fetch('/api/investments/real-estate').then((r) => r.json()),
-      fetch('/api/investments/insurance').then((r) => r.json()),
-      fetch('/api/investments/liabilities').then((r) => r.json()),
-      fetch('/api/investments/chit-funds').then((r) => r.json()),
-      fetch('/api/investments/fixed-deposits').then((r) => r.json()),
-      fetch('/api/investments/forex-deposits').then((r) => r.json()),
-    ])
-      .then(([stocksData, mfData, goldData, npsData, pfData, reData, insData, liaData, chitData, fdData, forexData]) => {
-        setHoldings(stocksData.holdings || []);
-        setFunds(mfData.mutualFunds || []);
-        setGold(goldData.gold || []);
-        setNps(npsData.accounts || []);
-        setPf(pfData.accounts || []);
-        setProperties(reData.properties || []);
-        setPolicies(insData.policies || []);
-        setDebts(liaData.liabilities || []);
-        setChits(chitData.chitFunds || []);
-        setFds(fdData.fixedDeposits || []);
-        setForex(forexData.forexDeposits || []);
-      })
-      .catch(() => {
-        setHoldings([]);
-        setFunds([]);
-        setGold([]);
-      })
-      .finally(() => setIsLoading(false));
+    // Resilient, per-endpoint loading. Previously a single Promise.all meant
+    // ONE slow endpoint froze the whole page on its spinner (exactly what a
+    // stalled stock-quote fetch did during the Docker DNS wedge), and ONE
+    // rejection blanked stocks/MF/gold via the shared catch. Now each fetch is
+    // timeout-bounded and updates its own slice independently, so a slow/failed
+    // asset class degrades to an empty tile instead of hanging net worth.
+    const getJson = (url: string): Promise<Record<string, unknown> | null> =>
+      fetch(url, { signal: AbortSignal.timeout(15000) })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
 
-    // Load 30-day history for sparkline
-    fetch('/api/networth/history?months=1')
-      .then((r) => r.json())
-      .then((data) => {
-        const hist = (data.history || []) as Array<{ date: string; netWorthPaisa: number }>;
-        setSparkline(hist.map((h) => ({ date: h.date, value: h.netWorthPaisa / 100 })));
-        const today = new Date().toISOString().slice(0, 10);
-        setHasTodaySnapshot(hist.some((h) => h.date === today));
-      })
-      .catch(() => {});
+    const jobs = [
+      getJson('/api/investments/stocks').then((d) => setHoldings((d?.holdings as Holding[]) || [])),
+      getJson('/api/investments/mutual-funds').then((d) => setFunds((d?.mutualFunds as MutualFund[]) || [])),
+      getJson('/api/investments/gold').then((d) => setGold((d?.gold as GoldHolding[]) || [])),
+      getJson('/api/investments/nps').then((d) => setNps((d?.accounts as NPSAccount[]) || [])),
+      getJson('/api/investments/pf').then((d) => setPf((d?.accounts as PFAccount[]) || [])),
+      getJson('/api/investments/real-estate').then((d) => setProperties((d?.properties as RealEstateProperty[]) || [])),
+      getJson('/api/investments/insurance').then((d) => setPolicies((d?.policies as InsurancePolicy[]) || [])),
+      getJson('/api/investments/liabilities').then((d) => setDebts((d?.liabilities as LiabilityRow[]) || [])),
+      getJson('/api/investments/chit-funds').then((d) => setChits((d?.chitFunds as ChitFundRow[]) || [])),
+      getJson('/api/investments/fixed-deposits').then((d) => setFds((d?.fixedDeposits as FixedDepositRow[]) || [])),
+      getJson('/api/investments/forex-deposits').then((d) => setForex((d?.forexDeposits as ForexDepositRow[]) || [])),
+    ];
+    Promise.allSettled(jobs).finally(() => setIsLoading(false));
+
+    // Load 30-day history for sparkline (independent — never blocks the tiles).
+    getJson('/api/networth/history?months=1').then((data) => {
+      if (!data) return;
+      const hist = (data.history || []) as Array<{ date: string; netWorthPaisa: number }>;
+      setSparkline(hist.map((h) => ({ date: h.date, value: h.netWorthPaisa / 100 })));
+      const today = new Date().toISOString().slice(0, 10);
+      setHasTodaySnapshot(hist.some((h) => h.date === today));
+    });
   }, []);
 
   const captureSnapshot = async () => {
