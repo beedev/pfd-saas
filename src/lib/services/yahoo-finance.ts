@@ -266,6 +266,7 @@ async function getDailyCloses(symbol: string, range = '1y'): Promise<DailyClose[
     const response = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
       cache: 'no-store',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       console.error(`Yahoo history error for ${symbol}: ${response.status}`);
@@ -314,7 +315,7 @@ async function getDailyOHLC(symbol: string, range = '1y'): Promise<DailyBar[]> {
   if (cached && Date.now() - cached.timestamp < HISTORY_TTL_MS) return cached.bars;
   try {
     const url = `${CHART_ENDPOINT}/${encodeURIComponent(symbol)}?interval=1d&range=${encodeURIComponent(range)}`;
-    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, cache: 'no-store' });
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, cache: 'no-store', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!response.ok) return cached?.bars ?? [];
     const data = (await response.json()) as YahooChartOHLC;
     const result = data.chart?.result?.[0];
@@ -346,7 +347,7 @@ export interface IntradayBar { epoch: number; open: number; high: number; low: n
 async function getIntradayBars(symbol: string, interval = '5m'): Promise<IntradayBar[]> {
   try {
     const url = `${CHART_ENDPOINT}/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}&range=1d`;
-    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, cache: 'no-store' });
+    const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, cache: 'no-store', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!response.ok) return [];
     const data = (await response.json()) as YahooChartOHLC;
     const result = data.chart?.result?.[0];
