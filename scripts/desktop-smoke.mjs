@@ -43,11 +43,15 @@ try {
   console.log(`   migrations applied: ${migRes.applied}/${migRes.total}`);
 
   console.log('== spawn Next standalone with in-process PGlite (PFD_DB_DRIVER=pglite) ==');
-  child = spawn(process.execPath, [path.join(STANDALONE, 'server.js')], {
+  // PFD_SPAWN_BIN lets us swap the runtime (real node vs electron-as-node) to
+  // isolate the "authed page 307 only under Electron" bug on a clean fresh DB.
+  const bin = process.env.PFD_SPAWN_BIN || process.execPath;
+  const extraEnv = process.env.PFD_SPAWN_BIN ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+  child = spawn(bin, [path.join(STANDALONE, 'server.js')], {
     cwd: STANDALONE,
-    env: { ...process.env, NODE_ENV: 'production', HOSTNAME: '127.0.0.1', PORT: String(nextPort),
+    env: { ...process.env, ...extraEnv, NODE_ENV: 'production', HOSTNAME: '127.0.0.1', PORT: String(nextPort),
       PFD_DB_DRIVER: 'pglite', PFD_PGLITE_DIR: DATA_DIR,
-      AUTH_SECRET: 'smoke-secret-smoke-secret-smoke-secret==', AUTH_URL: base, NEXTAUTH_URL: base,
+      AUTH_SECRET: process.env.PFD_TEST_SECRET || 'smoke-secret-smoke-secret-smoke-secret==', AUTH_URL: base, NEXTAUTH_URL: base,
       DEMO_PERSONAL_SWITCH: 'true', MAGIC_LINK_DISPLAY: 'ui', DISABLE_CRON: 'true' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -94,7 +98,12 @@ try {
   console.log(`   ${results.length - bad.length}/${results.length} strictly-ok, failures: ${bad.length}`);
   if (bad.length) console.log('   sample failures:', JSON.stringify(bad.slice(0, 3).map((b) => b.reason?.message || b.value)));
 
-  const pass = health.ok && cookie && Array.isArray(gold.gold) && bad.length === 0;
+  // Sequential authed page check — does the dashboard `/` render (200) or
+  // redirect to /login (307)? This is the exact thing the Electron window does.
+  const solo = await fetch(`${base}/`, { headers: { cookie: jar }, redirect: 'manual' });
+  console.log(`   SEQUENTIAL authed GET / -> ${solo.status} (200=dashboard, 307=bounced to login)`);
+
+  const pass = health.ok && cookie && Array.isArray(gold.gold) && bad.length === 0 && solo.status === 200;
   console.log(pass ? '\n✅ DESKTOP SMOKE PASSED: full app runs on PGlite-over-socket (migrate, auth, seed, DB reads).'
                    : '\n❌ smoke incomplete — see above.');
   failed = !pass;

@@ -75,7 +75,15 @@ async function boot() {
   const authSecret = ensureAuthSecret();
   const baseUrl = `http://127.0.0.1:${nextPort}`;
   const env = {
-    ...process.env,
+    // CURATED env — do NOT spread the Electron GUI process's full env. It
+    // carries injected vars that break Next's RSC rendering (server-component
+    // `auth()` returns null → every authed page 307s back to /login, while API
+    // routes still work). A clean, node-like env fixes it (a node-parent spawn
+    // works precisely because its env lacks those Electron additions).
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    TMPDIR: process.env.TMPDIR,
+    LANG: process.env.LANG,
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
     HOSTNAME: '127.0.0.1',
