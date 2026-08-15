@@ -1,7 +1,7 @@
 // Headless end-to-end smoke for the desktop stack — everything the Electron
 // main process does, minus the BrowserWindow. Proves the full app runs on
 // PGlite-over-socket: migrate → serve → spawn Next standalone → auth → DB reads.
-import { migrateAndServe } from '../electron/db-bootstrap.mjs';
+import { runMigrations } from '../electron/db-bootstrap.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
@@ -35,19 +35,18 @@ let db, child, failed = false;
 try {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
   stageStandalone();
-  const socketPort = await freePort();
   const nextPort = await freePort();
   const base = `http://127.0.0.1:${nextPort}`;
 
-  console.log('== migrate + serve PGlite over socket ==');
-  db = await migrateAndServe({ dataDir: DATA_DIR, migrationsDir: path.join(REPO, 'drizzle'), socketPort });
-  console.log(`   migrations applied: ${db.migrations.applied}/${db.migrations.total}, socket :${socketPort}`);
+  console.log('== migrate PGlite (open → migrate → close) ==');
+  const migRes = await runMigrations({ dataDir: DATA_DIR, migrationsDir: path.join(REPO, 'drizzle') });
+  console.log(`   migrations applied: ${migRes.applied}/${migRes.total}`);
 
-  console.log('== spawn Next standalone against the socket ==');
+  console.log('== spawn Next standalone with in-process PGlite (PFD_DB_DRIVER=pglite) ==');
   child = spawn(process.execPath, [path.join(STANDALONE, 'server.js')], {
     cwd: STANDALONE,
     env: { ...process.env, NODE_ENV: 'production', HOSTNAME: '127.0.0.1', PORT: String(nextPort),
-      DATABASE_URL: `postgresql://postgres:postgres@127.0.0.1:${socketPort}/postgres`,
+      PFD_DB_DRIVER: 'pglite', PFD_PGLITE_DIR: DATA_DIR,
       AUTH_SECRET: 'smoke-secret-smoke-secret-smoke-secret==', AUTH_URL: base, NEXTAUTH_URL: base,
       DEMO_PERSONAL_SWITCH: 'true', MAGIC_LINK_DISPLAY: 'ui', DISABLE_CRON: 'true' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -72,7 +71,30 @@ try {
   const login = await fetch(`${base}/login`, { headers: { cookie: jar } });
   console.log(`   GET /login -> ${login.status}`);
 
-  const pass = health.ok && cookie && Array.isArray(gold.gold);
+  // Concurrency burst — STRICT. The window's failure was the per-request
+  // Auth.js session lookup erroring under concurrency → the session not being
+  // recognized → 307 back to /login (the loop). So we assert the *authed*
+  // outcome, not just "<500": authed `/` must be 200 (dashboard, NOT a redirect
+  // to /login), and the data endpoint must return the actual row.
+  console.log('== concurrency burst (STRICT): 30 parallel authed requests ==');
+  const check = async (p) => {
+    const r = await fetch(`${base}${p}`, { headers: { cookie: jar }, redirect: 'manual' });
+    if (p === '/') return { p, ok: r.status === 200, got: r.status };            // 307 => session lost = loop
+    if (p === '/api/investments/gold') {
+      if (r.status !== 200) return { p, ok: false, got: r.status };
+      const j = await r.json();
+      return { p, ok: Array.isArray(j.gold) && j.gold.length === 1, got: `${r.status}/${(j.gold||[]).length} rows` };
+    }
+    return { p, ok: r.status === 200, got: r.status };
+  };
+  const eps = ['/', '/api/investments/gold', '/api/investments/stocks', '/api/investments/nps', '/api/investments/liabilities'];
+  const burst = Array.from({ length: 30 }, (_, i) => eps[i % eps.length]);
+  const results = await Promise.allSettled(burst.map((p) => check(p)));
+  const bad = results.filter((r) => r.status === 'rejected' || !r.value.ok);
+  console.log(`   ${results.length - bad.length}/${results.length} strictly-ok, failures: ${bad.length}`);
+  if (bad.length) console.log('   sample failures:', JSON.stringify(bad.slice(0, 3).map((b) => b.reason?.message || b.value)));
+
+  const pass = health.ok && cookie && Array.isArray(gold.gold) && bad.length === 0;
   console.log(pass ? '\n✅ DESKTOP SMOKE PASSED: full app runs on PGlite-over-socket (migrate, auth, seed, DB reads).'
                    : '\n❌ smoke incomplete — see above.');
   failed = !pass;

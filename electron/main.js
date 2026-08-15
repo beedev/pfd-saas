@@ -19,7 +19,6 @@ const { spawn } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
 let nextChild = null;
-let dbHandle = null;
 
 function resourcePath(...p) {
   // Packaged: files live under process.resourcesPath (electron-builder
@@ -65,15 +64,14 @@ async function boot() {
   const standaloneDir = resourcePath('.next', 'standalone');
   const serverJs = path.join(standaloneDir, 'server.js');
 
-  const socketPort = await freePort();
   const nextPort = await freePort();
 
-  // 1. DB up (migrate + socket).
+  // 1. Apply migrations (open → migrate → close) before the server opens the DB.
   const bootstrap = await import(pathToFileURL(resourcePath('electron', 'db-bootstrap.mjs')).href);
-  dbHandle = await bootstrap.migrateAndServe({ dataDir, migrationsDir, socketPort });
-  console.log(`[pfd] DB ready on :${socketPort} (migrations applied: ${dbHandle.migrations.applied}/${dbHandle.migrations.total})`);
+  const migRes = await bootstrap.runMigrations({ dataDir, migrationsDir });
+  console.log(`[pfd] migrations applied: ${migRes.applied}/${migRes.total}`);
 
-  // 2. Spawn Next standalone against the socket.
+  // 2. Spawn Next standalone with PGlite in-process (PFD_DB_DRIVER=pglite).
   const authSecret = ensureAuthSecret();
   const baseUrl = `http://127.0.0.1:${nextPort}`;
   const env = {
@@ -82,7 +80,8 @@ async function boot() {
     NODE_ENV: 'production',
     HOSTNAME: '127.0.0.1',
     PORT: String(nextPort),
-    DATABASE_URL: `postgresql://postgres:postgres@127.0.0.1:${socketPort}/postgres`,
+    PFD_DB_DRIVER: 'pglite',
+    PFD_PGLITE_DIR: dataDir,
     AUTH_SECRET: authSecret,
     AUTH_URL: baseUrl,
     NEXTAUTH_URL: baseUrl,
@@ -107,14 +106,16 @@ async function boot() {
     backgroundColor: '#0b0b0c',
     webPreferences: { contextIsolation: true },
   });
+
+  win.webContents.on('did-fail-load', (_e, code, desc, url) =>
+    console.error(`[pfd] window load failed: ${code} ${desc} ${url}`));
   win.loadURL(baseUrl);
 }
 
 function cleanup() {
+  // Killing the Next child releases the in-process PGlite (it holds the DB).
   try { if (nextChild) nextChild.kill(); } catch { /* ignore */ }
-  try { if (dbHandle) dbHandle.stop(); } catch { /* ignore */ }
   nextChild = null;
-  dbHandle = null;
 }
 
 app.whenReady().then(boot).catch((e) => {

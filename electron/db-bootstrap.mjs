@@ -1,13 +1,14 @@
-// Desktop DB bootstrap: embed PGlite, apply migrations, expose it over a local
-// Postgres-wire socket so the unchanged Next server (postgres-js) connects via
-// DATABASE_URL exactly as it does against real Postgres.
+// Desktop DB migrator. The desktop build embeds PGlite *in-process* inside the
+// Next server (src/db/index.ts, PFD_DB_DRIVER=pglite) — no socket, no pool, so
+// nothing to reset under concurrency. Since PGlite is single-process, the
+// launcher applies migrations here (open → migrate → close) BEFORE spawning the
+// Next server, which then opens the same data dir.
 //
-// Migrations are applied with PGlite.exec() (simple query protocol — allows
-// multiple statements per file), because the repo's hand-authored migrations
-// lack the `--> statement-breakpoint` markers drizzle's migrator needs. We track
-// applied files in a __pfd_migrations table so every boot only runs new ones.
+// Migrations run via PGlite.exec() (simple query protocol — multiple statements
+// per file), because the repo's hand-authored migrations lack drizzle's
+// `--> statement-breakpoint` markers. Applied files are tracked in
+// __pfd_migrations so each boot only runs new ones.
 import { PGlite } from '@electric-sql/pglite';
-import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -34,30 +35,14 @@ async function applyMigrations(pg, migrationsDir) {
   return { applied, total: files.length };
 }
 
-/**
- * Open PGlite at dataDir, apply any pending migrations, and start a
- * Postgres-wire socket server on socketPort. Returns a handle with stop().
- */
-export async function migrateAndServe({ dataDir, migrationsDir, socketPort, host = '127.0.0.1' }) {
+/** Open PGlite at dataDir, apply any pending migrations, close. Returns counts. */
+export async function runMigrations({ dataDir, migrationsDir }) {
   fs.mkdirSync(dataDir, { recursive: true });
   const pg = new PGlite(dataDir);
   await pg.waitReady;
-
-  const migRes = await applyMigrations(pg, migrationsDir);
-
-  const server = new PGLiteSocketServer({ db: pg, port: socketPort, host });
-  await server.start();
-
-  return {
-    migrations: migRes,
-    socketPort,
-    async stop() {
-      try { await server.stop(); } catch { /* ignore */ }
-      try { await pg.close(); } catch { /* ignore */ }
-    },
-    // Consistent backup — a single .tar.gz blob of the whole DB.
-    async dump() {
-      return pg.dumpDataDir('gzip');
-    },
-  };
+  try {
+    return await applyMigrations(pg, migrationsDir);
+  } finally {
+    await pg.close();
+  }
 }

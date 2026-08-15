@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
   // pdfjs-dist tries to spin up a worker even when worker is disabled, which
   // breaks under Turbopack server bundling. Marking it external keeps it as a
   // raw require() at runtime so its internal worker shim resolves correctly.
-  serverExternalPackages: ["pdfjs-dist"],
+  serverExternalPackages: ["pdfjs-dist", "@electric-sql/pglite"],
   // Security headers (S13 — partial). Content-Security-Policy is
   // deliberately deferred until it can be browser-tested.
   async headers() {
