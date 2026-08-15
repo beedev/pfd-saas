@@ -73,7 +73,7 @@ async function boot() {
 
   // 2. Spawn Next standalone with PGlite in-process (PFD_DB_DRIVER=pglite).
   const authSecret = ensureAuthSecret();
-  const baseUrl = `http://127.0.0.1:${nextPort}`;
+  const baseUrl = `http://localhost:${nextPort}`;
   const env = {
     // CURATED env — do NOT spread the Electron GUI process's full env. It
     // carries injected vars that break Next's RSC rendering (server-component
@@ -86,13 +86,19 @@ async function boot() {
     LANG: process.env.LANG,
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
-    HOSTNAME: '127.0.0.1',
+    HOSTNAME: 'localhost',
     PORT: String(nextPort),
     PFD_DB_DRIVER: 'pglite',
     PFD_PGLITE_DIR: dataDir,
     AUTH_SECRET: authSecret,
     AUTH_URL: baseUrl,
     NEXTAUTH_URL: baseUrl,
+    // Auth.js v5 auto-trusts only `localhost`; on 127.0.0.1:<random-port> it
+    // treats the host as untrusted and `auth()` silently returns null in RSC
+    // (server components), so authed pages 307 to /login even with a valid
+    // session cookie — while route handlers still resolve it. Trust the host
+    // explicitly. (Docker prod worked only because it uses `localhost`.)
+    AUTH_TRUST_HOST: 'true',
     DEMO_PERSONAL_SWITCH: 'true', // local account chooser, no email round-trip
     MAGIC_LINK_DISPLAY: 'ui',
     DISABLE_CRON: 'true',         // no Telegram/scheduler in the desktop build

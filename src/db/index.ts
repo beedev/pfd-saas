@@ -27,7 +27,16 @@ if (process.env.PFD_DB_DRIVER === 'pglite') {
   if (!dir) {
     throw new Error('PFD_PGLITE_DIR is required when PFD_DB_DRIVER=pglite');
   }
-  pgliteInstance = new PGlite(dir);
+  // Next.js bundles server code into multiple chunks (route handlers vs RSC),
+  // and this module can be evaluated more than once in the SAME process. Each
+  // `new PGlite(dir)` is a SEPARATE in-memory database on the same directory —
+  // a row written through one is invisible to the other. That made auth flaky:
+  // the session written by the switch-account route handler was randomly not
+  // seen by the RSC dashboard layout, which then bounced to /login. Pin a
+  // single instance on globalThis so every bundle shares one DB.
+  const g = globalThis as unknown as { __pfdPglite?: PGlite };
+  g.__pfdPglite ??= new PGlite(dir);
+  pgliteInstance = g.__pfdPglite;
   // Both drivers are PgDatabase subclasses with an identical query API; the
   // cast keeps the app's existing postgres-js-typed call sites happy while the
   // runtime object is the pglite one.

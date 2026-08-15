@@ -1,20 +1,40 @@
+'use client';
+
 /**
- * Two-card account chooser for Docker self-host.
+ * Two-card account chooser for the Docker self-host + desktop app.
  *
- * Sprint 6.1.9c — rendered by login/page.tsx when
- * DEMO_PERSONAL_SWITCH=true. Server component; no client interactivity
- * needed because each card is a plain HTML form posting to
- * /api/auth/switch-account?to=<target>. The route handler issues a 303
- * redirect to '/' on success, so the browser navigates naturally
- * without any JS in the page.
+ * Sprint 6.1.9c — rendered by login/page.tsx when DEMO_PERSONAL_SWITCH=true.
  *
- * Keep this component server-only so it stays renderable on JS-disabled
- * browsers — the click-to-sign-in flow degrades to a single HTTP POST.
+ * Client component: each card does `fetch(switch-account)` then navigates. The
+ * earlier version used a raw `<form method="POST">` relying on the route's 303
+ * redirect. That works over `localhost` (Docker) but in the desktop app
+ * (127.0.0.1) the browser races the Set-Cookie commit against the redirect —
+ * the follow-up GET / goes out without the session cookie and bounces back to
+ * /login. Awaiting the fetch guarantees the cookie is stored before we
+ * navigate, exactly like the sidebar switcher (which never had this problem).
  */
 
+import { useState } from 'react';
 import { appName } from '@/lib/brand';
 
 export function AccountChooser() {
+  const [busy, setBusy] = useState<'demo' | 'personal' | null>(null);
+
+  async function choose(target: 'demo' | 'personal') {
+    if (busy) return;
+    setBusy(target);
+    try {
+      const res = await fetch(`/api/auth/switch-account?to=${target}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`switch failed: ${res.status}`);
+      // Full navigation (not router.push) so every server component re-runs
+      // with the freshly-set session cookie.
+      window.location.href = '/';
+    } catch (e) {
+      console.error(e);
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 via-white to-amber-100 px-4 py-12">
       <div className="w-full max-w-3xl">
@@ -45,11 +65,7 @@ export function AccountChooser() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Demo card */}
-          <form
-            method="POST"
-            action="/api/auth/switch-account?to=demo"
-            className="bg-white rounded-2xl shadow-xl border border-amber-200 p-6 flex flex-col"
-          >
+          <div className="bg-white rounded-2xl shadow-xl border border-amber-200 p-6 flex flex-col">
             <div className="flex items-center gap-2 mb-3">
               <span aria-hidden="true" className="text-2xl">👁</span>
               <h2 className="text-lg font-semibold text-gray-900">
@@ -63,19 +79,17 @@ export function AccountChooser() {
               entering anything yourself.
             </p>
             <button
-              type="submit"
-              className="w-full py-2.5 px-4 rounded-lg bg-amber-700 hover:bg-amber-800 text-white font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+              type="button"
+              onClick={() => choose('demo')}
+              disabled={busy !== null}
+              className="w-full py-2.5 px-4 rounded-lg bg-amber-700 hover:bg-amber-800 disabled:opacity-60 text-white font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
             >
-              Open Demo →
+              {busy === 'demo' ? 'Opening…' : 'Open Demo →'}
             </button>
-          </form>
+          </div>
 
           {/* Personal card */}
-          <form
-            method="POST"
-            action="/api/auth/switch-account?to=personal"
-            className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 flex flex-col"
-          >
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-6 flex flex-col">
             <div className="flex items-center gap-2 mb-3">
               <span aria-hidden="true" className="text-2xl">💼</span>
               <h2 className="text-lg font-semibold text-gray-900">
@@ -84,16 +98,18 @@ export function AccountChooser() {
             </div>
             <p className="text-sm text-gray-600 mb-6 flex-1">
               Empty dashboard — start with your own salary, investments,
-              insurance, and taxes. Survives container restarts; your
-              entries live in the Docker volume.
+              insurance, and taxes. Survives restarts; your entries live in the
+              local database.
             </p>
             <button
-              type="submit"
-              className="w-full py-2.5 px-4 rounded-lg bg-gray-900 hover:bg-gray-800 text-white font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+              type="button"
+              onClick={() => choose('personal')}
+              disabled={busy !== null}
+              className="w-full py-2.5 px-4 rounded-lg bg-gray-900 hover:bg-gray-800 disabled:opacity-60 text-white font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
             >
-              Open Personal →
+              {busy === 'personal' ? 'Opening…' : 'Open Personal →'}
             </button>
-          </form>
+          </div>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
