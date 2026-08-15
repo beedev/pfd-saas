@@ -15,7 +15,11 @@
     "db:studio": "drizzle-kit studio",
     "predev": "node scripts/db-verify.mjs",
     "db:verify": "node scripts/db-verify.mjs",
-    "smoke:tax": "node scripts/smoke-test-tax.mjs"
+    "smoke:tax": "node scripts/smoke-test-tax.mjs",
+    "desktop:build": "next build && node electron/stage-standalone.mjs",
+    "desktop": "electron electron/main.js",
+    "desktop:dev": "npm run desktop:build && npm run desktop",
+    "desktop:smoke": "node scripts/desktop-smoke.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "1.11.2",
