@@ -82,3 +82,6 @@ tmp/
 
 # Local DB snapshots — never commit a tenant DB
 backups/
+
+# desktop app build output
+/electron-dist/

@@ -15,11 +15,18 @@
     "db:studio": "drizzle-kit studio",
     "predev": "node scripts/db-verify.mjs",
     "db:verify": "node scripts/db-verify.mjs",
-    "smoke:tax": "node scripts/smoke-test-tax.mjs"
+    "smoke:tax": "node scripts/smoke-test-tax.mjs",
+    "desktop:build": "next build && node electron/stage-standalone.mjs",
+    "desktop": "electron electron/main.js",
+    "desktop:dev": "npm run desktop:build && npm run desktop",
+    "desktop:smoke": "node scripts/desktop-smoke.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "1.11.2",
     "@dxp/ui": "file:../dxp/packages/ui",
+    "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite-socket": "^0.2.8",
+    "@electric-sql/pglite-tools": "^0.4.5",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -65,6 +72,8 @@
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
