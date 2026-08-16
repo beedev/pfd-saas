@@ -39,6 +39,24 @@ function freePort() {
   });
 }
 
+// Read KEY=VALUE pairs from a .env file. Dev reads the repo's .env.local; a
+// packaged app reads <userData>/.env.local (the user drops their keys there).
+// Used to forward the analyst's OPENAI_API_KEY (and friends) into the Next
+// server, which npm/electron do not load automatically.
+function loadDotEnv() {
+  const base = app.isPackaged ? app.getPath('userData') : path.join(__dirname, '..');
+  const out = {};
+  for (const name of ['.env', '.env.local']) {
+    const p = path.join(base, name);
+    if (!fs.existsSync(p)) continue;
+    for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$/);
+      if (m) out[m[1]] = m[2].replace(/^\s*["']?|["']?\s*$/g, '');
+    }
+  }
+  return out;
+}
+
 function ensureAuthSecret() {
   const f = path.join(app.getPath('userData'), 'auth-secret');
   if (!fs.existsSync(f)) fs.writeFileSync(f, crypto.randomBytes(32).toString('base64'), { mode: 0o600 });
@@ -73,6 +91,7 @@ async function boot() {
 
   // 2. Spawn Next standalone with PGlite in-process (PFD_DB_DRIVER=pglite).
   const authSecret = ensureAuthSecret();
+  const fileEnv = loadDotEnv(); // OPENAI_API_KEY etc. for the analyst (Artha)
   const baseUrl = `http://localhost:${nextPort}`;
   const env = {
     // CURATED env — do NOT spread the Electron GUI process's full env. It
@@ -102,6 +121,8 @@ async function boot() {
     DEMO_PERSONAL_SWITCH: 'true', // local account chooser, no email round-trip
     MAGIC_LINK_DISPLAY: 'ui',
     DISABLE_CRON: 'true',         // no Telegram/scheduler in the desktop build
+    // Analyst (Artha) LLM key, read from .env.local (dev) / userData (packaged).
+    ...(fileEnv.OPENAI_API_KEY ? { OPENAI_API_KEY: fileEnv.OPENAI_API_KEY } : {}),
   };
   nextChild = spawn(process.execPath, [serverJs], { env, cwd: standaloneDir, stdio: 'inherit' });
   nextChild.on('exit', (code) => console.log(`[pfd] next server exited: ${code}`));
