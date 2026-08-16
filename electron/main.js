@@ -19,6 +19,7 @@ const { spawn } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
 let nextChild = null;
+let cronTimer = null;
 
 function resourcePath(...p) {
   // Packaged: files live under process.resourcesPath (electron-builder
@@ -63,6 +64,38 @@ function ensureAuthSecret() {
   return fs.readFileSync(f, 'utf8').trim();
 }
 
+// Stable per-install secret the cron ticker sends as `Authorization: Bearer`,
+// validated by /api/cron/tick against the same value in the child env.
+function ensureCronSecret() {
+  const f = path.join(app.getPath('userData'), 'cron-secret');
+  if (!fs.existsSync(f)) {
+    fs.writeFileSync(f, crypto.randomBytes(32).toString('hex').slice(0, 40), { mode: 0o600 });
+  }
+  return fs.readFileSync(f, 'utf8').trim();
+}
+
+// Desktop replacement for the container's in-entrypoint 60s ticker. A single
+// POST /api/cron/tick self-seeds the per-user jobs (ensureDefaultJobsForAllUsers)
+// and runs any whose next_run_at is due — the analyst (Artha) intraday/daily
+// runs, news ingest, EOD review, self-tune, plus daily digest / alerts / SIPs.
+// Only runs while the app is open (no always-on container here). Jobs that are
+// time-anchored (IST) simply no-op until their window.
+function startCronTicker(baseUrl, cronSecret, intervalMs = 60_000) {
+  const tick = async () => {
+    try {
+      await fetch(`${baseUrl}/api/cron/tick`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cronSecret}` },
+      });
+    } catch (e) {
+      console.error('[pfd] cron tick failed:', e.message);
+    }
+  };
+  tick(); // fire one immediately so due jobs don't wait a full interval
+  cronTimer = setInterval(tick, intervalMs);
+  console.log(`[pfd] cron ticker on — POST /api/cron/tick every ${intervalMs / 1000}s`);
+}
+
 async function waitForHealth(url, timeoutMs = 90000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -91,6 +124,7 @@ async function boot() {
 
   // 2. Spawn Next standalone with PGlite in-process (PFD_DB_DRIVER=pglite).
   const authSecret = ensureAuthSecret();
+  const cronSecret = ensureCronSecret();
   const fileEnv = loadDotEnv(); // OPENAI_API_KEY etc. for the analyst (Artha)
   const baseUrl = `http://localhost:${nextPort}`;
   const env = {
@@ -120,7 +154,8 @@ async function boot() {
     AUTH_TRUST_HOST: 'true',
     DEMO_PERSONAL_SWITCH: 'true', // local account chooser, no email round-trip
     MAGIC_LINK_DISPLAY: 'ui',
-    DISABLE_CRON: 'true',         // no Telegram/scheduler in the desktop build
+    // The app validates /api/cron/tick against this; the ticker below sends it.
+    CRON_SECRET: cronSecret,
     // Analyst (Artha) LLM key, read from .env.local (dev) / userData (packaged).
     ...(fileEnv.OPENAI_API_KEY ? { OPENAI_API_KEY: fileEnv.OPENAI_API_KEY } : {}),
   };
@@ -145,9 +180,13 @@ async function boot() {
   win.webContents.on('did-fail-load', (_e, code, desc, url) =>
     console.error(`[pfd] window load failed: ${code} ${desc} ${url}`));
   win.loadURL(baseUrl);
+
+  // Drive the scheduler (analyst runs, digest, alerts, SIPs) while the app is open.
+  startCronTicker(baseUrl, cronSecret);
 }
 
 function cleanup() {
+  if (cronTimer) { clearInterval(cronTimer); cronTimer = null; }
   // Killing the Next child releases the in-process PGlite (it holds the DB).
   try { if (nextChild) nextChild.kill(); } catch { /* ignore */ }
   nextChild = null;
