@@ -92,14 +92,9 @@
     },
     "files": [
       "electron/**/*",
-      "package.json",
-      "node_modules/**/*"
+      "package.json"
     ],
     "extraResources": [
-      {
-        "from": ".next/standalone",
-        "to": ".next/standalone"
-      },
       {
         "from": "drizzle",
         "to": "drizzle"
@@ -117,6 +112,7 @@
       "category": "public.app-category.finance",
       "identity": null
     },
-    "npmRebuild": false
+    "npmRebuild": false,
+    "afterPack": "electron/after-pack.js"
   }
 }
