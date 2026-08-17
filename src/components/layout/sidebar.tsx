@@ -187,6 +187,7 @@ const navigation: NavSection[] = [
       { name: 'Settings', href: '/settings', icon: Settings },
       { name: 'Tax Rates & Rules', href: '/settings/tax-rules', icon: Calculator },
       { name: 'FY Close', href: '/settings/fy-close', icon: CalendarCheck },
+      { name: 'Import from backup', href: '/import-data', icon: Upload },
     ],
   },
 ];
