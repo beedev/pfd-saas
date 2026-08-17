@@ -164,8 +164,17 @@ async function boot() {
   // 2. Spawn Next standalone with PGlite in-process (PFD_DB_DRIVER=pglite).
   const authSecret = ensureAuthSecret();
   const cronSecret = ensureCronSecret();
-  const fileEnv = loadDotEnv(); // OPENAI_API_KEY etc. for the analyst (Artha)
+  const fileEnv = loadDotEnv(); // .env.local fallback (dev) for OPENAI_API_KEY etc.
   const backupDir = path.join(app.getPath('documents'), 'Artha Backups');
+  // OpenAI key: managed in-app via Settings → OpenAI key, which writes the raw
+  // key to this file (OPENAI_KEY_FILE) and applies it live. On boot we load it
+  // (so it persists across launches); a .env.local key is a dev-only fallback.
+  // Never baked into the .dmg — each user sets their own.
+  const openaiKeyFile = path.join(app.getPath('userData'), 'openai-api-key');
+  let openaiKey = fileEnv.OPENAI_API_KEY || '';
+  try {
+    if (fs.existsSync(openaiKeyFile)) openaiKey = fs.readFileSync(openaiKeyFile, 'utf8').trim() || openaiKey;
+  } catch { /* ignore */ }
   const baseUrl = `http://localhost:${nextPort}`;
   const env = {
     // CURATED env — do NOT spread the Electron GUI process's full env. It
@@ -198,8 +207,9 @@ async function boot() {
     // The app validates /api/cron/tick + /api/desktop/backup against this.
     CRON_SECRET: cronSecret,
     PFD_BACKUP_DIR: backupDir, // where /api/desktop/backup writes self-backups
-    // Analyst (Artha) LLM key, read from .env.local (dev) / userData (packaged).
-    ...(fileEnv.OPENAI_API_KEY ? { OPENAI_API_KEY: fileEnv.OPENAI_API_KEY } : {}),
+    // Analyst (Artha) LLM key + where Settings persists it (raw key file).
+    OPENAI_KEY_FILE: openaiKeyFile,
+    ...(openaiKey ? { OPENAI_API_KEY: openaiKey } : {}),
   };
   nextChild = spawn(process.execPath, [serverJs], { env, cwd: standaloneDir, stdio: 'inherit' });
   nextChild.on('exit', (code) => console.log(`[pfd] next server exited: ${code}`));
