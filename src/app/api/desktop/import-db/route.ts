@@ -15,6 +15,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync } from 'node:fs';
+import zlib from 'node:zlib';
 import { pglite } from '@/db';
 import { getSessionUserId, unauthenticated } from '@/lib/api/auth-guard';
 
@@ -37,9 +38,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No backup file uploaded (field "backup").' }, { status: 400 });
   }
 
+  // Accept either a plain .sql (prod pg_dump) or a gzipped self-backup (.sql.gz).
+  let bytes = Buffer.from(await file.arrayBuffer());
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = zlib.gunzipSync(bytes);
   // PG17 pg_dump emits psql meta-commands (\restrict / \unrestrict) PGlite can't
   // parse. --inserts has no COPY blocks, so dropping every backslash line is safe.
-  const sql = (await file.text())
+  const sql = bytes.toString('utf8')
     .split('\n')
     .filter((l) => !l.startsWith('\\'))
     .join('\n');

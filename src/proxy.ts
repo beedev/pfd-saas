@@ -26,6 +26,9 @@ const PUBLIC_PATHS = new Set([
   // external monitors can hit it without credentials. Returns only
   // { ok, db, uptimeMs } — no tenant data.
   '/api/health',
+  // Desktop self-backup — the Electron launcher calls it with a CRON_SECRET
+  // bearer (no session cookie), and the route validates that secret itself.
+  '/api/desktop/backup',
   // PWA assets. Must be reachable pre-auth — the manifest is loaded by
   // every page (including /login); the service worker fails registration
   // if the script fetch hits even one redirect. None of these expose

@@ -20,6 +20,7 @@ const { pathToFileURL } = require('node:url');
 
 let nextChild = null;
 let cronTimer = null;
+let backupTimer = null;
 
 function resourcePath(...p) {
   // Packaged: files live under process.resourcesPath (electron-builder
@@ -80,6 +81,41 @@ function ensureCronSecret() {
 // runs, news ingest, EOD review, self-tune, plus daily digest / alerts / SIPs.
 // Only runs while the app is open (no always-on container here). Jobs that are
 // time-anchored (IST) simply no-op until their window.
+// Age (ms) of the newest self-backup in `dir`, or Infinity if none.
+function newestBackupAgeMs(dir) {
+  try {
+    const files = fs.readdirSync(dir).filter((f) => /^artha-.*\.sql\.gz$/.test(f));
+    if (!files.length) return Infinity;
+    const newest = Math.max(...files.map((f) => fs.statSync(path.join(dir, f)).mtimeMs));
+    return Date.now() - newest;
+  } catch { return Infinity; }
+}
+
+// Periodic self-backup: dump Artha's DB to a .sql in the backups dir when the
+// newest one is older than ~12h. Checks hourly + once at startup, so a daily
+// user gets a roughly-daily backup without churning on quick relaunches. The
+// container has an always-on backup LaunchAgent; the desktop backs up while
+// it's open. Data itself always persists in pgdata — these are point-in-time
+// snapshots, re-importable via the Import screen.
+function startBackupTicker(baseUrl, cronSecret, backupDir) {
+  const DUE_MS = 12 * 60 * 60 * 1000;
+  const maybeBackup = async () => {
+    if (newestBackupAgeMs(backupDir) < DUE_MS) return;
+    try {
+      const r = await fetch(`${baseUrl}/api/desktop/backup`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cronSecret}` },
+      });
+      const d = await r.json().catch(() => ({}));
+      console.log(`[pfd] self-backup: ${r.ok ? d.file : 'failed ' + (d.error || r.status)}`);
+    } catch (e) {
+      console.error('[pfd] self-backup failed:', e.message);
+    }
+  };
+  maybeBackup();
+  backupTimer = setInterval(maybeBackup, 60 * 60 * 1000);
+}
+
 function startCronTicker(baseUrl, cronSecret, intervalMs = 60_000) {
   const tick = async () => {
     try {
@@ -129,6 +165,7 @@ async function boot() {
   const authSecret = ensureAuthSecret();
   const cronSecret = ensureCronSecret();
   const fileEnv = loadDotEnv(); // OPENAI_API_KEY etc. for the analyst (Artha)
+  const backupDir = path.join(app.getPath('documents'), 'Artha Backups');
   const baseUrl = `http://localhost:${nextPort}`;
   const env = {
     // CURATED env — do NOT spread the Electron GUI process's full env. It
@@ -158,8 +195,9 @@ async function boot() {
     AUTH_TRUST_HOST: 'true',
     DEMO_PERSONAL_SWITCH: 'true', // local account chooser, no email round-trip
     MAGIC_LINK_DISPLAY: 'ui',
-    // The app validates /api/cron/tick against this; the ticker below sends it.
+    // The app validates /api/cron/tick + /api/desktop/backup against this.
     CRON_SECRET: cronSecret,
+    PFD_BACKUP_DIR: backupDir, // where /api/desktop/backup writes self-backups
     // Analyst (Artha) LLM key, read from .env.local (dev) / userData (packaged).
     ...(fileEnv.OPENAI_API_KEY ? { OPENAI_API_KEY: fileEnv.OPENAI_API_KEY } : {}),
   };
@@ -187,10 +225,13 @@ async function boot() {
 
   // Drive the scheduler (analyst runs, digest, alerts, SIPs) while the app is open.
   startCronTicker(baseUrl, cronSecret);
+  // Periodic self-backup of Artha's own data (~/Documents/Artha Backups).
+  startBackupTicker(baseUrl, cronSecret, backupDir);
 }
 
 function cleanup() {
   if (cronTimer) { clearInterval(cronTimer); cronTimer = null; }
+  if (backupTimer) { clearInterval(backupTimer); backupTimer = null; }
   // Killing the Next child releases the in-process PGlite (it holds the DB).
   try { if (nextChild) nextChild.kill(); } catch { /* ignore */ }
   nextChild = null;

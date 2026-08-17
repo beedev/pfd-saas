@@ -69,7 +69,7 @@ export default function ImportDataPage() {
         <CardContent>
           <input
             type="file"
-            accept=".sql,text/plain,application/sql"
+            accept=".sql,.gz,text/plain,application/sql,application/gzip"
             onChange={(e) => { setFile(e.target.files?.[0] ?? null); setResult(null); }}
             disabled={busy}
             className="block w-full text-sm text-[var(--dxp-text-secondary)] file:mr-4 file:rounded-lg file:border-0 file:bg-[var(--dxp-brand)] file:px-4 file:py-2 file:text-white hover:file:opacity-90"
