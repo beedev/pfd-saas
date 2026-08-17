@@ -21,6 +21,7 @@ const { pathToFileURL } = require('node:url');
 let nextChild = null;
 let cronTimer = null;
 let backupTimer = null;
+let telegramTimer = null;
 
 function resourcePath(...p) {
   // Packaged: files live under process.resourcesPath (electron-builder
@@ -116,6 +117,23 @@ function startBackupTicker(baseUrl, cronSecret, backupDir) {
   backupTimer = setInterval(maybeBackup, 60 * 60 * 1000);
 }
 
+// Telegram two-way assistant ticker — POST /api/telegram/tick (poll inbound →
+// process inbox → drain outbox) every ~5s, mirroring the container. No-ops when
+// no bot token is set. Only the two-way assistant needs this; one-way alert/
+// digest sends already ride the cron ticker.
+function startTelegramTicker(baseUrl, cronSecret, intervalMs = 5_000) {
+  const tick = async () => {
+    try {
+      await fetch(`${baseUrl}/api/telegram/tick`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cronSecret}` },
+      });
+    } catch { /* transient */ }
+  };
+  telegramTimer = setInterval(tick, intervalMs);
+  console.log(`[pfd] telegram ticker on — POST /api/telegram/tick every ${intervalMs / 1000}s`);
+}
+
 function startCronTicker(baseUrl, cronSecret, intervalMs = 60_000) {
   const tick = async () => {
     try {
@@ -175,6 +193,15 @@ async function boot() {
   try {
     if (fs.existsSync(openaiKeyFile)) openaiKey = fs.readFileSync(openaiKeyFile, 'utf8').trim() || openaiKey;
   } catch { /* ignore */ }
+  // Telegram bot token — same in-app pattern: Settings → Assistant → connect
+  // Telegram writes the token to this file (TELEGRAM_TOKEN_FILE) and applies it
+  // live; we load it on boot. TELEGRAM_CONNECT_MODE=getupdates enables the
+  // in-app token/pairing flow (no public webhook on a desktop).
+  const telegramTokenFile = path.join(app.getPath('userData'), 'telegram-bot-token');
+  let telegramToken = fileEnv.TELEGRAM_BOT_TOKEN || '';
+  try {
+    if (fs.existsSync(telegramTokenFile)) telegramToken = fs.readFileSync(telegramTokenFile, 'utf8').trim() || telegramToken;
+  } catch { /* ignore */ }
   const baseUrl = `http://localhost:${nextPort}`;
   const env = {
     // CURATED env — do NOT spread the Electron GUI process's full env. It
@@ -210,6 +237,10 @@ async function boot() {
     // Analyst (Artha) LLM key + where Settings persists it (raw key file).
     OPENAI_KEY_FILE: openaiKeyFile,
     ...(openaiKey ? { OPENAI_API_KEY: openaiKey } : {}),
+    // Telegram: in-app token management + getUpdates pairing (no webhook).
+    TELEGRAM_TOKEN_FILE: telegramTokenFile,
+    TELEGRAM_CONNECT_MODE: 'getupdates',
+    ...(telegramToken ? { TELEGRAM_BOT_TOKEN: telegramToken } : {}),
   };
   nextChild = spawn(process.execPath, [serverJs], { env, cwd: standaloneDir, stdio: 'inherit' });
   nextChild.on('exit', (code) => console.log(`[pfd] next server exited: ${code}`));
@@ -235,6 +266,8 @@ async function boot() {
 
   // Drive the scheduler (analyst runs, digest, alerts, SIPs) while the app is open.
   startCronTicker(baseUrl, cronSecret);
+  // Telegram two-way assistant (no-op until a bot token is set in Settings).
+  startTelegramTicker(baseUrl, cronSecret);
   // Periodic self-backup of Artha's own data (~/Documents/Artha Backups).
   startBackupTicker(baseUrl, cronSecret, backupDir);
 }
@@ -242,6 +275,7 @@ async function boot() {
 function cleanup() {
   if (cronTimer) { clearInterval(cronTimer); cronTimer = null; }
   if (backupTimer) { clearInterval(backupTimer); backupTimer = null; }
+  if (telegramTimer) { clearInterval(telegramTimer); telegramTimer = null; }
   // Killing the Next child releases the in-process PGlite (it holds the DB).
   try { if (nextChild) nextChild.kill(); } catch { /* ignore */ }
   nextChild = null;
