@@ -12,13 +12,12 @@ CONTAINER=vaspar-pfd
 OUT=${1:-"$HOME/artha-backups/artha-prod-$(date +%d%m%Y-%H%M).sql"}
 mkdir -p "$(dirname "$OUT")"
 
-# Pull DATABASE_URL out of the running Next server process inside the container.
+# Pull DATABASE_URL out of the running Next server (its process title is
+# "next-server", not server.js) — find the first process whose env has it.
 DBURL=$(docker exec "$CONTAINER" sh -c '
   for d in /proc/[0-9]*; do
-    if grep -qa "server.js" "$d/cmdline" 2>/dev/null; then
-      tr "\0" "\n" < "$d/environ" 2>/dev/null | sed -n "s/^DATABASE_URL=//p"
-      break
-    fi
+    v=$(tr "\0" "\n" < "$d/environ" 2>/dev/null | sed -n "s/^DATABASE_URL=//p")
+    if [ -n "$v" ]; then echo "$v"; break; fi
   done')
 
 if [ -z "$DBURL" ]; then
