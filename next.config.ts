@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
   // breaks under Turbopack server bundling. Marking it external keeps it as a
   // raw require() at runtime so its internal worker shim resolves correctly.
   serverExternalPackages: ["pdfjs-dist", "@electric-sql/pglite"],
+  // The desktop "Import from backup" uploads a full pg_dump (tens of MB and
+  // growing with analyst data). Raise the proxy body limit above the 10MB
+  // default so the restore endpoint receives the whole file.
+  experimental: { proxyClientMaxBodySize: '512mb' },
   // Security headers (S13 — partial). Content-Security-Policy is
   // deliberately deferred until it can be browser-tested.
   async headers() {

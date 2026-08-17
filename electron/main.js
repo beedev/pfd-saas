@@ -118,7 +118,10 @@ async function boot() {
   const nextPort = await freePort();
 
   // 1. Apply migrations (open → migrate → close) before the server opens the DB.
-  const bootstrap = await import(pathToFileURL(resourcePath('electron', 'db-bootstrap.mjs')).href);
+  // db-bootstrap.mjs ships next to main.js (in the app), so resolve it from
+  // __dirname — works in dev and in the packaged bundle. (The .next/standalone
+  // and drizzle dirs are extraResources → resourcePath/process.resourcesPath.)
+  const bootstrap = await import(pathToFileURL(path.join(__dirname, 'db-bootstrap.mjs')).href);
   const migRes = await bootstrap.runMigrations({ dataDir, migrationsDir });
   console.log(`[pfd] migrations applied: ${migRes.applied}/${migRes.total}`);
 
@@ -143,6 +146,7 @@ async function boot() {
     PORT: String(nextPort),
     PFD_DB_DRIVER: 'pglite',
     PFD_PGLITE_DIR: dataDir,
+    PFD_MIGRATIONS_DIR: migrationsDir, // import-db route marks these applied after a restore
     AUTH_SECRET: authSecret,
     AUTH_URL: baseUrl,
     NEXTAUTH_URL: baseUrl,
