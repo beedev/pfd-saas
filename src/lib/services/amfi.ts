@@ -2,15 +2,30 @@
  * AMFI NAV service.
  *
  * Fetches and parses the daily NAV file from AMFI India:
- *   https://www.amfiindia.com/spages/NAVAll.txt
+ *   https://portal.amfiindia.com/spages/NAVAll.txt
  *
- * The file is a pipe-delimited ("; " actually ";") text file with section
- * headers (AMC group lines have no semicolons and must be skipped).
+ * The file is a semicolon-delimited text file with section headers (AMC group
+ * lines have no semicolons and must be skipped).
  *
- * Fund lines have the shape:
- *   SchemeCode;ISIN Div Payout/Growth;ISIN Div Reinvestment;SchemeName;NAV;Date
+ * IMPORTANT — the column layout is NOT stable. AMFI has shipped at least two:
  *
- * The full file is ~5 MB and is refreshed once per business day. We cache it
+ *   6-column (historic):
+ *     SchemeCode;ISIN Payout/Growth;ISIN Reinvest;SchemeName;NAV;Date
+ *
+ *   8-column (current, seen 2026-09):
+ *     SchemeCode;ISIN Payout/Growth;ISIN Reinvest;SchemeName;Plan;Option;NAV;Date
+ *
+ * The 8-column change silently broke a front-indexed parser: `cols[4]` went
+ * from being the NAV to being "Direct Plan", every parseFloat returned NaN,
+ * and the whole file parsed to zero funds for ~3 weeks without a single error
+ * being logged (see docs/changes/CHANGES-2026-09-09.md).
+ *
+ * So we anchor to the END of the row instead of the front: NAV and Date are
+ * always the last two fields, the identifiers are always the first three, and
+ * everything between is the scheme's display name. That is correct for both
+ * layouts and survives AMFI inserting further descriptive columns.
+ *
+ * The full file is ~1.5 MB and is refreshed once per business day. We cache it
  * in-memory for 1 hour; if the fetch fails and a cached copy exists, the stale
  * cache is returned so the UI never goes blank.
  */
@@ -23,7 +38,9 @@ export interface AmfiFund {
   navDate: string;  // ISO YYYY-MM-DD
 }
 
-const AMFI_ENDPOINT = 'https://www.amfiindia.com/spages/NAVAll.txt';
+// Canonical host. www.amfiindia.com 302-redirects here; pin the target so we
+// do not depend on a redirect AMFI may retire.
+const AMFI_ENDPOINT = 'https://portal.amfiindia.com/spages/NAVAll.txt';
 const USER_AGENT = 'Mozilla/5.0 (compatible; PersonalFinanceDashboard/1.0)';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -59,10 +76,24 @@ function parseNavAll(text: string): AmfiFund[] {
     const cols = line.split(';');
     if (cols.length < 6) continue;
 
-    const [schemeCode, isinGrowth, isinReinv, schemeName, navStr, dateStr] = cols;
+    // End-anchored: NAV and Date are ALWAYS the final two fields, in both the
+    // 6- and 8-column layouts. Never index the NAV from the front.
+    const navStr = cols[cols.length - 2];
+    const dateStr = cols[cols.length - 1];
 
     const nav = parseFloat(navStr);
     if (!Number.isFinite(nav) || nav <= 0) continue;
+
+    const [schemeCode, isinGrowth, isinReinv] = cols;
+
+    // Everything between the identifiers and the NAV is the display name. In
+    // the 6-column layout that is a single pre-joined field; in the 8-column
+    // layout AMFI splits it into Scheme Name / Plan / Option, so re-join them.
+    const schemeName = cols
+      .slice(3, cols.length - 2)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(' - ');
 
     const isin = (isinGrowth && isinGrowth !== '-' ? isinGrowth : isinReinv).trim();
     if (!schemeCode || !schemeName) continue;
@@ -70,7 +101,7 @@ function parseNavAll(text: string): AmfiFund[] {
     funds.push({
       schemeCode: schemeCode.trim(),
       isin,
-      schemeName: schemeName.trim(),
+      schemeName,
       nav,
       navDate: parseAmfiDate(dateStr),
     });
@@ -92,6 +123,25 @@ async function fetchAndCache(): Promise<AmfiFund[]> {
     }
     const text = await response.text();
     const funds = parseNavAll(text);
+
+    // A non-empty file that yields ZERO funds is a format break, not a quiet
+    // day. Never cache that: caching it would serve an empty NAV universe for
+    // the next hour and turn a parser bug into silent wrong answers everywhere
+    // downstream (SIP execution skips every fund, search returns nothing,
+    // redemptions cannot price). Shout, and keep serving the last good copy.
+    if (funds.length === 0 && text.trim().length > 0) {
+      console.error(
+        `AMFI parse yielded 0 funds from ${text.length} bytes — the NAVAll.txt ` +
+        `column layout has probably changed again. Check parseNavAll(). ` +
+        `First data line: ${text.split(/\r?\n/).find((l) => l.includes(';')) ?? '(none)'}`,
+      );
+      if (cache) {
+        console.info('Serving stale AMFI cache rather than an empty NAV universe');
+        return cache.funds;
+      }
+      return [];
+    }
+
     cache = { funds, timestamp: Date.now() };
     return funds;
   } catch (err) {
