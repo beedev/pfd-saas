@@ -111,6 +111,43 @@ const NEXT_EODREVIEW_IST = sql`(
   ELSE ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '16 hours 30 minutes') AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'UTC' + interval '1 day' END
 )`;
 
+/**
+ * Turn a job's own result payload into a one-line health note.
+ *
+ * A job can complete without throwing and still have done nothing useful — the
+ * SIP executor, for example, pushes every fund it could not price onto a
+ * `skipped` list and returns normally. For ~3 weeks that meant `last_run_status
+ * = success` while ZERO SIPs executed, because AMFI changed its NAV file
+ * layout and every ISIN lookup silently returned null. `scheduled_jobs` is the
+ * only durable record of what cron did, so it has to record that, not just
+ * "no exception was thrown".
+ *
+ * Returns null when the job had nothing worth flagging.
+ */
+function summariseOutcome(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const r = result as {
+    executed?: unknown[];
+    skipped?: { reason?: string }[];
+    errors?: { error?: string }[];
+  };
+  const skipped = Array.isArray(r.skipped) ? r.skipped : [];
+  const errors = Array.isArray(r.errors) ? r.errors : [];
+  if (skipped.length === 0 && errors.length === 0) return null;
+
+  const executed = Array.isArray(r.executed) ? r.executed.length : 0;
+  const parts: string[] = [];
+  if (errors.length > 0) {
+    parts.push(`${errors.length} error(s): ${errors[0]?.error ?? 'unknown'}`);
+  }
+  if (skipped.length > 0) {
+    parts.push(`${skipped.length} skipped: ${skipped[0]?.reason ?? 'unknown'}`);
+  }
+  // The loudest case: the job did nothing at all and blamed it on skips.
+  const prefix = executed === 0 ? 'NOTHING EXECUTED — ' : '';
+  return `${prefix}${parts.join('; ')}`;
+}
+
 interface JobReport {
   userId: string;
   jobType: JobType;
@@ -242,6 +279,13 @@ export async function POST(request: NextRequest) {
 
     report.durationMs = Date.now() - start;
 
+    // Surface non-throwing failure (skips / per-item errors) onto the row too,
+    // so a job that "succeeds" while doing nothing is visible in the DB.
+    const outcomeNote = report.status === 'success' ? summariseOutcome(report.result) : null;
+    if (outcomeNote) {
+      console.warn(`[cron/tick] ${job.jobType} for ${job.userId}: ${outcomeNote}`);
+    }
+
     // Update the scheduled_jobs row regardless of success — bump
     // next_run_at so a failing job doesn't immediately re-fire on the
     // very next tick. Sprint 7+ could add an exponential backoff.
@@ -252,7 +296,7 @@ export async function POST(request: NextRequest) {
       .set({
         lastRunAt: sql`NOW()`,
         lastRunStatus: report.status,
-        lastRunError: report.error ?? null,
+        lastRunError: report.error ?? outcomeNote ?? null,
         runCount: (job.runCount ?? 0) + 1,
         nextRunAt: job.jobType === 'agent_daily_run'
           ? NEXT_DAILY_OPEN_IST
