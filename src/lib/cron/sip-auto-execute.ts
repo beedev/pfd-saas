@@ -141,13 +141,31 @@ export async function runSipAutoExecute(
     let currentSipTotalInvested = sip.totalInvestedSoFar;
     let currentMfUnits = mf.units;
     let currentMfTotalInvestment = mf.totalInvestment;
-    let lastNav = mf.nav;
     let lastXirr = sip.expectedXirr;
 
     while (nextDue < today) {
+      // Preferred source: the NAV actually published on (or first published
+      // after) the due date, from mfapi.in's dated history.
       const historicalNav = await getHistoricalNav(schemeCode, nextDue);
-      let fallbackNavRupees: number | null = null;
-      if (historicalNav === null) {
+
+      let navRupees: number;
+      if (historicalNav !== null) {
+        navRupees = historicalNav;
+      } else {
+        // Fallback: AMFI's NAVAll.txt. It carries ONLY the latest NAV, and on a
+        // fetch failure the service returns a STALE in-memory cache whose age is
+        // not surfaced to the caller. Taking `.nav` from it unconditionally is
+        // how a transient container-DNS outage in early August 2026 wrote ten
+        // installments at the frozen 2026-08-04 NAV — on dates that each had
+        // their own published NAV, and in one case a NAV from BEFORE the due
+        // date, which the on-or-after search can never legitimately return.
+        //
+        // So apply the same on-or-after rule here: the NAV is only an
+        // acceptable price for `nextDue` if it is at least as recent as
+        // `nextDue`. Otherwise skip and let the next run pick it up — the
+        // catch-up `while` loop means nothing is lost by waiting, whereas a
+        // wrong price is written permanently and silently corrupts units,
+        // XIRR and the cost basis.
         const currentFund = await getBySchemeCode(schemeCode);
         if (!currentFund) {
           errors.push({
@@ -157,10 +175,19 @@ export async function runSipAutoExecute(
           });
           break;
         }
-        fallbackNavRupees = currentFund.nav;
+        if (!currentFund.navDate || currentFund.navDate < nextDue) {
+          skipped.push({
+            sipId: sip.id,
+            schemeName,
+            reason:
+              `No NAV published for ${nextDue} yet — refusing to price it from ` +
+              `AMFI's ${currentFund.navDate || 'undated'} NAV. Will retry.`,
+          });
+          break;
+        }
+        navRupees = currentFund.nav;
       }
 
-      const navRupees = historicalNav ?? fallbackNavRupees ?? lastNav / 100;
       const navPaisa = Math.round(navRupees * 100);
       const amountPaisa = sip.monthlyAmount;
       const amountRupees = amountPaisa / 100;
@@ -225,8 +252,6 @@ export async function runSipAutoExecute(
             eq(mutualFunds.userId, userId),
           ),
         );
-
-      lastNav = navPaisa;
 
       // c. Recompute XIRR over the user's full txn history for this fund
       const allTxns = await db
