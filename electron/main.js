@@ -22,6 +22,25 @@ let nextChild = null;
 let cronTimer = null;
 let backupTimer = null;
 let telegramTimer = null;
+let mainWindow = null;
+let appBaseUrl = null;
+
+// Runtime used to spawn the Next server. On macOS the electron-as-node child,
+// if launched from the MAIN app binary, registers as a second foreground app
+// and shows a duplicate Dock icon ("next-server"). Electron's base
+// "<App> Helper.app" binary is marked LSUIElement (dockless), so spawn via that.
+function nodeRunner() {
+  if (process.platform !== 'darwin') return process.execPath;
+  try {
+    const fwDir = path.join(path.dirname(process.execPath), '..', 'Frameworks');
+    const base = fs.readdirSync(fwDir).find((d) => /\bHelper\.app$/.test(d) && !d.includes('('));
+    if (base) {
+      const bin = path.join(fwDir, base, 'Contents', 'MacOS', base.replace(/\.app$/, ''));
+      if (fs.existsSync(bin)) return bin;
+    }
+  } catch { /* fall through */ }
+  return process.execPath;
+}
 
 function resourcePath(...p) {
   // Packaged: files live under process.resourcesPath (electron-builder
@@ -171,6 +190,22 @@ async function boot() {
 
   const nextPort = await freePort();
 
+  // 0. Clear a stale postmaster.pid. A hard crash / force-kill / power loss
+  // leaves this lock in pgdata, which can bring PGlite up READ-ONLY on the next
+  // start (every UPDATE then fails with "read-only transaction" and health goes
+  // db:down). Since always-on restarts Artha after a crash, recover here: if the
+  // PID the lock names is no longer running, it's stale — remove it. If it IS
+  // running, leave it (a real instance holds the DB).
+  try {
+    const pidFile = path.join(dataDir, 'postmaster.pid');
+    if (fs.existsSync(pidFile)) {
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf8').split('\n')[0], 10);
+      let alive = false;
+      if (pid > 0) { try { process.kill(pid, 0); alive = true; } catch { alive = false; } }
+      if (!alive) { fs.rmSync(pidFile, { force: true }); console.log('[pfd] cleared stale postmaster.pid (pid ' + pid + ' not running)'); }
+    }
+  } catch (e) { console.error('[pfd] postmaster.pid check failed:', e); }
+
   // 1. Apply migrations (open → migrate → close) before the server opens the DB.
   // db-bootstrap.mjs ships next to main.js (in the app), so resolve it from
   // __dirname — works in dev and in the packaged bundle. (The .next/standalone
@@ -213,6 +248,13 @@ async function boot() {
     HOME: process.env.HOME,
     TMPDIR: process.env.TMPDIR,
     LANG: process.env.LANG,
+    // NOTE: we deliberately do NOT set TZ=UTC here. The DATABASE session is
+    // pinned to UTC in src/db/index.ts (`SET TIME ZONE 'UTC'`) so naive
+    // `timestamp` columns store UTC and the SQL `AT TIME ZONE` display
+    // conversions on the jobs page are correct. Forcing the whole *process* to
+    // UTC additionally broke server-side JavaScript date formatting (anything
+    // not explicitly bound to Asia/Kolkata rendered 5:30 behind), so the process
+    // keeps the host's local timezone while the DB stays UTC.
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
     HOSTNAME: 'localhost',
@@ -242,7 +284,11 @@ async function boot() {
     TELEGRAM_CONNECT_MODE: 'getupdates',
     ...(telegramToken ? { TELEGRAM_BOT_TOKEN: telegramToken } : {}),
   };
-  nextChild = spawn(process.execPath, [serverJs], { env, cwd: standaloneDir, stdio: 'inherit' });
+  // Spawn via nodeRunner() — the dockless LSUIElement Helper on macOS — so the
+  // Next server child doesn't register as a second app in the Dock.
+  const runner = nodeRunner();
+  console.log(`[pfd] next server runner: ${runner}`);
+  nextChild = spawn(runner, [serverJs], { env, cwd: standaloneDir, stdio: 'inherit' });
   nextChild.on('exit', (code) => console.log(`[pfd] next server exited: ${code}`));
 
   // 3. Window once healthy.
@@ -252,17 +298,8 @@ async function boot() {
     app.quit();
     return;
   }
-  const win = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    title: 'Personal Finance',
-    backgroundColor: '#0b0b0c',
-    webPreferences: { contextIsolation: true },
-  });
-
-  win.webContents.on('did-fail-load', (_e, code, desc, url) =>
-    console.error(`[pfd] window load failed: ${code} ${desc} ${url}`));
-  win.loadURL(baseUrl);
+  appBaseUrl = baseUrl;
+  createWindow();
 
   // Drive the scheduler (analyst runs, digest, alerts, SIPs) while the app is open.
   startCronTicker(baseUrl, cronSecret);
@@ -270,6 +307,20 @@ async function boot() {
   startTelegramTicker(baseUrl, cronSecret);
   // Periodic self-backup of Artha's own data (~/Documents/Artha Backups).
   startBackupTicker(baseUrl, cronSecret, backupDir);
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1440,
+    height: 920,
+    title: 'Personal Finance',
+    backgroundColor: '#0b0b0c',
+    webPreferences: { contextIsolation: true },
+  });
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) =>
+    console.error(`[pfd] window load failed: ${code} ${desc} ${url}`));
+  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.loadURL(appBaseUrl);
 }
 
 function cleanup() {
@@ -286,5 +337,13 @@ app.whenReady().then(boot).catch((e) => {
   app.quit();
 });
 
-app.on('window-all-closed', () => { cleanup(); app.quit(); });
+// Always-on: closing the window does NOT stop Artha — the server, cron, and
+// analyst keep running in the background. Re-open the window from the Dock icon
+// (the 'activate' handler). Only an explicit Quit (Cmd-Q) tears things down.
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') { cleanup(); app.quit(); }
+});
+app.on('activate', () => {
+  if (mainWindow === null && appBaseUrl) createWindow();
+});
 app.on('before-quit', cleanup);

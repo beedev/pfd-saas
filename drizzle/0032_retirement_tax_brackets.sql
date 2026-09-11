@@ -5,8 +5,8 @@
 -- the band in RUPEES (not paisa — matches how the user thinks about
 -- "₹10L slab"). The compute lib applies standard slab math.
 --
--- Default: 0% up to ₹10L, 15% ₹10L-₹30L, 25% above ₹30L. This is
--- Bharath's planning starting point — conservative, reflects the
+-- Default: 0% up to ₹10L, 15% ₹10L-₹30L, 25% above ₹30L. This is a
+-- conservative planning starting point — it reflects the
 -- typical post-retirement income mix (pension + capital gains +
 -- some rental). Configurable per user via the /settings page editor.
 --

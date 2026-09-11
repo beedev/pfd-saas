@@ -34,14 +34,59 @@ no `-e` secrets needed on redeploy. Monthly DB backup →
 `~/pfd-backups/vaspar-pfd-db-backup-DDMMYYYY.dump` via the
 `com.bharath.vaspar-pfd-backup` LaunchAgent.
 
-Redeploy vaspar-pfd (**only when intentionally shipping a prod change**):
+Redeploy vaspar-pfd (**only when intentionally shipping a prod change**) — use
+the script, never hand-rolled docker commands:
 ```bash
-docker build -t vaspar-pfd:latest .          # in ~/Desktop/pfd-saas
-docker rm -f vaspar-pfd
-docker run -d --name vaspar-pfd --restart unless-stopped -p 9999:3000 \
-  -v vaspar-pfd-data:/data -e AUTH_URL=http://localhost:9999 -e DEMO_PERSONAL_SWITCH=true \
-  vaspar-pfd:latest
+scripts/deploy-prod.sh        # run from a CLEAN checkout of the prod branch
 ```
+`scripts/deploy-prod.sh` is the only sanctioned prod deploy. It does five
+things a manual `docker build && docker rm -f && docker run` silently skips:
+
+1. **Hard clean-tree gate** — refuses to build if `git status --porcelain` is
+   non-empty. This exists because of the **2026-06-21 incident**: an *untracked*
+   migration (`0043_form_16a_uploads.sql`) sat in the working tree, `docker
+   build` copied it in (`.dockerignore` does not exclude `drizzle/`), it was
+   applied to the prod DB, and a later regenerate of that same migration
+   collided on prod with "relation already exists". Prod images come from
+   committed code only.
+2. Backs up the prod DB first via `scripts/backup-vaspar-pfd.mjs`.
+3. Stamps the image with `--label git.sha=… --label git.branch=…`, so you can
+   always ask a running container which commit it is.
+4. Passes **`-e APP_OWNER=Bharath`** — easy to forget by hand.
+5. Waits on `/api/health` (up to 180s) and fails loudly if it never goes green.
+
+Don't confuse it with **`scripts/deploy.sh`**, which is the *generic self-host*
+deploy (container `pfd-saas`, port 3000, volume `pfd_saas_data`) used by testers
+following README-DOCKER.md. It is NOT the prod path and will not touch
+vaspar-pfd.
+
+**Deploying is the human's job.** Tearing down the prod container is refused by
+the permission layer for the agent — `docker rm -f vaspar-pfd`,
+`docker run … vaspar-pfd`, and `scripts/deploy-prod.sh` itself are all blocked,
+as are writes to the prod DB (`psql … -c "UPDATE …"`). Don't burn turns
+retrying or looking for a way around it: build and verify the image, then hand
+Bharath the exact command to paste with a leading `!`. Reading prod
+(`docker exec … psql … SELECT`), building an image, and `docker cp` are allowed.
+
+**Deploying from a git worktree.** The clean-tree gate means you usually cannot
+deploy from `~/Desktop/pfd-saas` (it normally carries in-flight edits). Add a
+worktree on the prod branch, commit there, and run the script from inside it —
+`deploy-prod.sh` resolves `REPO_ROOT` from its own location, so it builds that
+worktree:
+```bash
+git worktree add /tmp/wt-prod feat/analyst-agent && cd /tmp/wt-prod
+# …commit the fix here… then
+scripts/deploy-prod.sh
+```
+
+**Backups already run on a schedule — do not create ad-hoc dumps.** Three
+layers already exist: `docker-entrypoint.sh` takes a `pre-migrate-*.dump` in
+`/data/backups` on *every* container start (keeps the last 7),
+`deploy-prod.sh` calls `backup-vaspar-pfd.mjs` → `~/pfd-backups/`, and the
+`com.bharath.vaspar-pfd-backup` LaunchAgent runs monthly on the 1st at 03:00.
+Before a risky write, point at the most recent of those rather than adding
+another dump. (Ad-hoc dumps also don't match the `pre-migrate-*` glob, so the
+entrypoint never prunes them.)
 
 **⚠️ Which branch is prod built from? `feat/analyst-agent`, NOT `main`.**
 This is the deploy gotcha to remember:
@@ -58,7 +103,31 @@ committed on `feat/analyst-agent` too — not just `main` — or the next prod
 rebuild silently drops it**, because prod is built from that branch. Standard
 flow for a core fix: commit to `main` → `git merge main` into
 `feat/analyst-agent` → rebuild vaspar-pfd. (Example: budget cross-year fix
-`9ec488d`, 2026-08-05 — landed on main, merged into analyst, then prod rebuilt.)
+`9ec488d`, 2026-08-05 — landed on main, merged into analyst, then prod rebuilt.
+Same again for the AMFI/SIP fixes, 2026-09-09/11.)
+
+**There are THREE live lineages, not two — check which one you're on.** As of
+2026-09-11:
+
+| branch | merged into `main`? | role |
+|---|---|---|
+| `feat/telegram-assistant` | ✅ yes | two-way bot; now part of `main`, so prod gets it via the merge |
+| `feat/tax-engine-refactor` | ✅ yes | folded in |
+| `feat/analyst-agent` | ❌ never (by design) | **the prod branch.** Build vaspar-pfd from here |
+| `feat/desktop-analyst` | ❌ no | Electron + PGlite desktop app (`.dmg`). **Diverged** from `feat/analyst-agent` — 19 ahead, 5 behind |
+| `feat/desktop-app` | ❌ no | earlier desktop attempt |
+| `feat/recurring-deposits` | ❌ no | unmerged feature |
+
+`feat/desktop-analyst` is usually the checked-out branch in
+`~/Desktop/pfd-saas`, and it is **not** a superset of the prod branch — it is a
+separate lineage that does not receive core fixes automatically. Never build
+vaspar-pfd from it. Verify before deploying:
+```bash
+git grep -c '<a string from the fix>' feat/analyst-agent -- <path>
+```
+Use `git grep <pattern> <branch> -- <path>`, not `git show <branch>:<path> | grep`
+inside a shell loop — the latter silently produced wrong zero-counts on
+2026-09-11 and nearly triggered a false alarm that the fixes had been lost.
 
 **Telegram + cron run automatically ONLY in vaspar-pfd.** Dev never auto-sends:
 `npm run dev` has no scheduler, and any throwaway Docker test container must run
@@ -958,6 +1027,67 @@ Still deferred from Sprint 4:
   `rm -rf uploads/<userId>` in one shot. Reads always resolve the
   DB-stored path (`path.resolve(process.cwd(), stored)`), so legacy
   scope-first files on disk keep working.
+- **Never let market data of unknown age become a transaction price.** Learned
+  the hard way in Sept 2026 (see `docs/changes/CHANGES-2026-09-09.md`). Two
+  rules fall out of it:
+    - **Parse third-party feeds end-anchored, not front-indexed.** AMFI silently
+      changed `NAVAll.txt` from 6 columns to 8 by splitting the scheme name into
+      `Scheme Name / Plan / Option`. `parseNavAll()` read the NAV from `cols[4]`,
+      which became the string `"Direct Plan"`; `parseFloat` returned `NaN` and
+      **every line in a 1.5 MB file was dropped** for three weeks. NAV and date
+      are now taken as `cols[len-2]` / `cols[len-1]`, which is correct for both
+      layouts and survives further columns being inserted in the middle.
+      `scripts/check-amfi-nav-feed.mjs` is the canary — it asserts the feed still
+      matches that assumption rather than re-implementing the parser.
+    - **A cache that can serve stale data must expose its age, and price paths
+      must check it.** `AmfiFund` always carried `navDate`; nothing read it.
+      `getAllNavs()` returns a stale in-memory copy when the fetch throws, so
+      during a container-DNS outage `getBySchemeCode().nav` kept handing back a
+      frozen NAV and `sip-auto-execute` wrote it as a real purchase price.
+      The AMFI fallback now only prices `nextDue` when `navDate >= nextDue`,
+      mirroring the on-or-after rule `getHistoricalNavOn` already used; otherwise
+      it **skips and retries**. A missed installment that prices correctly
+      tomorrow beats a wrong one written permanently. Historical NAV comes from
+      mfapi.in's *dated* history and is the preferred source precisely because
+      each point carries its own date.
+    - Weekend/holiday due dates correctly take the **next published NAV** (the
+      on-or-after search), matching how an AMC processes a non-business-day SIP.
+      That behaviour is intentional — don't "fix" it.
+- **A cron job that did nothing must not report success.** `cron/tick` only
+  marked a job failed if it *threw*, while `runSipAutoExecute` pushes unpriceable
+  funds onto a `skipped[]` list and returns normally. Result: 90 consecutive
+  `last_run_status = success` rows, an empty `last_run_error`, and 22 days of
+  zero log output while every SIP silently skipped. `summariseOutcome()` in
+  `src/app/api/cron/tick/route.ts` now folds a job's own `skipped`/`errors`
+  payload into `last_run_error` even on success, prefixed `NOTHING EXECUTED —`
+  when nothing ran. Any new job returning `{executed, skipped, errors}` gets this
+  for free; preserve the shape.
+- **`mutual_funds.units` is NOT derivable from `investment_transactions`.** Funds
+  carried over from the v1 import have large opening balances with no transaction
+  rows behind them (e.g. id 4 = 2766.79 units, id 8 = 433.77). Any correction to
+  holdings must apply a **delta**, never `SUM(quantity)` — a "recompute from
+  transactions" would destroy most of the position. The same caveat applies to
+  XIRR, which is computed from transaction flows only.
+
+## Docs worth reading before you touch anything
+
+- `docs/ARCHITECTURE.md` — arc42 architecture doc (context, building blocks,
+  runtime + deployment views, ADRs, risks). Start here for the big picture.
+- `docs/changes/CHANGES-YYYY-MM-DD.md` — the daily change log. The most reliable
+  record of *why* something is the way it is; grep it before assuming a quirk is
+  an accident.
+- `docs/backup-restore.md` — `scripts/pfd-backup.sh` / `pfd-restore.sh`, portable
+  across hosts and same-major Postgres versions.
+- `docs/portability.md` — the Settings export/import over all 72 user-scoped
+  tables.
+- `docs/DESKTOP-ARTHA-HANDOFF.md` — Electron + PGlite desktop build state.
+- `docs/PLAN-telegram-assistant.md` — the two-way bot design.
+  Operational note: the bot is reachable by anyone who finds it. A stranger
+  `/start`ed it on 2026-08-01, blocked it, and the bot then logged ~46,785
+  `Forbidden: bot was blocked by the user` retries over six days. A permanent
+  Telegram 403/400 should terminate a send, not retry forever.
+- `README-DOCKER.md` (self-host), `README-DESKTOP.md` (macOS app),
+  `docs/agent-strategy-plain-english.md` (analyst agent in plain English).
 
 ## Stack
 

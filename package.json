@@ -112,6 +112,34 @@
       "category": "public.app-category.finance",
       "identity": null
     },
+    "dmg": {
+      "window": {
+        "width": 600,
+        "height": 460
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 170
+        },
+        {
+          "x": 450,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 150,
+          "y": 340,
+          "path": "build/Install Artha.command"
+        },
+        {
+          "x": 450,
+          "y": 340,
+          "path": "README-DESKTOP.md"
+        }
+      ]
+    },
     "npmRebuild": false,
     "afterPack": "electron/after-pack.js"
   }

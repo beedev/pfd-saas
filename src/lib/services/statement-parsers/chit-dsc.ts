@@ -58,7 +58,7 @@ function extractBranch(stream: string): string | null {
 }
 
 function extractSubscriberName(stream: string): string | null {
-  // "Name : Agent Name : : : : : : : : : : : : BHARATHWAJAN D S/O DEVANATHAN G ..."
+  // "Name : Agent Name : : : : : : : : : : : : SAMPLE SUBSCRIBER S/O FATHER NAME ..."
   // Subscriber name is the first ALL-CAPS token sequence after the colon block.
   const m = /Agent Name\s*:(?:\s*:)+\s+([A-Z][A-Z .]+?)\s+(?:S\/O|D\/O|W\/O|PLOT)/i.exec(stream);
   return m ? m[1].trim() : null;

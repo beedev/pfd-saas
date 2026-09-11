@@ -37,6 +37,13 @@ if (process.env.PFD_DB_DRIVER === 'pglite') {
   const g = globalThis as unknown as { __pfdPglite?: PGlite };
   g.__pfdPglite ??= new PGlite(dir);
   pgliteInstance = g.__pfdPglite;
+  // Force the DB session to UTC so `NOW()` written into naive `timestamp`
+  // columns stores UTC — matching the Postgres/Docker convention the whole app
+  // assumes. PGlite otherwise inherits the host's local timezone, which shifts
+  // every stored time (and its later `AT TIME ZONE` display) by the local
+  // offset. Enqueued on PGlite's single FIFO connection before any request-time
+  // query, so it applies first; idempotent if the module re-evaluates.
+  void pgliteInstance.exec("SET TIME ZONE 'UTC'");
   // Both drivers are PgDatabase subclasses with an identical query API; the
   // cast keeps the app's existing postgres-js-typed call sites happy while the
   // runtime object is the pglite one.
