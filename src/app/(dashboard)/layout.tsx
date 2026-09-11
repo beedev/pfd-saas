@@ -72,7 +72,7 @@ export default async function DashboardLayout({
           // to mailto so the link always works; testers/deployers
           // override via `-e FEEDBACK_URL=https://github.com/.../issues/new`.
           process.env.FEEDBACK_URL ||
-          'mailto:bharath.devanathan@htcinc.com?subject=pfd-saas%20feedback'
+          'mailto:vaspar@gmail.com?subject=Artha%20feedback'
         }
         // Sprint 6.1.9d — built-in account switcher (Docker self-host).
         // The env flag lives on the server; bridge it via prop so the
