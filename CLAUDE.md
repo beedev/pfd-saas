@@ -129,23 +129,6 @@ Use `git grep <pattern> <branch> -- <path>`, not `git show <branch>:<path> | gre
 inside a shell loop — the latter silently produced wrong zero-counts on
 2026-09-11 and nearly triggered a false alarm that the fixes had been lost.
 
-**⚠️ Which branch is prod built from? `feat/analyst-agent`, NOT `main`.**
-This is the deploy gotcha to remember:
-
-| Target | Built from | Has the analyst (Artha)? |
-|--------|-----------|--------------------------|
-| **Everyone / self-host** (GHCR image, built on `git push` of `main`) | `main` | ❌ no — analyst is never merged to main |
-| **vaspar-pfd (Bharath's prod)** | local `docker build` on the `feat/analyst-agent` working tree | ✅ yes |
-
-The analyst code lives ONLY on `feat/analyst-agent` (isolated to `api/agent/**`,
-`lib/agent/**`, `investments/analyst/**`) and stays out of `main` on purpose, so
-the public image never ships it. Consequence: **a core (non-analyst) fix must be
-committed on `feat/analyst-agent` too — not just `main` — or the next prod
-rebuild silently drops it**, because prod is built from that branch. Standard
-flow for a core fix: commit to `main` → `git merge main` into
-`feat/analyst-agent` → rebuild vaspar-pfd. (Example: budget cross-year fix
-`9ec488d`, 2026-08-05 — landed on main, merged into analyst, then prod rebuilt.)
-
 **Telegram + cron run automatically ONLY in vaspar-pfd.** Dev never auto-sends:
 `npm run dev` has no scheduler, and any throwaway Docker test container must run
 with `-e DISABLE_CRON=true`.
@@ -343,7 +326,7 @@ attempt made it worse. Keep using that pattern for new migrations.
   `/start`ed it on 2026-08-01, blocked it, and the bot then logged ~46,785
   `Forbidden: bot was blocked by the user` retries over six days. A permanent
   Telegram 403/400 should terminate a send, not retry forever.
-- `README-DOCKER.md` (self-host), `README-DESKTOP.md` (macOS app),
+- `README-DOCKER.md` (self-host),
   `docs/agent-strategy-plain-english.md` (analyst agent in plain English).
 
 ## Stack
@@ -479,12 +462,12 @@ is the one paid dependency and analyst-only.
 
 | service | used for | client | notes |
 |---|---|---|---|
-| **AMFI** `portal.amfiindia.com/spages/NAVAll.txt` | latest MF NAV + ISIN→scheme-code index | `services/amfi.ts` | **Format has changed before** (6→8 columns, Sept 2026) and killed every MF feature silently. Parse end-anchored; canary at `scripts/check-amfi-nav-feed.mjs`. Carries only the *latest* NAV — never price a dated transaction from it without checking `navDate`. |
-| **mfapi.in** `api.mfapi.in/mf/<code>` | **dated** NAV history | `services/amfi.ts` | preferred for anything date-sensitive, because each point carries its own date |
-| **Yahoo Finance v8** | stocks, `<CCY>INR=X` FX, `GC=F` gold | `services/yahoo-finance.ts` | 5-min quote cache |
-| **IBJA** | India gold rates | `services/ibja.ts` | |
+| **AMFI** `portal.amfiindia.com/spages/NAVAll.txt` | latest MF NAV + ISIN→scheme-code index | `src/lib/services/amfi.ts` | **Format has changed before** (6→8 columns, Sept 2026) and killed every MF feature silently. Parse end-anchored; canary at `scripts/check-amfi-nav-feed.mjs`. Carries only the *latest* NAV — never price a dated transaction from it without checking `navDate`. |
+| **mfapi.in** `api.mfapi.in/mf/<code>` | **dated** NAV history | `src/lib/services/amfi.ts` | preferred for anything date-sensitive, because each point carries its own date |
+| **Yahoo Finance v8** | stocks, `<CCY>INR=X` FX, `GC=F` gold | `src/lib/services/yahoo-finance.ts` | 5-min quote cache |
+| **IBJA** | India gold rates | `src/lib/services/ibja.ts` | |
 | **NSE bhavcopy / RSS** | analyst prices + news | `agent/providers/`, `agent/news/` | analyst branch only |
-| **Telegram Bot API** | alerts, digests, two-way assistant | `services/telegram.ts` | token in `/data/.secrets/telegram_bot_token`. A **permanent** 403 (blocked/chat-not-found) must terminate a send — `drainOutbox` currently retries it forever. |
+| **Telegram Bot API** | alerts, digests, two-way assistant | `src/lib/services/telegram.ts` | token in `/data/.secrets/telegram_bot_token`. A **permanent** 403 (blocked/chat-not-found) must terminate a send — `drainOutbox` currently retries it forever. |
 | **OpenAI** | analyst LLM calls | `agent/**` | key in `/data/.secrets/openai_api_key`; **the only paid dependency** |
 
 Every unwired integration is tracked in `STUBS.md`. When you replace a stub, move
@@ -494,12 +477,17 @@ its entry to "Replaced" with the date and commit hash.
 
 - `DATABASE_URL` — `postgresql://user@host:port/dbname`
 - `AUTH_SECRET` — random 32+ bytes (`openssl rand -base64 32`)
-- `NEXTAUTH_URL` — `http://localhost:3000` for dev; canonical https URL
-  in prod
-- `EMAIL_FROM` — sender address on outgoing magic-link emails (used by
-  Auth.js display; the actual send is stubbed in Sprint 1)
-- `EMAIL_SERVER` — SMTP connection string, real Sprint 5+, ignored while
-  stubbed
+- `AUTH_URL` — the host:port the **browser** will use. Auth.js v5 name; the old
+  `NEXTAUTH_URL` is not read anywhere. `http://localhost:3000` in dev;
+  `deploy-prod.sh` passes `http://localhost:9999`. Without it, post-login
+  redirects point at the container's internal bind address and break.
+- `EMAIL_FROM` — sender address on outgoing magic-link emails. Defaults to
+  `noreply@pfd-saas.local`.
+- `EMAIL_SERVER` — SMTP connection string. **Real and working** (Nodemailer;
+  Gmail / Resend / Postmark all fine). Required for `MAGIC_LINK_DISPLAY=email`;
+  without it that mode silently degrades to `ui`.
+- `MAGIC_LINK_DISPLAY` — `ui` (default) | `email` | `both`. Read at boot. See
+  "Sign-in flow" above.
 - `CRON_SECRET` — bearer token gating `/api/cron/tick`
 - `TELEGRAM_BOT_TOKEN` — single bot token. One bot serves every user;
   chat IDs are per-user (stored on `user_preferences.telegram_chat_id`).
@@ -528,19 +516,40 @@ The script reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` from
 env / `.env.local`. Telegram persists the registration — re-run only if
 you change hosts or rotate the secret.
 
-## Sign-in flow (Sprint 1 — email send is STUBBED)
+## Sign-in flow — three modes, and prod uses none of them
 
-1. Visit `/` → middleware redirects to `/login`.
-2. Enter email, submit.
-3. Land on `/login/check-email`. In dev, the page itself tells you the
-   stub is active.
-4. Grab the magic-link URL from either:
-   - the `npm run dev` terminal (banner: `🔑 MAGIC LINK ...`)
-   - `tmp/magic-links.log` (newline-delimited JSON)
-5. Paste the URL in the same browser, Auth.js validates the token,
-   creates a row in `session`, redirects to `/`.
+**Email is NOT stubbed** (it was in Sprint 1; real SMTP landed in Sprint 2). The
+behaviour is selected by `MAGIC_LINK_DISPLAY`, read at **boot** — restart after
+changing it. See `buildEmailProvider()` in `src/auth.ts`.
 
-See `STUBS.md` for the full list of stubbed integrations.
+| `MAGIC_LINK_DISPLAY` | behaviour |
+|---|---|
+| `ui` (**default**) | no email sent. The link is surfaced in the browser via `/api/auth/pending-link`, and also written to stdout and `tmp/magic-links.log`. In-memory cache, 5-min TTL, single-use. Default for the Docker self-host image. |
+| `email` | real SMTP via Nodemailer — needs `EMAIL_SERVER`. The production SaaS path. |
+| `both` | surfaces in the UI *and* sends. For demos. |
+
+**`email` silently degrades to `ui` when `EMAIL_SERVER` is unset** — there is
+nothing to send to. If you think SMTP is configured and it is not, you get the UI
+flow with no error.
+
+**On `vaspar-pfd` (prod), magic-link is not the login path at all.**
+`DEMO_PERSONAL_SWITCH=true` replaces `/login` with a two-card Demo/Personal chooser
+that mints a session directly (`POST /api/auth/switch-account`). Set it to `false`
+to restore magic-link. That switcher is **localhost-single-machine only** — never
+expose it beyond that; see the security caveat in `README-DOCKER.md`.
+
+Magic-link flow when it *is* active:
+
+1. `/` → middleware redirects to `/login`.
+2. Enter email, submit → `/login/check-email`.
+3. In `ui` mode the page polls `/api/auth/pending-link` every 800 ms for up to 10 s
+   and shows a "Sign in as you@example.com →" button. In dev you can also take the
+   link from the `npm run dev` terminal (`🔑 MAGIC LINK …`) or
+   `tmp/magic-links.log` (newline-delimited JSON).
+4. Auth.js validates the token, writes a `session` row, redirects to `/`.
+
+`STUBS.md` tracks what genuinely *is* still stubbed — check it there rather than
+trusting a heading.
 
 ## Importing personal-v1 data into a fresh pfd-saas
 
@@ -573,9 +582,11 @@ email); it stamps `user_id` on every imported row.
 - Money columns are `bigint` where they hold sums (real estate value,
   chit value, total balance, etc.). Per-unit prices, IDs, counters,
   ages stay `integer`.
-- Cron-driven endpoints (`/api/alerts/check`, `/api/daily-digest`,
-  `/api/investments/sips/auto-execute`) return 503 with `TODO(sprint-2)`.
-  Per-tenant cron scheduling lands in Sprint 2 Phase 5.
+- ~~Cron-driven endpoints return 503 with `TODO(sprint-2)`~~ — **no longer true.**
+  Per-tenant cron shipped in Sprint 2 Phase 5. `/api/alerts/check`,
+  `/api/daily-digest` and `/api/investments/sips/auto-execute` all work and are
+  dispatched from `/api/cron/tick`; the SIP one is also reachable from the
+  "Auto-execute all" button on `/investments/sips`.
 
 ## Don't
 
