@@ -327,7 +327,8 @@ attempt made it worse. Keep using that pattern for new migrations.
   `Forbidden: bot was blocked by the user` retries over six days. A permanent
   Telegram 403/400 should terminate a send, not retry forever.
 - `README-DOCKER.md` (self-host),
-  `docs/agent-strategy-plain-english.md` (analyst agent in plain English).
+  `docs/agent-strategy-plain-english.md` (analyst agent in plain English — on
+  `feat/analyst-agent` only, per the analyst-isolation rule; absent on `main`).
 
 ## Stack
 
