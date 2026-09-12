@@ -1119,15 +1119,136 @@ Still deferred from Sprint 4:
 
 ```bash
 npm install
-npm run db:generate            # generate Drizzle migration from schema.ts
-npm run db:migrate             # apply pending migrations
-npm run dev -- --port 3000     # dev server (port assigned by ~/.appregistry)
+npm run dev -- --port 3000     # dev server (port 3000 — see App Registry below)
 npm run build                  # production build
 npm run lint
+
+npm run db:generate            # generate a Drizzle migration from schema.ts
+npm run db:migrate             # apply pending migrations  (see the journal caveat)
+npm run db:verify              # sanity-check the DB connection + schema hash
+npm run db:studio              # Drizzle Studio, browse the dev DB
+
+npm run smoke:tax              # 20-endpoint tax API smoke test (see Testing below)
 ```
 
-No test suite yet; the smoke-test convention is to load the owner's
-imported data (Sprint 1.5) and walk every page.
+Two lifecycle hooks fire automatically, which explains otherwise-confusing
+output:
+
+- **`predev` → `scripts/db-verify.mjs`.** `npm run dev` verifies the DB first. If
+  it complains, your `DATABASE_URL` or schema is out of step — fix that before
+  reading anything else as a bug.
+- **`prebuild` → `scripts/compute-schema-hash.mjs`.** `npm run build` stamps a
+  schema hash; a mismatch at runtime means the build and the DB disagree.
+
+**Dev needs the host Postgres**, not the container: `postgresql://…@localhost:5432/pfd_saas`.
+Dev has **no scheduler and never auto-sends Telegram** — trigger jobs by hand with
+`POST /api/cron/tick`.
+
+## Testing and smoke tests
+
+There is no unit-test suite. There *are* three real smoke tests — prefer them over
+clicking around:
+
+| command / script | covers | notes |
+|---|---|---|
+| `npm run smoke:tax` | 20 tax + finance API endpoints, asserts 200 (or a documented non-200) | needs the dev server running with `DEV_AUTH_BYPASS=true`; sends `x-dev-as-user: <USER_ID>` per request. Refuses to run when `NODE_ENV=production`. |
+| `node scripts/smoke-portability.mjs` | export → wipe → import round-trip over all 72 user-scoped tables | destructive to the target user's data — use a throwaway user |
+| `./scripts/smoke-backup.sh` | `pfd-backup.sh` → `pfd-restore.sh` round-trip | container-level |
+
+Run the tax smoke in two terminals:
+
+```bash
+# terminal 1
+DEV_AUTH_BYPASS=true npm run dev
+# terminal 2
+npm run smoke:tax
+```
+
+`scripts/check-amfi-nav-feed.mjs` is a **canary**, not a test: it asserts the live
+AMFI feed still matches what `parseNavAll()` assumes (NAV second-to-last column,
+date last). Run it whenever MF numbers look wrong — it is the fastest way to rule
+in or out a third-party format change.
+
+## Diagnosing a reported failure
+
+The 2026-09 AMFI incident is the worked example: SIPs silently stopped for three
+weeks while cron reported `success` on every run. Work outward from the data, and
+**do not trust that a green status means the job did anything.** Full command
+reference in `docs/OPERATIONS-RUNBOOK.md`.
+
+1. **Is the thing even running?** `docker ps`, then
+   `docker inspect vaspar-pfd --format '{{index .Config.Labels "git.sha"}}'` to see
+   *which commit* is live. A fix you merged is not a fix you deployed.
+2. **What does the job ledger say?** Query `scheduled_jobs` for `last_run_at`,
+   `last_run_status`, `last_run_error` and `(next_run_at <= NOW())`. Remember a
+   24 h job is not due just because you restarted, and that `success` historically
+   meant only "did not throw" — the `NOTHING EXECUTED —` prefix now marks a run
+   that skipped everything.
+3. **Did the expected rows appear?** Go to the domain table
+   (`investment_transactions`, `cashflow_events`, `alert_history`, …) and check
+   dates, not just counts. A wrong *value* is worse than a missing row and will not
+   show up as an error anywhere.
+4. **Bound the log window.** `docker logs --since 2m` and `--timestamps`. The log is
+   cumulative across restarts and the app only logs on error, so the tail is
+   whatever last broke — possibly weeks ago. **Silence is not health.**
+5. **Suspect the external feed.** Most "the app broke" reports are really AMFI,
+   mfapi.in, Yahoo or IBJA changing shape or a DNS wedge. Run
+   `node scripts/check-amfi-nav-feed.mjs`, and test DNS from *inside* the container
+   (`docker exec vaspar-pfd sh -lc 'nslookup api.mfapi.in'`) — container DNS dies
+   roughly biweekly here.
+6. **Compare against the source of truth**, never against what the DB already says.
+   For NAVs that means mfapi.in's dated history; for tax it means the Yeswanth
+   reference sheet.
+7. **Check `docs/changes/`** before concluding a quirk is a bug. Several are
+   deliberate and documented.
+
+## Key modules — where things live
+
+`src/lib` is the compute layer; keep it pure and pass `userId` in rather than
+reaching for the session.
+
+| path | files | what it is |
+|---|---|---|
+| `src/lib/finance/` | 54 | **All the money math**, pure and testable. Biggest: `cashflow-derivation.ts` (859), `goal-corpus.ts`, `tax-compute.ts`, `deduction-engine.ts`, `form-26as-recon.ts`, `goal-projection.ts`, `chit-calculator.ts`, `capital-gains-tax.ts`. Tax libs each cite the Yeswanth template row they mirror. |
+| `src/lib/services/` | 17 | **External API clients** — `amfi.ts` (NAV + mfapi.in history), `yahoo-finance.ts` (stocks, FX, gold), `ibja.ts` (gold), `telegram.ts`, plus `statement-parsers/` for PDF/xlsx import. |
+| `src/lib/cron/` | 8 | One module per scheduled job, dispatched from `api/cron/tick`. |
+| `src/lib/agent/` | 74 | **Analyst (Artha)** — only on `feat/analyst-agent`, never on `main`. |
+| `src/lib/reports/` | 24 | GST / ITR / filing-pack generation. |
+| `src/lib/telegram-assistant/` | 10 | Two-way bot: `poll` → `telegram_inbox` → `worker` → `telegram_outbox` → `send`. |
+| `src/lib/portability/` | 6 | Settings export/import across all 72 user-scoped tables. |
+| `src/lib/api/` | 2 | `auth-guard.ts` (`getSessionUserId`) + `parseBody` — the convention every route uses. |
+| `src/db/schema.ts` | — | Single Drizzle schema for every table. |
+
+Route pattern reference: `src/app/api/investments/nps/` — copy its userId scoping.
+
+## Installation paths (three of them)
+
+| audience | how | what they get |
+|---|---|---|
+| **Self-hosters** | `curl -fsSL https://raw.githubusercontent.com/beedev/pfd-saas/main/install.sh \| bash` — pulls the prebuilt GHCR image | built from **`main`** on push, so **no analyst**. `install.sh` at the repo root. |
+| **Self-host from source** | `./scripts/deploy.sh` (container `pfd-saas`, port 3000, volume `pfd_saas_data`) | see `README-DOCKER.md` |
+| **Bharath's prod** | `scripts/deploy-prod.sh` (container `vaspar-pfd`, port 9999, volume `vaspar-pfd-data`) | built from **`feat/analyst-agent`**, **with** the analyst |
+
+First run in any container: `initdb` → generate secrets into `/data/.secrets` →
+`drizzle-kit migrate` → start Next. No `-e` secrets needed on later runs.
+
+## External APIs integrated
+
+All free, no API keys, no rate limits at single-user scale — except OpenAI, which
+is the one paid dependency and analyst-only.
+
+| service | used for | client | notes |
+|---|---|---|---|
+| **AMFI** `portal.amfiindia.com/spages/NAVAll.txt` | latest MF NAV + ISIN→scheme-code index | `services/amfi.ts` | **Format has changed before** (6→8 columns, Sept 2026) and killed every MF feature silently. Parse end-anchored; canary at `scripts/check-amfi-nav-feed.mjs`. Carries only the *latest* NAV — never price a dated transaction from it without checking `navDate`. |
+| **mfapi.in** `api.mfapi.in/mf/<code>` | **dated** NAV history | `services/amfi.ts` | preferred for anything date-sensitive, because each point carries its own date |
+| **Yahoo Finance v8** | stocks, `<CCY>INR=X` FX, `GC=F` gold | `services/yahoo-finance.ts` | 5-min quote cache |
+| **IBJA** | India gold rates | `services/ibja.ts` | |
+| **NSE bhavcopy / RSS** | analyst prices + news | `agent/providers/`, `agent/news/` | analyst branch only |
+| **Telegram Bot API** | alerts, digests, two-way assistant | `services/telegram.ts` | token in `/data/.secrets/telegram_bot_token`. A **permanent** 403 (blocked/chat-not-found) must terminate a send — `drainOutbox` currently retries it forever. |
+| **OpenAI** | analyst LLM calls | `agent/**` | key in `/data/.secrets/openai_api_key`; **the only paid dependency** |
+
+Every unwired integration is tracked in `STUBS.md`. When you replace a stub, move
+its entry to "Replaced" with the date and commit hash.
 
 ## Environment variables
 
