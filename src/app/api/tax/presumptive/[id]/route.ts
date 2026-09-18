@@ -44,7 +44,7 @@ export async function GET(
     if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
     return NextResponse.json({ entry: row });
   } catch (err) {
-    console.error('[tax/itr4/presumptive/:id GET]', err);
+    console.error('[tax/presumptive/:id GET]', err);
     return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
@@ -142,7 +142,7 @@ export async function PATCH(
 
     return NextResponse.json({ entry: row });
   } catch (err) {
-    console.error('[tax/itr4/presumptive/:id PATCH]', err);
+    console.error('[tax/presumptive/:id PATCH]', err);
     return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
   }
 }
@@ -171,7 +171,7 @@ export async function DELETE(
     if (res.length === 0) return NextResponse.json({ error: 'not found' }, { status: 404 });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error('[tax/itr4/presumptive/:id DELETE]', err);
+    console.error('[tax/presumptive/:id DELETE]', err);
     return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
   }
 }

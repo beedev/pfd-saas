@@ -82,7 +82,7 @@ export function BusinessProfileForm() {
       email: '',
       phone: '',
       financialYear: financialYears[0],
-      invoicePrefix: 'INV-',
+      invoicePrefix: '',
       invoiceStartNumber: 1,
     },
   });
@@ -104,7 +104,12 @@ export function BusinessProfileForm() {
             email: data.profile.email || '',
             phone: data.profile.phone || '',
             financialYear: data.profile.financialYear || financialYears[0],
-            invoicePrefix: data.profile.invoicePrefix || 'INV-',
+            // `?? ''` not `|| 'INV-'`: an empty prefix is a deliberate choice
+            // (it selects the `0007/26-27` FY-suffixed format in
+            // /api/gst/invoices/next-number). With `||`, an empty stored value
+            // rendered as 'INV-' and was silently persisted on the next save,
+            // breaking a GST invoice series mid-year.
+            invoicePrefix: data.profile.invoicePrefix ?? '',
             invoiceStartNumber: data.profile.invoiceStartNumber || 1,
           });
           // Validate existing GSTIN
@@ -431,7 +436,11 @@ export function BusinessProfileForm() {
                     <FormControl>
                       <Input {...field} placeholder="e.g., INV-" />
                     </FormControl>
-                    <FormDescription>Auto-prefix for invoice numbers</FormDescription>
+                    <FormDescription>
+                      {form.watch('invoicePrefix')
+                        ? `Next invoice will look like ${form.watch('invoicePrefix')}0008`
+                        : 'Leave empty for the financial-year format — next invoice will look like 0008/26-27'}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

@@ -149,8 +149,20 @@ export default function IncomePage() {
               detail={`${stream.freelance.count} finalised invoice(s)`}
               amount={stream.freelance.totalPaisa}
               href="/gst/invoices"
-              note="Taxable amount (pre-GST). GST collected is not income."
+              note="Taxable amount (pre-GST). GST collected is not income. These are RECEIPTS — declare presumptive income to set the taxable profit."
             />
+            {/* Presumptive is what turns the receipts above into a taxable
+                profit (44ADA 50%, 44AD 6-8%). Without a declaration for the FY,
+                tax-compute taxes the receipts in full. Surfaced here because
+                this is where the receipts are shown, not only under /tax. */}
+            <div className="pl-9 pt-1">
+              <Link
+                href="/tax/presumptive"
+                className="text-xs font-medium text-[var(--dxp-brand)] underline underline-offset-2"
+              >
+                Declare presumptive income (44AD / 44ADA / 44AE) →
+              </Link>
+            </div>
             <StreamRow
               icon={Building2}
               title="Rental"

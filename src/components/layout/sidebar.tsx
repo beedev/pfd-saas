@@ -56,6 +56,7 @@ import {
   Sparkles,
   ClipboardCheck,
   FileCheck2,
+  Briefcase,
 } from 'lucide-react';
 
 type NavItem = { name: string; href: string; icon: typeof LayoutDashboard };
@@ -146,6 +147,10 @@ const navigation: NavSection[] = [
       { name: 'Form 16', href: '/tax/form-16', icon: FileText },
       { name: '80G Donations', href: '/tax/80g', icon: PiggyBank },
       { name: 'Capital Gains', href: '/tax/ltcg-stcg', icon: Calculator },
+      // Presumptive income is an INCOME declaration (it sets taxable business
+      // profit for every form and regime), not an ITR-4 artifact — it used to be
+      // reachable only via the wizard, which made it circular and unusable.
+      { name: 'Presumptive Income', href: '/tax/presumptive', icon: Briefcase },
       { name: 'Documents', href: '/tax/documents', icon: FolderOpen },
       { name: 'Filing Pack', href: '/tax/filing-pack', icon: Package },
       { name: 'ITR Wizard', href: '/tax/itr-wizard', icon: FileCheck2 },
