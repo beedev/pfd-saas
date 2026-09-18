@@ -3,7 +3,7 @@
 /**
  * Shared presumptive-income form — Sprint 4.1.
  *
- * Used by both /tax/itr4/presumptive/new and /tax/itr4/presumptive/[id].
+ * Used by both /tax/presumptive/new and /tax/presumptive/[id].
  * The parent decides whether to POST (create) or PATCH (update) by
  * passing the `mode` + optional `initial` row.
  *
@@ -142,8 +142,8 @@ export function PresumptiveForm({ mode, fy, initial }: Props) {
       };
       const url =
         mode === 'create'
-          ? '/api/tax/itr4/presumptive'
-          : `/api/tax/itr4/presumptive/${initial!.id}`;
+          ? '/api/tax/presumptive'
+          : `/api/tax/presumptive/${initial!.id}`;
       const method = mode === 'create' ? 'POST' : 'PATCH';
       const r = await fetch(url, {
         method,

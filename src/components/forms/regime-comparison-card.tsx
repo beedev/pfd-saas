@@ -56,6 +56,9 @@ interface RegimeCompareResponse {
     hraExemption?: number;
     other: number;
     business: number;
+    businessBasis?: 'PRESUMPTIVE' | 'GROSS_RECEIPTS' | 'NONE';
+    businessDetail?: string;
+    businessGrossReceipts?: number;
     rentalGross?: number;
     sec24b?: number;
     sec80eea?: number;
@@ -68,6 +71,7 @@ interface RegimeCompareResponse {
     newRegime: number;
     breakdown?: DeductionBreakdownRow[];
   };
+  warnings?: string[];
   comparison: {
     old: ComputeResult;
     new: ComputeResult;
@@ -178,6 +182,27 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
               )}
             </p>
           </div>
+          {/* Warnings that make the figures above wrong or incomplete. Rendered
+              BEFORE the numbers, deliberately — a plausible-looking figure with
+              a caveat hidden underneath it is worse than a visible gap. */}
+          {(data.warnings?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+              {data.warnings!.map((w, i) => (
+                <p key={i} className="text-xs leading-relaxed text-amber-900">
+                  <span className="mr-1 font-semibold">⚠ Check this:</span>
+                  {w}
+                </p>
+              ))}
+              {data.income.businessBasis === 'GROSS_RECEIPTS' && (
+                <a
+                  href={`/tax/presumptive/new?fy=${data.fy}`}
+                  className="mt-2 inline-block text-xs font-semibold text-amber-900 underline underline-offset-2 hover:text-amber-950"
+                >
+                  Declare presumptive income for FY {data.fy} →
+                </a>
+              )}
+            </div>
+          )}
           {/* Income composition — how we arrive at the slab-able income, before
               each regime applies its own exemptions/deductions. */}
           <div className="rounded-md border bg-[var(--dxp-surface-muted,#f8fafc)] p-3 text-xs">
@@ -196,7 +221,17 @@ export function RegimeComparisonCard({ fy }: { fy: string }) {
               )}
               {data.income.business > 0 && (
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-[var(--dxp-text-muted)]">Business / professional</dt>
+                  <dt className="text-[var(--dxp-text-muted)]">
+                    Business / professional
+                    {data.income.businessBasis === 'PRESUMPTIVE' && (
+                      <span className="ml-1 text-[10px] text-emerald-700">· presumptive profit</span>
+                    )}
+                    {data.income.businessBasis === 'GROSS_RECEIPTS' && (
+                      <span className="ml-1 text-[10px] font-semibold text-amber-700">
+                        · GROSS RECEIPTS, not profit
+                      </span>
+                    )}
+                  </dt>
                   <dd className="font-medium tabular-nums">{formatINR(data.income.business)}</dd>
                 </div>
               )}

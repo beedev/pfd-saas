@@ -1,33 +1,15 @@
-'use client';
-
 /**
- * Create a new presumptive-income row — Sprint 4.1.
- *
- * Wrapper around <PresumptiveForm mode="create"> that reads the FY
- * from ?fy=... (falls back to previous FY).
+ * Redirect — presumptive income moved out from under the ITR-4 walkthrough on
+ * 2026-09-18. It is an income declaration, not a form artifact. Kept so old
+ * bookmarks and links do not 404.
  */
+import { redirect } from 'next/navigation';
 
-import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { PresumptiveForm } from '../_form';
-import { getCurrentFinancialYear } from '@/lib/finance/tax-constants';
-
-function previousFy(): string {
-  const current = getCurrentFinancialYear();
-  const startYear = Number(current.split('-')[0]) - 1;
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`;
-}
-
-export default function NewPresumptivePage() {
-  return (
-    <Suspense fallback={<div className="p-6 text-[var(--dxp-text-muted)]">Loading…</div>}>
-      <Inner />
-    </Suspense>
-  );
-}
-
-function Inner() {
-  const sp = useSearchParams();
-  const fy = sp.get('fy') ?? previousFy();
-  return <PresumptiveForm mode="create" fy={fy} />;
+export default async function MovedNew({
+  searchParams,
+}: {
+  searchParams: Promise<{ fy?: string }>;
+}) {
+  const { fy } = await searchParams;
+  redirect(`/tax/presumptive/new${fy ? `?fy=${encodeURIComponent(fy)}` : ''}`);
 }

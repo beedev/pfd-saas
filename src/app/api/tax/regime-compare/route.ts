@@ -38,6 +38,10 @@ export async function GET(request: NextRequest) {
       deductions: result.deductions,
       loanDeductions: result.loanDeductions,
       comparison: result.comparison,
+      // Conditions that make the figures above wrong or incomplete (e.g. business
+      // income falling back to gross receipts because no presumptive declaration
+      // exists for this FY). The card MUST render these.
+      warnings: result.warnings,
     });
   } catch (err) {
     console.error('[tax/regime-compare GET]', err);

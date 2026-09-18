@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ entries: rows });
   } catch (err) {
-    console.error('[tax/itr4/presumptive GET]', err);
+    console.error('[tax/presumptive GET]', err);
     return NextResponse.json({ error: 'Failed to list' }, { status: 500 });
   }
 }
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ entry: row }, { status: 201 });
   } catch (err) {
-    console.error('[tax/itr4/presumptive POST]', err);
+    console.error('[tax/presumptive POST]', err);
     const { code, detail } = findPgError(err);
     if (code === '23505') {
       return NextResponse.json(

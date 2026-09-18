@@ -69,6 +69,12 @@ export interface FyTaxComparison {
     hraExemption: number;
     other: number;
     business: number;
+    /** How `business` was derived. GROSS_RECEIPTS means no presumptive
+     *  declaration exists for this FY, so receipts are taxed in full — see
+     *  `warnings`. */
+    businessBasis: 'PRESUMPTIVE' | 'GROSS_RECEIPTS' | 'NONE';
+    businessDetail: string;
+    businessGrossReceipts: number;
     rentalGross: number;
     rentalStdMaintenance: number;
     sec24b: number;
@@ -107,6 +113,15 @@ export interface FyTaxComparison {
   /** Recommended-regime total tax (slab + CG, cess included). The figure
    *  advance-tax projects installments against. */
   recommendedTotalTaxPaisa: number;
+  /** Conditions that make the numbers above wrong or incomplete. The UI MUST
+   *  surface these — a plausible-looking figure with a hidden caveat is worse
+   *  than a visible gap. */
+  warnings: string[];
+}
+
+/** paisa -> "₹12,34,567" for warning text. Indian digit grouping. */
+function rupees(paisa: number): string {
+  return '₹' + Math.round(paisa / 100).toLocaleString('en-IN');
 }
 
 function isError(x: unknown): x is ComputeError {
@@ -246,12 +261,57 @@ export async function computeFyTaxComparison(
     .reduce((s, r) => s + (r.amountPaisa ?? 0), 0);
 
   // ─── Business: presumptive deemed profit, else full GST receipts ──
+  //
+  // The fallback is a LAST RESORT and must never be silent. Presumptive
+  // treatment (44AD/44ADA/44AE) applies only when the user has declared it for
+  // THIS fy — it is a per-year election with its own eligibility conditions, so
+  // we cannot infer it from a prior year.
+  //
+  // When there is no declaration we fall back to gross receipts, which is not a
+  // profit figure under any regime: a presumptive filer would be taxed on 50%
+  // (44ADA) or 6-8% (44AD), and a regular filer would deduct expenses. Taxing
+  // 100% of receipts therefore overstates tax, and it looks entirely plausible
+  // on screen — exactly the silent-wrongness that let the AMFI NAV bug run for
+  // three weeks. So we tag the basis and emit a warning the UI must surface.
   const gstReceiptsPaisa = gstInvoices.reduce((s, r) => s + (r.taxableAmount ?? 0), 0);
   const presumptiveDeclaredPaisa = presumptiveRows.reduce(
     (s, r) => s + (r.declaredProfitPaisa ?? 0),
     0,
   );
-  const businessPaisa = presumptiveRows.length > 0 ? presumptiveDeclaredPaisa : gstReceiptsPaisa;
+  const presumptiveReceiptsPaisa = presumptiveRows.reduce(
+    (s, r) => s + (r.grossReceiptsPaisa ?? 0),
+    0,
+  );
+  const hasPresumptive = presumptiveRows.length > 0;
+  const businessPaisa = hasPresumptive ? presumptiveDeclaredPaisa : gstReceiptsPaisa;
+
+  const businessBasis: 'PRESUMPTIVE' | 'GROSS_RECEIPTS' | 'NONE' = hasPresumptive
+    ? 'PRESUMPTIVE'
+    : gstReceiptsPaisa > 0
+      ? 'GROSS_RECEIPTS'
+      : 'NONE';
+
+  const businessWarnings: string[] = [];
+  let businessDetail = 'No business or professional income for this FY.';
+  if (businessBasis === 'PRESUMPTIVE') {
+    const sections = [...new Set(presumptiveRows.map((r) => r.section))].join(', ');
+    businessDetail =
+      `Presumptive (${sections}): declared profit ${rupees(presumptiveDeclaredPaisa)}` +
+      (presumptiveReceiptsPaisa > 0
+        ? ` on receipts ${rupees(presumptiveReceiptsPaisa)}`
+        : '');
+  } else if (businessBasis === 'GROSS_RECEIPTS') {
+    businessDetail =
+      `Gross receipts ${rupees(gstReceiptsPaisa)} taxed in full — ` +
+      `no presumptive declaration for FY ${fy}.`;
+    businessWarnings.push(
+      `Business income for FY ${fy} is your GROSS RECEIPTS (${rupees(gstReceiptsPaisa)}), ` +
+        `not profit — you have not declared presumptive income for this year. Under 44ADA ` +
+        `only 50% (${rupees(Math.round(gstReceiptsPaisa * 0.5))}) would be taxable; under ` +
+        `44AD, 6-8%. Declare it for this FY, or record actual expenses, or this tax figure ` +
+        `is overstated.`,
+    );
+  }
 
   // ─── House property head ─────────────────────────────────────────
   let rentalGrossPaisa = 0;
@@ -394,6 +454,9 @@ export async function computeFyTaxComparison(
       hraExemption: hraExemptionPaisa,
       other: otherPaisa,
       business: businessPaisa,
+      businessBasis,
+      businessDetail,
+      businessGrossReceipts: gstReceiptsPaisa,
       rentalGross: rentalGrossPaisa,
       rentalStdMaintenance: stdMaintenanceDeductionPaisa,
       sec24b: sec24bTotalPaisa,
@@ -442,5 +505,6 @@ export async function computeFyTaxComparison(
       savingsPaisa,
     },
     recommendedTotalTaxPaisa: recommendation === 'NEW' ? newTotal : oldTotal,
+    warnings: businessWarnings,
   };
 }

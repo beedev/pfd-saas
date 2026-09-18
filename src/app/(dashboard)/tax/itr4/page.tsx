@@ -147,7 +147,7 @@ export default function Itr4Page() {
   const remove = async (id: number) => {
     if (!confirm('Delete this presumptive row?')) return;
     try {
-      const r = await fetch(`/api/tax/itr4/presumptive/${id}`, { method: 'DELETE' });
+      const r = await fetch(`/api/tax/presumptive/${id}`, { method: 'DELETE' });
       if (!r.ok) {
         const j = await r.json();
         throw new Error(j?.error || 'Failed');
@@ -304,7 +304,7 @@ export default function Itr4Page() {
                     Presumptive income
                   </h3>
                 </div>
-                <Link href={`/tax/itr4/presumptive/new?fy=${encodeURIComponent(fy)}`}>
+                <Link href={`/tax/presumptive/new?fy=${encodeURIComponent(fy)}`}>
                   <Button variant="primary" size="sm">
                     <Plus className="mr-1 h-3 w-3" /> Add row
                   </Button>
@@ -369,7 +369,7 @@ export default function Itr4Page() {
                           <td className="px-2 py-2 text-right">
                             <div className="flex justify-end gap-1">
                               <Link
-                                href={`/tax/itr4/presumptive/${r.id}?fy=${encodeURIComponent(fy)}`}
+                                href={`/tax/presumptive/${r.id}?fy=${encodeURIComponent(fy)}`}
                               >
                                 <Button variant="ghost" size="sm">
                                   <Pencil className="h-3 w-3" />
