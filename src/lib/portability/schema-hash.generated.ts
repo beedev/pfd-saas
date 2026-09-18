@@ -2,4 +2,3 @@
 // Regenerated on every `npm run build` via the prebuild hook.
 // Source: src/db/schema.ts (sha256 of file contents).
 export const SCHEMA_HASH = 'sha256:45467690b0f33d2ac4c19f00de66dde19f7edb0581b6ab62dcd99efaeb883518';
-export const SCHEMA_HASH = 'sha256:b83ccc7b339d30f6e00c2dd6760fecc3930127428e907eedfe26ce2d76738d63';
